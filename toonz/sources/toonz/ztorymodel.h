@@ -12,6 +12,10 @@
 #include "toonz/txshchildlevel.h"  // for TXshLevelP
 #include "traster.h"               // TRaster32P (export-to-board panels)
 
+class QFileSystemWatcher;
+class QLockFile;
+class QTimer;
+
 // ─── NumberingConfig ─────────────────────────────────────────────────────────
 // Persistent numbering scheme used both at startup and during Board editing.
 
@@ -692,6 +696,10 @@ public:
   void loadProjectDb();                              // from current project folder
   void loadProjectDbFromPath(const QString &path);  // B3c: load from explicit path
   void saveProjectDb();
+  // While held (a Kitsu Sync running), changes made on disk by another Ztoryc
+  // are not read back into memory: they are merged at the next save as usual,
+  // and read once the hold is released. Calls must be balanced.
+  void holdDiskReload(bool hold);
   // Persist project-DB edits made directly via projectShots_rw() and refresh the
   // Production Tracker (used by the Kitsu pull/review sync). One save + one signal.
   void saveAndNotifyTasks();
@@ -1121,11 +1129,34 @@ private:
 
   void loadProjectDbFromDevice(QIODevice &dev);  // shared XML parser
 
+  // ── More than one Ztoryc on the same project (2026-10-02) ──────────────────
+  // m_dbBase is the production.ztrack the memory derives from: what this
+  // instance last read or wrote. When the file on disk differs from it, someone
+  // else wrote it, and saves merge (ZtrackMerge) instead of overwriting.
+  QByteArray m_dbBase;
+  QString    m_dbBasePath;  // canonical path m_dbBase belongs to
+  QFileSystemWatcher *m_dbWatcher     = nullptr;
+  QTimer             *m_dbReloadTimer = nullptr;
+  int  m_dbReloadHold    = 0;
+  bool m_dbReloadPending = false;
+  QByteArray serializeProjectDb() const;
+  void readProjectDbBytes(const QString &path, const QByteArray &bytes);
+  bool writeProjectDbFile(const QString &path, const QByteArray &bytes);
+  void watchProjectDb(const QString &path);
+  bool projectMetaEmpty() const;
+  // Scene open in this instance, locked so another instance can tell.
+  QLockFile *m_sceneLock = nullptr;
+  QString m_sceneLockPath;
+  void updateSceneLock(bool warnIfTaken);
+
 private slots:
   // Global sceneSwitched handler: when an exported shot scene (role="shot")
   // becomes current, advance its first pipeline task Ready/Todo→WIP. Lives here
   // (not only in StoryboardPanel) so it fires regardless of the current room.
   void onSceneSwitchedAdvanceShot();
+  // Reads back production.ztrack when another instance (or Drive) changed it,
+  // merging in whatever this instance has not saved yet.
+  void reloadProjectDbIfChangedOnDisk();
 
 signals:
   // Overlay display settings changed (light visibility/colour, camera-move

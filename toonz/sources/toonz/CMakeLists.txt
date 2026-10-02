@@ -108,6 +108,8 @@ set(MOC_HEADERS
     storyboardpanel.h
     ztoryproductionpanel.h
     ztorymodel.h
+    ztrackmerge.h
+    ztorylocks.h
     ztoryshotops.h
     ztorytaskflow.h
     ztorycharacterreview.h
@@ -272,6 +274,8 @@ set(SOURCES
     storyboardpanel.cpp
     ztoryproductionpanel.cpp
     ztorymodel.cpp
+    ztrackmerge.cpp
+    ztorylocks.cpp
     ztoryshotops.cpp
     ztorytaskflow.cpp
     ztorycharacterreview.cpp

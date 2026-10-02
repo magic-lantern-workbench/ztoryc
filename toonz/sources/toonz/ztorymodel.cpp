@@ -40,6 +40,14 @@
 #include <QRegularExpression>
 #include <QFileInfo>
 #include <QUuid>
+#include <QBuffer>
+#include <QCoreApplication>
+#include <QFileSystemWatcher>
+#include <QLockFile>
+#include <QSaveFile>
+#include <QTimer>
+#include "ztrackmerge.h"
+#include "ztorylocks.h"
 #include <QSettings>
 #include <climits>
 
@@ -155,6 +163,63 @@ ZtoryModel::ZtoryModel() : m_fps(24) {
   if (TApp::instance() && TApp::instance()->getCurrentScene())
     connect(TApp::instance()->getCurrentScene(), &TSceneHandle::sceneSwitched,
             this, &ZtoryModel::onSceneSwitchedAdvanceShot);
+  // More than one Ztoryc may be open on the same project: read back what the
+  // others write (debounced: one save can come as several file events).
+  m_dbReloadTimer = new QTimer(this);
+  m_dbReloadTimer->setSingleShot(true);
+  connect(m_dbReloadTimer, &QTimer::timeout, this,
+          &ZtoryModel::reloadProjectDbIfChangedOnDisk);
+  m_dbWatcher = new QFileSystemWatcher(this);
+  connect(m_dbWatcher, &QFileSystemWatcher::fileChanged, this,
+          [this]() { m_dbReloadTimer->start(400); });
+  if (TApp::instance() && TApp::instance()->getCurrentScene()) {
+    TSceneHandle *sh = TApp::instance()->getCurrentScene();
+    connect(sh, &TSceneHandle::sceneSwitched, this,
+            [this]() { updateSceneLock(true); });
+    connect(sh, &TSceneHandle::nameSceneChanged, this,
+            [this]() { updateSceneLock(true); });
+  }
+  connect(qApp, &QCoreApplication::aboutToQuit, this, [this]() {
+    delete m_sceneLock;  // removes the lock file
+    m_sceneLock = nullptr;
+  });
+}
+
+// Lock on the scene open here, so a second instance opening the same scene can
+// warn: both saving it, the last save erases the other's work. A warning only —
+// opening it read-only to compare is legitimate.
+void ZtoryModel::updateSceneLock(bool warnIfTaken) {
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  const QString tnz =
+      (scene && !scene->isUntitled())
+          ? QString::fromStdWString(scene->getScenePath().getWideString())
+          : QString();
+  const QString lockPath =
+      tnz.isEmpty() ? QString() : ZtoryLocks::lockFilePath("scene", tnz);
+  // nameSceneChanged also comes with every change of the dirty flag: the same
+  // scene warns once, then only retries in silence (the other window may have
+  // closed it meanwhile).
+  const bool sameScene = (lockPath == m_sceneLockPath);
+  if (sameScene && (m_sceneLock || lockPath.isEmpty())) return;
+  delete m_sceneLock;
+  m_sceneLock     = nullptr;
+  m_sceneLockPath = lockPath;
+  if (lockPath.isEmpty()) return;
+  m_sceneLock = new QLockFile(lockPath);
+  m_sceneLock->setStaleLockTime(0);  // held for hours: only a dead pid frees it
+  if (m_sceneLock->tryLock(0)) return;
+  delete m_sceneLock;
+  m_sceneLock = nullptr;
+  if (!warnIfTaken || sameScene) return;
+  const QString name = QFileInfo(tnz).fileName();
+  // After the scene has finished loading, not in the middle of it.
+  QTimer::singleShot(0, this, [name]() {
+    DVGui::warning(
+        QObject::tr("«%1» is already open in another Ztoryc window.\n\n"
+                    "If both windows save it, the last save erases the other "
+                    "one's changes.")
+            .arg(name));
+  });
 }
 
 // Advance the first pipeline task of an exported shot scene Ready/Todo→WIP when
@@ -1305,9 +1370,7 @@ void ZtoryModel::saveProjectDb() {
   // a stray save during a scene/room switch). Shots may be present (published
   // from the scene) — without this guard such a save wipes production/team/
   // assets while keeping the shots, exactly the observed data loss.
-  bool metaEmpty = m_production.isEmpty() && m_title.isEmpty() &&
-                   m_season.isEmpty() && m_episode.isEmpty() &&
-                   m_team.isEmpty() && m_assets.empty();
+  const bool metaEmpty = projectMetaEmpty();
   if (metaEmpty && QFile::exists(path)) {
     // Block ONLY if the on-disk file actually carries metadata we would wipe
     // (the transient-reset data-loss case). A brand-new project legitimately
@@ -1328,9 +1391,54 @@ void ZtoryModel::saveProjectDb() {
     }
   }
 
-  QFile file(path);
-  if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
-  QXmlStreamWriter xml(&file);
+  const QByteArray ours = serializeProjectDb();
+  const QString key     = ZtoryLocks::canonicalPath(path);
+  // One instance at a time between reading the file and writing it back.
+  QLockFile lock(ZtoryLocks::lockFilePath("ztrack", key));
+  lock.setStaleLockTime(0);  // a crashed holder is detected by its pid
+  if (!lock.tryLock(3000))
+    qWarning("production.ztrack: lock busy, saving without it");
+
+  QByteArray out = ours;
+  bool reload    = false;
+  bool write     = true;
+  QFile df(path);
+  if (key == m_dbBasePath && df.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    const QByteArray disk = df.readAll();
+    df.close();
+    // The file changed since this instance last read or wrote it: another
+    // instance (or Drive) wrote it. Merge, don't overwrite.
+    if (!ZtrackMerge::sameContent(disk, m_dbBase)) {
+      QStringList conflicts;
+      bool ok = false;
+      const QByteArray merged =
+          ZtrackMerge::merge(m_dbBase, ours, disk, &conflicts, &ok);
+      if (!ok) {
+        qWarning("production.ztrack: the file on disk does not parse, "
+                 "overwritten with this window's tracker");
+      } else {
+        for (const QString &c : conflicts)
+          qWarning("production.ztrack merge: %s", qPrintable(c));
+        out    = merged;
+        reload = !ZtrackMerge::sameContent(merged, ours);
+        // Everything of ours is already on disk: nothing to write.
+        if (ZtrackMerge::sameContent(merged, disk)) write = false;
+      }
+    }
+  }
+  if (write && !writeProjectDbFile(path, out)) return;
+  // The memory is still «ours»: that is what it derives from. When the merge
+  // brought in changes from elsewhere, the reload below reads them in, after
+  // the caller of this save is done with its indices.
+  m_dbBase     = ours;
+  m_dbBasePath = key;
+  watchProjectDb(path);
+  if (reload && m_dbReloadTimer) m_dbReloadTimer->start(0);
+}
+
+QByteArray ZtoryModel::serializeProjectDb() const {
+  QByteArray bytes;
+  QXmlStreamWriter xml(&bytes);
   xml.setAutoFormatting(true);
   xml.writeStartDocument();
   xml.writeStartElement("ztrack");
@@ -1494,12 +1602,100 @@ void ZtoryModel::saveProjectDb() {
 
   xml.writeEndElement();  // ztrack
   xml.writeEndDocument();
+  return bytes;
+}
+
+bool ZtoryModel::projectMetaEmpty() const {
+  return m_production.isEmpty() && m_title.isEmpty() && m_season.isEmpty() &&
+         m_episode.isEmpty() && m_team.isEmpty() && m_assets.empty();
+}
+
+// Atomic: another instance reading the file meanwhile sees the old one or the
+// new one, never half of it.
+bool ZtoryModel::writeProjectDbFile(const QString &path,
+                                    const QByteArray &bytes) {
+  QSaveFile file(path);
+  if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
+  if (file.write(bytes) != bytes.size()) {
+    file.cancelWriting();
+    return false;
+  }
+  return file.commit();
+}
+
+void ZtoryModel::readProjectDbBytes(const QString &path,
+                                    const QByteArray &bytes) {
+  QBuffer buf;
+  buf.setData(bytes);
+  buf.open(QIODevice::ReadOnly | QIODevice::Text);
+  loadProjectDbFromDevice(buf);
+  m_dbBase     = bytes;
+  m_dbBasePath = ZtoryLocks::canonicalPath(path);
+  watchProjectDb(path);
+}
+
+void ZtoryModel::watchProjectDb(const QString &path) {
+  if (!m_dbWatcher) return;
+  const QStringList files = m_dbWatcher->files();
+  // Re-added after every write: the atomic save replaces the file, and some
+  // systems stop watching the one that was replaced.
+  if (!files.isEmpty()) m_dbWatcher->removePaths(files);
+  if (QFile::exists(path)) m_dbWatcher->addPath(path);
+}
+
+void ZtoryModel::holdDiskReload(bool hold) {
+  m_dbReloadHold += hold ? 1 : -1;
+  if (m_dbReloadHold < 0) m_dbReloadHold = 0;
+  if (m_dbReloadHold == 0 && m_dbReloadPending && m_dbReloadTimer)
+    m_dbReloadTimer->start(0);
+}
+
+void ZtoryModel::reloadProjectDbIfChangedOnDisk() {
+  if (m_dbBasePath.isEmpty()) return;
+  if (m_dbReloadHold > 0) {
+    m_dbReloadPending = true;
+    return;
+  }
+  m_dbReloadPending  = false;
+  const QString path = m_dbBasePath;
+  watchProjectDb(path);
+  QLockFile lock(ZtoryLocks::lockFilePath("ztrack", path));
+  lock.setStaleLockTime(0);
+  if (!lock.tryLock(3000)) {
+    m_dbReloadTimer->start(1000);  // the other instance is writing: later
+    return;
+  }
+  QFile df(path);
+  if (!df.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+  const QByteArray disk = df.readAll();
+  df.close();
+  if (ZtrackMerge::sameContent(disk, m_dbBase)) return;
+  if (!ZtrackMerge::isWellFormed(disk)) return;  // Drive mid-download: next event
+  QByteArray merged = disk;
+  // The same guard as saveProjectDb(): memory in a transient empty state must
+  // not count as «everything deleted here».
+  if (!projectMetaEmpty()) {
+    QStringList conflicts;
+    bool ok = false;
+    merged = ZtrackMerge::merge(m_dbBase, serializeProjectDb(), disk,
+                                &conflicts, &ok);
+    if (!ok) return;
+    for (const QString &c : conflicts)
+      qWarning("production.ztrack merge: %s", qPrintable(c));
+    if (!ZtrackMerge::sameContent(merged, disk) &&
+        !writeProjectDbFile(path, merged))
+      return;
+  }
+  readProjectDbBytes(path, merged);
+  emit productionReloaded();
+  emit assetsChanged();
+  emit taskStatusChanged();
 }
 
 void ZtoryModel::loadProjectDbFromPath(const QString &path) {
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
-  loadProjectDbFromDevice(file);
+  readProjectDbBytes(path, file.readAll());
 }
 
 void ZtoryModel::loadProjectDb() {
@@ -1516,7 +1712,7 @@ void ZtoryModel::loadProjectDb() {
     saveProjectDb();
     return;
   }
-  loadProjectDbFromDevice(file);
+  readProjectDbBytes(file.fileName(), file.readAll());
 }
 
 // Internal: parse a production.ztrack XML from an already-opened device.

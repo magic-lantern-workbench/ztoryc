@@ -1,3 +1,37 @@
+## [2026-10-02] — piu' istanze di Ztoryc aperte insieme
+
+Sessione cloud. Chiesto da Franco rivedendo
+[matitanimata/ztoryc#4](https://github.com/matitanimata/ztoryc/pull/4) (copia/incolla di disegni
+tra istanze). **Solo compilato** (syntax check Qt 5 su Linux; l'unione a tre vie provata a parte
+con 8 casi), **da collaudare sul Mac**.
+
+### Changed
+- **Tolto il blocco «Ztoryc is already running»** (`main.cpp`, era del 27/05, 140d790a). Sul Mac
+  una seconda finestra si apre con `open -n -a Ztoryc` (il doppio clic riporta in primo piano
+  quella aperta).
+
+### Added
+- **`production.ztrack` si unisce invece di sovrascriversi** (`ztrackmerge.cpp`, nuovo;
+  `ZtoryModel::saveProjectDb`). Ogni istanza teneva il tracker in memoria e riscriveva il file
+  intero: con due istanze sullo stesso progetto vinceva l'ultimo salvataggio, e le modifiche
+  dell'altra sparivano senza avviso. Ora il modello ricorda il file com'era quando l'ha letto o
+  scritto; se al salvataggio su disco e' diverso, unisce le due versioni per identita' (asset e
+  shot per uuid, task per tipo, persone per nome), attributo per attributo: vince chi ha cambiato;
+  se tutti e due hanno cambiato la stessa cosa vince la finestra che salva (riga nel log).
+  Una cancellazione perde contro una modifica fatta dall'altra parte. Scrittura atomica
+  (`QSaveFile`), lucchetto fra lettura e scrittura, e un `QFileSystemWatcher` che rilegge il file
+  quando lo cambia un'altra istanza — o Drive da un'altra macchina.
+- **Sync Kitsu: uno alla volta per progetto** (`ztorykitsusync.cpp`). Se e' gia' in corso in
+  un'altra finestra, il secondo non parte e lo dice. Durante il Sync le modifiche delle altre
+  finestre si uniscono ai salvataggi ma entrano in memoria solo alla fine.
+- **Avviso se la scena e' gia' aperta in un'altra finestra** (`ZtoryModel::updateSceneLock`): solo
+  un avviso, una volta; salvandola da tutte e due vince l'ultimo salvataggio, come prima.
+- I lucchetti stanno nella cache locale (`ztorylocks.cpp`), mai accanto ai file: su Drive si
+  sincronizzerebbero sulle altre macchine.
+
+### Da sapere
+- La libreria dei rig (`<scena>.zrig`) e preferenze/layout delle room restano «vince l'ultimo».
+
 ## [2026-09-29] — render con i personaggi da PSD: trovata la causa (sh110); Kitsu: il legame con l'episodio non si sposta piu'
 
 Sessione cloud. Il render e' **collaudato da Franco sul Mac**; le modifiche Kitsu sono solo

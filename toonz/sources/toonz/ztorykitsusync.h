@@ -27,6 +27,7 @@
 #include "kitsuclient.h"
 
 #include <QHash>
+#include <QLockFile>
 #include <QObject>
 #include <QSet>
 #include <QStringList>
@@ -108,4 +109,7 @@ private:
   std::unique_ptr<QTemporaryDir> m_previewDir;
   int m_previewsSent = 0, m_previewsFailed = 0, m_previewsSkipped = 0;
   int m_castTaken = 0, m_castWritten = 0, m_castConflicts = 0;
+  // Held while syncing: two Ztoryc windows on the same project must not sync
+  // it at the same time (2026-10-02). See ZtoryLocks.
+  std::unique_ptr<QLockFile> m_projectLock;
 };

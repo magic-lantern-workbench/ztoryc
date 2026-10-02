@@ -2,6 +2,7 @@
 
 #include "ztoryassetpreview.h"
 #include "ztorymodel.h"
+#include "ztorylocks.h"
 #include "ztorytaskflow.h"
 
 #include "toonzqt/dvdialog.h"
@@ -523,6 +524,11 @@ ZtoryKitsuSync::ZtoryKitsuSync(QObject *parent) : QObject(parent) {
             m->setKitsuEpisode(episodeId, episodeName);
             m->saveProjectDb();
           });
+  connect(this, &ZtoryKitsuSync::finished, this, [this]() {
+    if (!m_projectLock) return;
+    m_projectLock.reset();
+    ZtoryModel::instance()->holdDiskReload(false);
+  });
   m_watchdog = new QTimer(this);
   m_watchdog->setSingleShot(true);
   connect(m_watchdog, &QTimer::timeout, this, [this]() {
@@ -835,6 +841,19 @@ bool ZtoryKitsuSync::start(int handles, QString *why) {
                 "moment.");
     return false;
   }
+  m_projectLock.reset(
+      new QLockFile(ZtoryLocks::lockFilePath("kitsusync", m->projectDbPath())));
+  m_projectLock->setStaleLockTime(0);  // a crashed holder: freed by its pid
+  if (!m_projectLock->tryLock(0)) {
+    m_projectLock.reset();
+    if (why)
+      *why = tr("This production is already syncing in another Ztoryc "
+                "window: wait for it to finish.");
+    return false;
+  }
+  // What other windows write meanwhile is merged at each save, and read back
+  // into memory only at the end: the steps work on a tracker that holds still.
+  m->holdDiskReload(true);
   m_handles = handles;
   m_updated = m_conflicts = m_notSent = 0;
   m_droppedAssets = 0;
