@@ -12,6 +12,7 @@
 #include "tlevel_io.h"
 #include "tofflinegl.h"
 #include "tvectorgl.h"
+#include "tvectorrenderdata.h"
 
 #include <QCryptographicHash>
 #include <QDebug>
