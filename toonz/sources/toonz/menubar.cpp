@@ -312,6 +312,7 @@ void TopBar::loadMenubar() {
   QMenu *fileMenu = addMenu(ShortcutTree::tr("File"), m_menuBar);
   addMenuItem(fileMenu, MI_NewScene);
   addMenuItem(fileMenu, MI_LoadScene);
+  addMenuItem(fileMenu, MI_NewZtorycInstance);
   addMenuItem(fileMenu, MI_SaveAll);
   QMenu *saveOtherMenu = fileMenu->addMenu(tr("Other Save Options"));
   {

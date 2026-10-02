@@ -1,6 +1,7 @@
 
 
 #include "filebrowser.h"
+#include "ztoryinstance.h"
 
 // Tnz6 includes
 #include "dvdirtreeview.h"
@@ -1212,6 +1213,12 @@ QMenu *FileBrowser::getContextMenu(QWidget *parent, int index) {
 
   if (files.size() == 1 && files[0].getType() == "tnz") {
     menu->addAction(cm->getAction(MI_LoadScene));
+    // Ztoryc: the same scene in a second copy of the app, side by side.
+    const QString scene = files[0].getQString();
+    QAction *other = menu->addAction(tr("Open in Another Ztoryc Window"));
+    connect(other, &QAction::triggered, [scene]() {
+      ztoryOpenInNewInstance(scene);
+    });
   }
 
   bool areResources = true;

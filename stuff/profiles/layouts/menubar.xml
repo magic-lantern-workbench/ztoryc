@@ -5,6 +5,7 @@
  
     <item>MI_NewScene</item>
     <item>MI_LoadScene</item>
+    <item>MI_NewZtorycInstance</item>
     <item>MI_SaveScene</item>
     <item>MI_SaveSceneAs</item>
     <separator/>	

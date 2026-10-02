@@ -25,6 +25,7 @@ extern ToggleCommandHandler showMeshToggle;
 #include "filebrowserpopup.h"
 #include "ztorymodel.h"
 #include "ztoryrecovery.h"
+#include "ztoryinstance.h"
 #include "storyboardpanel.h"
 #include "ztoryanimatic.h"
 
@@ -606,6 +607,8 @@ centralWidget->setLayout(centralWidgetLayout);*/
   setCommandHandler("MI_NewScene", this, &MainWindow::onNewScene);
   setCommandHandler("MI_SaveSceneVersion", this, &MainWindow::onSaveSceneVersion);
   setCommandHandler("MI_LoadScene", this, &MainWindow::onLoadScene);
+  setCommandHandler(MI_NewZtorycInstance, this,
+                    &MainWindow::onNewZtorycInstance);
   setCommandHandler("MI_LoadSubSceneFile", this, &MainWindow::onLoadSubScene);
   setCommandHandler(MI_ImportAssets, this, &MainWindow::onImportAssets);
   setCommandHandler("MI_ResetRoomLayout", this, &MainWindow::resetRoomsLayout);
@@ -1287,6 +1290,10 @@ void MainWindow::onNewScene() {
   popup->raise();
   popup->activateWindow();
 }
+
+//-----------------------------------------------------------------------------
+
+void MainWindow::onNewZtorycInstance() { ztoryOpenInNewInstance(); }
 
 //-----------------------------------------------------------------------------
 
@@ -2344,6 +2351,10 @@ void MainWindow::defineActions() {
                        "new_scene", tr("Create a new scene."));
   createMenuFileAction(MI_LoadScene, QT_TR_NOOP("&Load Scene..."), "Ctrl+L",
                        "load_scene", tr("Load an existing scene."));
+  createMenuFileAction(MI_NewZtorycInstance,
+                       QT_TR_NOOP("Open Another Ztoryc Window"), "", "",
+                       tr("Start a second copy of Ztoryc, to work on another "
+                          "scene side by side."));
   createMenuFileAction(MI_SaveScene, QT_TR_NOOP("&Save Scene"), "Ctrl+Shift+S",
                        "save_scene",
                        tr("Save ONLY the scene.") + separator +

@@ -13,6 +13,7 @@
 
 #define MI_NewScene "MI_NewScene"
 #define MI_LoadScene "MI_LoadScene"
+#define MI_NewZtorycInstance "MI_NewZtorycInstance"
 #define MI_SaveScene "MI_SaveScene"
 #define MI_SaveSceneAs "MI_SaveSceneAs"
 #define MI_SaveSceneVersion "MI_SaveSceneVersion"

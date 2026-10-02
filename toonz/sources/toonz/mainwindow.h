@@ -88,6 +88,7 @@ public:
   void onRedo();
   void onNewScene();
   void onLoadScene();
+  void onNewZtorycInstance();
   void onSaveSceneVersion();
   void onLoadSubScene();
   void onImportAssets();

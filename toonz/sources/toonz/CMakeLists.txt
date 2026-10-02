@@ -110,6 +110,7 @@ set(MOC_HEADERS
     ztorymodel.h
     ztrackmerge.h
     ztorylocks.h
+    ztoryinstance.h
     ztoryshotops.h
     ztorytaskflow.h
     ztorycharacterreview.h
@@ -276,6 +277,7 @@ set(SOURCES
     ztorymodel.cpp
     ztrackmerge.cpp
     ztorylocks.cpp
+    ztoryinstance.cpp
     ztoryshotops.cpp
     ztorytaskflow.cpp
     ztorycharacterreview.cpp

@@ -1,6 +1,9 @@
 
 
 #include "startuppopup.h"
+#include "ztoryinstance.h"
+#include <QMenu>
+#include <QCursor>
 
 // Tnz6 includes
 #include "mainwindow.h"
@@ -877,6 +880,16 @@ void StartupPopup::refreshRecentScenes() {
                          (projectName != "-" ? " [" + projectName + "]" : "");
       m_recentNamesLabels[i] = new StartupLabel(justName, this, i);
       m_recentNamesLabels[i]->setToolTip(fileName);
+      // Ztoryc: right click opens the scene in a second copy of the app.
+      m_recentNamesLabels[i]->setContextMenuPolicy(Qt::CustomContextMenu);
+      connect(m_recentNamesLabels[i], &QWidget::customContextMenuRequested,
+              this, [this, fileName](const QPoint &) {
+                QMenu menu(this);
+                QAction *other =
+                    menu.addAction(tr("Open in Another Ztoryc Window"));
+                if (menu.exec(QCursor::pos()) == other)
+                  ztoryOpenInNewInstance(fileName);
+              });
       m_recentSceneLay->addWidget(m_recentNamesLabels[i], 0, Qt::AlignTop);
       i++;
     }
@@ -1981,6 +1994,11 @@ StartupLabel::StartupLabel(const QString &text, QWidget *parent, int index)
 StartupLabel::~StartupLabel() {}
 
 void StartupLabel::mousePressEvent(QMouseEvent *event) {
+  // Left button only: the right one opens the context menu (another window).
+  if (event->button() != Qt::LeftButton) {
+    QLabel::mousePressEvent(event);
+    return;
+  }
   m_text              = text();
   std::string strText = m_text.toStdString();
   emit wasClicked(m_index);
