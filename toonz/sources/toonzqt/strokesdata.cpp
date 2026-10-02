@@ -10,11 +10,18 @@
 #include "toonz/stage.h"
 #include "toonzqt/gutil.h"
 #include "tlevel_io.h"
+#include "tofflinegl.h"
+#include "tvectorgl.h"
 
 #include <QCryptographicHash>
+#include <QDebug>
 #include <QFile>
+#include <QOpenGLContext>
+#include <QPointer>
 #include <QTemporaryDir>
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 
 using namespace std;
@@ -25,6 +32,69 @@ const char *const VectorClipboardFormat =
 const char VectorClipboardMagic[]       = {'O', 'T', 'V', '2'};
 constexpr int VectorClipboardHeaderSize = 4 + 4 + 32;
 constexpr int MaxVectorClipboardSize    = 64 * 1024 * 1024;
+
+constexpr int MaxVectorClipboardPreviewSize = 4096;
+
+// TOfflineGL can replace the current context while constructing or destroying
+// its resources. Keep this guard outside its lifetime, including on failure.
+class ClipboardGLContextGuard final {
+  QPointer<QOpenGLContext> m_context;
+  QSurface *m_surface;
+
+public:
+  ClipboardGLContextGuard()
+      : m_context(QOpenGLContext::currentContext())
+      , m_surface(m_context ? m_context->surface() : nullptr) {}
+
+  ~ClipboardGLContextGuard() {
+    if (m_context && m_surface) {
+      if (!m_context->makeCurrent(m_surface))
+        qWarning("Could not restore the OpenGL context after clipboard preview.");
+    } else if (QOpenGLContext *current = QOpenGLContext::currentContext()) {
+      current->doneCurrent();
+    }
+  }
+
+  ClipboardGLContextGuard(const ClipboardGLContextGuard &) = delete;
+  ClipboardGLContextGuard &operator=(const ClipboardGLContextGuard &) = delete;
+};
+
+QImage vectorClipboardImage(const TVectorImageP &image) {
+  const TRectD bounds = image->getBBox();
+  if (bounds.isEmpty() || !std::isfinite(bounds.x0) ||
+      !std::isfinite(bounds.y0) || !std::isfinite(bounds.x1) ||
+      !std::isfinite(bounds.y1))
+    return QImage();
+
+  // Bound the allocation before converting to integer pixel dimensions. Only
+  // the rendered preview is scaled; the native strokes and PLI stay unchanged.
+  const double x0     = std::floor(bounds.x0);
+  const double y0     = std::floor(bounds.y0);
+  const double width  = std::ceil(bounds.x1) - x0 + 1.0;
+  const double height = std::ceil(bounds.y1) - y0 + 1.0;
+  if (!std::isfinite(width) || !std::isfinite(height) || width <= 0.0 ||
+      height <= 0.0)
+    return QImage();
+
+  const double scale =
+      std::min(1.0, MaxVectorClipboardPreviewSize / std::max(width, height));
+  const int lx = std::max(
+      1, std::min(MaxVectorClipboardPreviewSize, int(std::ceil(width * scale))));
+  const int ly = std::max(
+      1, std::min(MaxVectorClipboardPreviewSize, int(std::ceil(height * scale))));
+  const TDimension size(lx, ly);
+
+  ClipboardGLContextGuard contextGuard;
+  TOfflineGL offline(size);
+  offline.clear(TPixel32(0, 0, 0, 0));
+  TVectorRenderData rd(TScale(scale) * TTranslation(-x0, -y0), TRect(size),
+                       image->getPalette(), 0, true, true);
+  rd.m_drawRegions = true;
+  offline.draw(image, rd, false);
+  // Copy the borrowed pixels while the raster and offscreen resources live.
+  const TRaster32P raster = offline.getRaster();
+  return raster ? rasterToQImage(raster).copy() : QImage();
+}
 
 QByteArray makeVectorClipboardPayload(const QByteArray &pliData) {
   QByteArray payload;
@@ -67,8 +137,8 @@ QByteArray vectorPliData(const QByteArray &payload) {
 void StrokesData::setClipboardFormats() {
   if (!m_image || m_image->getStrokeCount() == 0) return;
   try {
-    TRaster32P raster = m_image->render(false);
-    if (raster) setImageData(rasterToQImage(raster).copy());
+    const QImage preview = vectorClipboardImage(m_image);
+    if (!preview.isNull()) setImageData(preview);
   } catch (...) {
     // Native copy remains available when a rendering context cannot be made.
   }
