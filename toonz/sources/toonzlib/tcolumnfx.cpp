@@ -1288,13 +1288,28 @@ void TLevelColumnFx::doCompute(TTile &tile, double frame,
       double ly_2 = ras->getLy() / 2.0;
 
       TRenderSettings infoAux(info);
-      assert(info.m_affine.isTranslation());
       infoAux.m_data.clear();
       if (infoAux.m_applyMask)
         infoAux.m_invertedMask = m_levelColumn->isInvertedMask();
 
-      // Place the output rect in the image's reference
-      tileRectD += TPointD(lx_2 - info.m_affine.a13, ly_2 - info.m_affine.a23);
+      // Place the output rect in the image's reference. Ztoryc: through the
+      // INVERSE affine, not by subtracting its translation only. The affine is
+      // a pure translation in the common case, and then the two coincide; but a
+      // raster column used as a clipping mask declares canHandle() true (so it
+      // is not cached) and receives the whole affine, scale included — the old
+      // code (and its assert, silent in release) then cropped the wrong part of
+      // the mask image. In the main xsheet, characters scaled to 0.36-0.45 lost
+      // their pupils wherever the eye was off-centre in its image; inside the
+      // sub-xsheets, at scale 1, the masks were right (CS2606 sh160, 2026-10-02).
+      if (info.m_affine.isTranslation())
+        tileRectD += TPointD(lx_2 - info.m_affine.a13, ly_2 - info.m_affine.a23);
+      else {
+        tileRectD = info.m_affine.inv() * tileRectD;
+        // Two pixels of margin each side for the resampling filter.
+        tileRectD.x0 -= 2, tileRectD.y0 -= 2, tileRectD.x1 += 2,
+            tileRectD.y1 += 2;
+        tileRectD += TPointD(lx_2, ly_2);
+      }
 
       // Then, retrieve loaded image's interesting region
       TRectD inTileRectD;
@@ -1687,6 +1702,21 @@ std::string TLevelColumnFx::getAlias(double frame,
       break;
     }
     rdata += maskAlias;
+  }
+
+  // Ztoryc: a mask column draws NOTHING as an ordinary layer, its image only
+  // when it masks (m_applyMask) or when a Plastic texture asks for it
+  // (m_plasticMask) — so it must not share its alias with an ordinary column
+  // showing the same drawing. A drawing used twice (the eye white shown in one
+  // column, the same drawing as the pupil's clipping mask in another) gave the
+  // two columns one alias: called as a layer, the mask column was served the
+  // eye white from the cache and drew it over the pupil — in the output, not
+  // in the preview, and depending on the resolution, because whether the
+  // cache is hit depends on the tiles (CS2606 sh160, 2026-10-02).
+  if (m_levelColumn->isMask()) {
+    rdata += "maskcol";
+    if (info.m_applyMask) rdata += "_apply";
+    if (info.m_plasticMask) rdata += "_plastic";
   }
 
   return getFxType() + "[" + ::to_string(fpStr) + "," + rdata + "]";
