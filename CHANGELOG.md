@@ -1,3 +1,51 @@
+## [2026-10-02b] — seconda finestra dal menu, PR #4 di Rodney, clipping mask nel render, FCPXML in sync; memoria e testina (28/09)
+
+Sessione locale sul Mac, collaudata da Franco su CS2606 (Messina). Commit `d36bf4868`, `77a99bf38`,
+`9583eb3ef`, `4392d661d`, `d5569fd2e`, `a693261d5`, `6505afcae`, `f6dcefd83`, `c8055fd1d`, `d516aab85`.
+Review 2026-10-02 (ztoryc-reviewer e license-guard, ora su Sonnet) su `d8dbf7e83~1..HEAD`: licenze OK,
+nessun bloccante; i consigliati concreti corretti nella stessa sessione.
+
+### Added
+- **«Open Another Ztoryc Window»** (menu File, sotto Load Scene) e clic destro su una scena nel browser
+  dei file o nelle scene recenti della schermata d'avvio: su macOS una seconda copia dell'app si apre solo
+  con `open -n`, ora lo fa l'app (su Windows/Linux rilancia l'eseguibile). Nelle scene recenti il clic
+  destro non carica piu' la scena.
+- **Copia e incolla di disegni fra due finestre di Ztoryc** — PR #4 di **Rodney (@RodneyBaker)**, grazie!
+  Selezione raster e vettoriale con lo strumento Selection, e incolla di immagini esterne. Serviva un
+  `#include` per compilare; controllo licenze OK (il repo d'origine e' un fork di Ztoryc).
+
+### Fixed
+- **Clipping mask che sparivano nel render** (pupille dei nani in sh160): nelle sotto-scene annidate la
+  preview era giusta e il main/l'output no. Due difetti di Tahoma in `tcolumnfx.cpp`: il ritaglio
+  dell'immagine della maschera ignorava la scala, e la colonna maschera condivideva la chiave della cache
+  con una colonna normale che mostra lo stesso disegno (riceveva il bianco dell'occhio e copriva la
+  pupilla, solo in output e secondo la risoluzione).
+- **FCPXML fuori sync in DaVinci Resolve con le dissolvenze**: clip ora consecutivi con il taglio a meta'
+  della dissolvenza, e l'audio non viene piu' spostato una seconda volta (anticipava di 22, 68, 84, 124
+  fotogrammi). Collaudato in Resolve su Messina. Il file di Messina e' stato corretto (originale in
+  `..._sh700_ORIGINALE.fcpxml`).
+- **Perdita di memoria fino a 32 GB** (28/09): `TXshSoundColumn::getCell` creava una cella a ogni lettura
+  di una colonna audio e non la liberava; scena appena aperta da 5,3 a 0,8 GB.
+- **Testina dell'animatic** (28/09): trascinandola oltre il bordo la timeline scorre invece di scattare al
+  centro sotto il mouse.
+- **CRASH su Cancel con due render insieme** (stock, `dvdialog.cpp:378`): un dialogo fuori schermo alla
+  chiusura usava un puntatore allo schermo nullo. E ora **un solo render di output alla volta**: su macOS la
+  finestra di avanzamento non e' modale e niente impediva il secondo.
+- Dalla review: la cache ffmpeg condivisa non viene piu' cancellata se c'e' un'altra istanza aperta; il
+  lucchetto del `production.ztrack` non resta preso mentre si avvisano i pannelli; un errore OpenGL nelle
+  anteprime del Board non chiude piu' l'app; il razor usa lo stesso backup dei merge.
+- `ztorylocks.cpp` riscritto (stesso comportamento) dopo un falso positivo della scansione licenze.
+
+### Upstream candidates
+- `TXshSoundColumn::getCell`: una cella persa a ogni lettura (misurato con `heap`).
+- `DVGui::Dialog::hideEvent`: puntatore allo schermo nullo per i dialoghi senza geometria salvata.
+- `TLevelColumnFx`: ritaglio della maschera raster senza scala; alias della cache uguale per colonna
+  maschera e colonna normale.
+
+### Notes
+- Patch release ancora da fare (memoria + Board + render + FCPXML): in cima ad ANIMATIC_TASKS.
+- Nelle note di rilascio: ringraziare Rodney per la PR #4.
+
 ## [2026-10-02] — piu' istanze di Ztoryc aperte insieme
 
 Sessione cloud. Chiesto da Franco rivedendo

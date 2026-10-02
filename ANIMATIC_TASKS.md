@@ -843,7 +843,7 @@ Milestone:
 
 **Altro**
 
-- ⬜ **Save and Render fa partire DUE render** — candidato upstream. ESCLUSI: la
+- ✅ (2026-10-02, `c8055fd1d`: un solo render di output alla volta; la causa del doppio avvio non e' stata vista, ma ora il secondo non parte) **Save and Render fa partire DUE render** — candidato upstream. ESCLUSI: la
   tavoletta (succede anche col mouse) e l'handler (`onSaveAndRender` fa un solo
   `doRender`). **Biforcazione da risolvere**: il comando parte due volte, oppure
   una esecuzione produce due render? Un contatore all'ingresso di
@@ -1347,7 +1347,7 @@ e viene composto in **due punti diversi** nelle due strade: `stagevisitor.cpp`
 * squashCtrl * meshToWorldMeshAff`. **Verifica diretta**: stampare le due matrici
 finali sullo stesso frame e confrontarle.
 
-### 🟠 APERTO — doppio render occasionale
+### ✅ CHIUSO 2026-10-02 (`c8055fd1d`, un render di output alla volta) — doppio render occasionale
 
 Franco: «succede ogni tanto». Parte due volte lo stesso lavoro. Da capire se
 succede lanciando dal Task panel o dal menu — e se due processi scrivono lo
@@ -1544,6 +1544,27 @@ deduzione; all'export non e' fra i mancanti. Non per i personaggi. Un collegamen
 ricompare togliendo il segno; collegare un file toglie il segno.
 Voce di lavoro dalla review: il blocco <assets> dei .ztoryc vecchi (storyboardpanel ~3663) ricostruisce
 gli asset senza filePath/rigPsd/noFile — verificare che production.ztrack li rimetta dopo.
+
+### 🔜 DA FARE A INIZIO PROSSIMA SESSIONE (28/09, limite settimanale al 97%)
+- **Patch release** con la correzione della perdita di memoria (`77a99bf38`: 32 GB in una sessione,
+  difetto anche nelle versioni pubblicate) + Board piu' svelto, merge, task per uuid. Decisione di
+  Franco: si fa quando il limite si ripristina (venerdi').
+- CHANGELOG: mancano `d36bf4868` (testina che scorre col trascinamento) e `77a99bf38` (perdita).
+- ✅ Review automatiche fatte il 2026-10-02 (reviews/2026-10-02_*.md).
+- **Dalla review del 2026-10-02, ancora aperti**: togliere la diagnostica ZTORYC_PLASTIC_DIAG da
+  tcolumnfx/plasticdeformerfx (stock, ~140 righe; la causa e' trovata); PR #4: render GL fino a 4096²
+  e scrittura PLI a ogni copia sul thread dell'interfaccia, e clone() che copia l'immagine a ogni paste
+  (valutare con Rodney); ztrackmerge ignora i nodi di testo (oggi solo attributi: commento/assert);
+  Kitsu: removeAssetAt non deve lasciare riferimenti in needs/castSynced; preferenze/env con piu'
+  istanze: vince l'ultima che chiude; autosave/backup con due finestre da provare.
+- **Cascina (CS2605) non sincronizza con Kitsu**: NON e' una copia (uuid e sorgenti diversi, episodi Kitsu
+  diversi e giusti; l'episodio CS2605_CASCINA su Kitsu ha 0 shot). Probabile DIFETTO: abbinamento degli shot
+  per NOME su tutto il progetto Kitsu invece che nell'episodio (sh430 di Cascina → sh430/SQ01/CS2606_MESSINA,
+  creato il 24/09). Prima correggere l'abbinamento, poi pulire. Dati:
+  69 shot su 71 hanno i kitsuShotId degli shot di MESSINA, 11 asset lo stesso kitsuAssetId. Il Sync
+  li salta (bene: altrimenti scriverebbe su Messina). Da fare: backup, togliere kitsuShotId /
+  kitsuAssetId / basi del Sync dal ztrack di Cascina, episodio giusto nella scheda Project, Sync.
+  Poi: impedire che una copia di progetto si porti dietro i collegamenti (o avvisare).
 
 ### 🆕 2026-09-28 — Board: operazioni sugli shot piu' svelte, il resto (P2)
 
