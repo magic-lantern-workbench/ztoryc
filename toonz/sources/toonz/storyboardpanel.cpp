@@ -8488,10 +8488,9 @@ bool writeAnimaticFcpxml(const QString &path, const QString &projectName, int fp
     trans[i] = t;
     if (t > 0) anyTransition = true;
   }
-  // Compensated (overlapped) timeline start of each clip, and a mapper from an
-  // original sequential frame to its overlapped position — used to keep the
-  // audio, which is placed in absolute sequential frames, synced to the video
-  // once the dissolves have pulled later clips earlier.
+  // Timeline start of each clip, with the dissolves overlapped — the same
+  // timeline as the main xsheet, where a shot column already starts inside the
+  // previous one's dissolve window.
   std::vector<int> compStart(clips.size(), 0);
   {
     int acc = 0;
@@ -8501,14 +8500,6 @@ bool writeAnimaticFcpxml(const QString &path, const QString &projectName, int fp
     }
   }
   int total = clips.empty() ? 0 : compStart.back() + clips.back().frames;
-  auto compAudioFrame = [&](int origFrame) {
-    int shift = 0, seam = 0;
-    for (size_t i = 0; i + 1 < clips.size(); i++) {
-      seam += clips[i].frames;  // original sequential seam between i and i+1
-      if (origFrame >= seam) shift += trans[i];
-    }
-    return qMax(0, origFrame - shift);
-  };
 
   QXmlStreamWriter x(&f);
   x.setAutoFormatting(true);
@@ -8603,15 +8594,18 @@ bool writeAnimaticFcpxml(const QString &path, const QString &projectName, int fp
     x.writeAttribute("start", headCut[i] ? dur(headCut[i]) : QString("0s"));
     x.writeAttribute("duration", dur(visible));
     // Connected audio clips (lanes -1, -2, …) nested in the first video clip,
-    // offsets relative to the timeline start. Offsets are compensated for the
-    // dissolve overlaps so the audio stays synced to the pulled-earlier video.
+    // offsets relative to the timeline start. Ztoryc: NOT "compensated" for the
+    // dissolves any more — the offsets come from the main xsheet, which already
+    // overlaps the shots at each dissolve (as compStart does), so subtracting
+    // the overlaps again moved the audio earlier by 22, 68, 84, 124 frames after
+    // each of Messina's dissolves (Franco, 2026-10-02).
     if (i == 0) {
       aid = 0;
       for (const auto &a : audio) {
         x.writeStartElement("asset-clip");
         x.writeAttribute("ref", QString("a%1").arg(++aid));
         x.writeAttribute("lane", QString::number(a.lane));
-        x.writeAttribute("offset", dur(compAudioFrame(a.offset)));
+        x.writeAttribute("offset", dur(a.offset));
         x.writeAttribute("name", a.name);
         // start = in-point into the source, so a trimmed/repositioned audio clip
         // plays from where the user set it in the animatic (not from 0s).
