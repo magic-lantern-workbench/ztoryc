@@ -8576,15 +8576,32 @@ bool writeAnimaticFcpxml(const QString &path, const QString &projectName, int fp
   x.writeAttribute("tcStart", "0s");
   x.writeAttribute("tcFormat", "NDF");
   x.writeStartElement("spine");
+  // Ztoryc: in a spine the clips follow one another — each begins where the
+  // previous ends — and a transition sits ACROSS the cut, using the media
+  // past the edit of both clips (handles). Writing the two clips overlapped
+  // instead made Resolve lay them end to end anyway: every dissolve pushed the
+  // rest of the picture later by its length, while the audio, connected to
+  // the first clip, stayed put (Messina: 22+46+16+40 frames, 5 s out of sync
+  // by the end; Franco, 2026-10-02). Now the cut is at the middle of each
+  // dissolve: the clip before ends there (its rendered tail is the handle),
+  // the clip after starts there, entered `head` frames into its media (its
+  // rendered head is the handle). The dissolve stays exactly where it was.
+  std::vector<int> headCut(clips.size(), 0), tailCut(clips.size(), 0);
+  for (size_t i = 0; i + 1 < clips.size(); i++) {
+    if (trans[i] <= 0) continue;
+    headCut[i + 1] = trans[i] / 2;
+    tailCut[i]     = trans[i] - trans[i] / 2;
+  }
   vid = 0;
   for (size_t i = 0; i < clips.size(); i++) {
     const auto &c = clips[i];
+    const int visible = std::max(1, c.frames - headCut[i] - tailCut[i]);
     x.writeStartElement("asset-clip");
     x.writeAttribute("ref", QString("v%1").arg(++vid));
-    x.writeAttribute("offset", dur(compStart[i]));
+    x.writeAttribute("offset", dur(compStart[i] + headCut[i]));
     x.writeAttribute("name", c.name);
-    x.writeAttribute("start", "0s");
-    x.writeAttribute("duration", dur(c.frames));
+    x.writeAttribute("start", headCut[i] ? dur(headCut[i]) : QString("0s"));
+    x.writeAttribute("duration", dur(visible));
     // Connected audio clips (lanes -1, -2, …) nested in the first video clip,
     // offsets relative to the timeline start. Offsets are compensated for the
     // dissolve overlaps so the audio stays synced to the pulled-earlier video.
