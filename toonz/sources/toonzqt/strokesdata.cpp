@@ -8,8 +8,204 @@
 #include "toonz/toonzimageutils.h"
 #include "toonz/trasterimageutils.h"
 #include "toonz/stage.h"
+#include "toonzqt/gutil.h"
+#include "tlevel_io.h"
+#include "tofflinegl.h"
+#include "tvectorgl.h"
+
+#include <QCryptographicHash>
+#include <QDebug>
+#include <QFile>
+#include <QOpenGLContext>
+#include <QPointer>
+#include <QTemporaryDir>
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 
 using namespace std;
+
+namespace {
+const char *const VectorClipboardFormat =
+    "application/x-opentoonz-vector-selection-v2";
+const char VectorClipboardMagic[]       = {'O', 'T', 'V', '2'};
+constexpr int VectorClipboardHeaderSize = 4 + 4 + 32;
+constexpr int MaxVectorClipboardSize    = 64 * 1024 * 1024;
+
+constexpr int MaxVectorClipboardPreviewSize = 4096;
+
+// TOfflineGL can replace the current context while constructing or destroying
+// its resources. Keep this guard outside its lifetime, including on failure.
+class ClipboardGLContextGuard final {
+  QPointer<QOpenGLContext> m_context;
+  QSurface *m_surface;
+
+public:
+  ClipboardGLContextGuard()
+      : m_context(QOpenGLContext::currentContext())
+      , m_surface(m_context ? m_context->surface() : nullptr) {}
+
+  ~ClipboardGLContextGuard() {
+    if (m_context && m_surface) {
+      if (!m_context->makeCurrent(m_surface))
+        qWarning("Could not restore the OpenGL context after clipboard preview.");
+    } else if (QOpenGLContext *current = QOpenGLContext::currentContext()) {
+      current->doneCurrent();
+    }
+  }
+
+  ClipboardGLContextGuard(const ClipboardGLContextGuard &) = delete;
+  ClipboardGLContextGuard &operator=(const ClipboardGLContextGuard &) = delete;
+};
+
+QImage vectorClipboardImage(const TVectorImageP &image) {
+  const TRectD bounds = image->getBBox();
+  if (bounds.isEmpty() || !std::isfinite(bounds.x0) ||
+      !std::isfinite(bounds.y0) || !std::isfinite(bounds.x1) ||
+      !std::isfinite(bounds.y1))
+    return QImage();
+
+  // Bound the allocation before converting to integer pixel dimensions. Only
+  // the rendered preview is scaled; the native strokes and PLI stay unchanged.
+  const double x0     = std::floor(bounds.x0);
+  const double y0     = std::floor(bounds.y0);
+  const double width  = std::ceil(bounds.x1) - x0 + 1.0;
+  const double height = std::ceil(bounds.y1) - y0 + 1.0;
+  if (!std::isfinite(width) || !std::isfinite(height) || width <= 0.0 ||
+      height <= 0.0)
+    return QImage();
+
+  const double scale =
+      std::min(1.0, MaxVectorClipboardPreviewSize / std::max(width, height));
+  const int lx = std::max(
+      1, std::min(MaxVectorClipboardPreviewSize, int(std::ceil(width * scale))));
+  const int ly = std::max(
+      1, std::min(MaxVectorClipboardPreviewSize, int(std::ceil(height * scale))));
+  const TDimension size(lx, ly);
+
+  ClipboardGLContextGuard contextGuard;
+  TOfflineGL offline(size);
+  offline.clear(TPixel32(0, 0, 0, 0));
+  TVectorRenderData rd(TScale(scale) * TTranslation(-x0, -y0), TRect(size),
+                       image->getPalette(), 0, true, true);
+  rd.m_drawRegions = true;
+  offline.draw(image, rd, false);
+  // Copy the borrowed pixels while the raster and offscreen resources live.
+  const TRaster32P raster = offline.getRaster();
+  return raster ? rasterToQImage(raster).copy() : QImage();
+}
+
+QByteArray makeVectorClipboardPayload(const QByteArray &pliData) {
+  QByteArray payload;
+  payload.reserve(VectorClipboardHeaderSize + pliData.size());
+  payload.append(VectorClipboardMagic, 4);
+  const quint32 size = static_cast<quint32>(pliData.size());
+  payload.append(static_cast<char>((size >> 24) & 0xff));
+  payload.append(static_cast<char>((size >> 16) & 0xff));
+  payload.append(static_cast<char>((size >> 8) & 0xff));
+  payload.append(static_cast<char>(size & 0xff));
+  payload.append(QCryptographicHash::hash(pliData, QCryptographicHash::Sha256));
+  payload.append(pliData);
+  return payload;
+}
+
+QByteArray vectorPliData(const QByteArray &payload) {
+  if (payload.size() < VectorClipboardHeaderSize ||
+      memcmp(payload.constData(), VectorClipboardMagic, 4) != 0)
+    return QByteArray();
+
+  const unsigned char *data =
+      reinterpret_cast<const unsigned char *>(payload.constData());
+  const quint32 size = (static_cast<quint32>(data[4]) << 24) |
+                       (static_cast<quint32>(data[5]) << 16) |
+                       (static_cast<quint32>(data[6]) << 8) |
+                       static_cast<quint32>(data[7]);
+  if (size == 0 || size > MaxVectorClipboardSize ||
+      payload.size() != VectorClipboardHeaderSize + static_cast<int>(size))
+    return QByteArray();
+
+  const QByteArray pliData      = payload.mid(VectorClipboardHeaderSize);
+  const QByteArray expectedHash = payload.mid(8, 32);
+  if (QCryptographicHash::hash(pliData, QCryptographicHash::Sha256) !=
+      expectedHash)
+    return QByteArray();
+  return pliData;
+}
+}  // namespace
+
+void StrokesData::setClipboardFormats() {
+  if (!m_image || m_image->getStrokeCount() == 0) return;
+  try {
+    const QImage preview = vectorClipboardImage(m_image);
+    if (!preview.isNull()) setImageData(preview);
+  } catch (...) {
+    // Native copy remains available when a rendering context cannot be made.
+  }
+
+  QTemporaryDir dir;
+  if (!dir.isValid()) return;
+  QString path = dir.filePath("selection.pli");
+  try {
+    // A split selection can retain internal state from its source image that
+    // is not suitable for a standalone PLI. Rebuild it just as the custom
+    // vector-brush exporter does before handing it to the PLI writer.
+    TPaletteP palette           = new TPalette();
+    TVectorImageP sourceCopy    = m_image->clone();
+    TVectorImageP transferImage = new TVectorImage();
+    transferImage->setPalette(palette.getPointer());
+    transferImage->setAutocloseTolerance(m_image->getAutocloseTolerance());
+    transferImage->mergeImage(sourceCopy, TAffine());
+    transferImage->findRegions();
+    if (transferImage->getStrokeCount() == 0) return;
+
+    TLevelP level = new TLevel();
+    level->setPalette(palette.getPointer());
+    level->setFrame(TFrameId(1), transferImage);
+    TLevelWriterP writer(TFilePath(path.toStdWString()));
+    writer->save(level);
+    writer = TLevelWriterP();  // The PLI writer finishes on destruction.
+    QFile file(path);
+    if (file.open(QIODevice::ReadOnly)) {
+      const QByteArray pliData = file.readAll();
+      if (!pliData.isEmpty() && pliData.size() <= MaxVectorClipboardSize)
+        QMimeData::setData(VectorClipboardFormat,
+                           makeVectorClipboardPayload(pliData));
+    }
+  } catch (...) {
+    // The image representation and in-process vector data still work.
+  }
+}
+
+StrokesData *StrokesData::fromClipboard(const QMimeData *mime) {
+  if (!mime || !mime->hasFormat(VectorClipboardFormat)) return nullptr;
+  const QByteArray bytes = vectorPliData(mime->data(VectorClipboardFormat));
+  if (bytes.isEmpty()) return nullptr;
+  QTemporaryDir dir;
+  if (!dir.isValid()) return nullptr;
+  QString path = dir.filePath("selection.pli");
+  QFile file(path);
+  if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size())
+    return nullptr;
+  file.close();
+  try {
+    TLevelReaderP reader(TFilePath(path.toStdWString()));
+    // PLI frame readers need loadInfo() to initialize the stream and palette.
+    TLevelP level = reader->loadInfo();
+    if (!level || level->getFrameCount() != 1) return nullptr;
+    TImageReaderP frame = reader->getFrameReader(TFrameId(1));
+    TImageP loaded      = frame ? frame->load() : TImageP();
+    TVectorImageP image = loaded;
+    if (!image || image->getStrokeCount() == 0 || !level->getPalette() ||
+        level->getPalette()->getPageCount() == 0 ||
+        level->getPalette()->getStyleCount() == 0)
+      return nullptr;
+    image->setPalette(level->getPalette());
+    return new StrokesData(image.getPointer());
+  } catch (...) {
+    return nullptr;
+  }
+}
 
 //=============================================================================
 namespace {

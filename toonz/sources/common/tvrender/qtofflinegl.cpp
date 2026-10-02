@@ -3,6 +3,7 @@
 #include "qtofflinegl.h"
 #include <traster.h>
 #include <tconvert.h>
+#include "texception.h"
 
 //-----------------------------------------------------------------------------
 
@@ -125,26 +126,31 @@ void QtOfflineGL::createContext(TDimension rasterSize,
 
 */
 
-  QOpenGLFramebufferObjectFormat fmt;
-  fmt.setAttachment(QOpenGLFramebufferObject::Attachment::CombinedDepthStencil);
+  if (rasterSize.lx <= 0 || rasterSize.ly <= 0)
+    throw TException("Invalid offscreen OpenGL framebuffer size.");
 
   QSurfaceFormat format;
   format.setProfile(QSurfaceFormat::CompatibilityProfile);
 
-  m_surface = std::make_shared<QOffscreenSurface>();
-  m_surface->setFormat(format);
-  m_surface->create();
-
   m_context = std::make_shared<QOpenGLContext>();
   m_context->setFormat(format);
-  m_context->create();
-  m_context->makeCurrent(m_surface.get());
+  if (!m_context->create() || !m_context->isValid())
+    throw TException("Cannot create an offscreen OpenGL context.");
+
+  m_surface = std::make_shared<QOffscreenSurface>();
+  m_surface->setFormat(m_context->format());
+  m_surface->create();
+  if (!m_surface->isValid())
+    throw TException("Cannot create an offscreen OpenGL surface.");
+  if (!m_context->makeCurrent(m_surface.get()))
+    throw TException("Cannot make the offscreen OpenGL context current.");
 
   QOpenGLFramebufferObjectFormat fbo_format;
   fbo_format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
   m_fbo = std::make_shared<QOpenGLFramebufferObject>(rasterSize.lx,
                                                      rasterSize.ly, fbo_format);
-  m_fbo->bind();
+  if (!m_fbo->isValid() || !m_fbo->bind())
+    throw TException("Cannot create or bind the offscreen OpenGL framebuffer.");
 
   printf("create context:%p [thread:0x%x]\n", m_context.get(),
          (unsigned int)(size_t)QThread::currentThreadId());
@@ -158,7 +164,8 @@ void QtOfflineGL::createContext(TDimension rasterSize,
 void QtOfflineGL::makeCurrent() {
   if (m_context) {
     m_context->moveToThread(QThread::currentThread());
-    m_context->makeCurrent(m_surface.get());
+    if (!m_context->makeCurrent(m_surface.get()))
+      throw TException("Cannot make the offscreen OpenGL context current.");
   }
 }
 
