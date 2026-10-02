@@ -422,6 +422,16 @@ class RenderListener final : public DVGui::ProgressDialog,
   };
 
 public:
+  // Ztoryc: output renders in progress. On macOS this progress window is not
+  // modal (see below), so nothing stopped a second render of the same scene
+  // from starting while the first ran — two renders writing one file, and the
+  // Cancel of one crashed (2026-10-02). doRender asks before starting another.
+  static int s_active;
+  bool m_counted = false;
+  void stopCounting() {
+    if (m_counted) { m_counted = false; --s_active; }
+  }
+
   RenderListener(TRenderer *renderer, const TFilePath &path, int steps,
                  bool isPreview)
       : DVGui::ProgressDialog(
@@ -447,8 +457,10 @@ public:
              : QObject::tr(" of %1", "RenderListener").arg(toQString(path)));
     // setMinimumDuration (0);
     m_totalFrames = steps;
+    if (!isPreview) { m_counted = true; ++s_active; }
     show();
   }
+  ~RenderListener() { stopCounting(); }
 
   /*-- 以下３つの関数はMovieRenderer::Listenerの純粋仮想関数の実装 --*/
   bool onFrameCompleted(int frame) override {
@@ -464,6 +476,7 @@ public:
     return onFrameCompleted(frame);
   }
   void onSequenceCompleted(const TFilePath &fp) override {
+    stopCounting();
     Message(this, -1, "").send();
     OnRenderCompleted(fp, m_error).send();
     m_error = false;
@@ -471,6 +484,7 @@ public:
   }
 
   void onCancel() override {
+    stopCounting();
     m_isCanceled = true;
     setLabelText(QObject::tr("Aborting render...", "RenderListener"));
     reset();
@@ -478,6 +492,8 @@ public:
     RenderCommand::resetBgColor();
   }
 };
+
+int RenderListener::s_active = 0;
 
 //---------------------------------------------------------
 
@@ -916,6 +932,14 @@ void RenderCommand::onPreview() { doRender(true); }
 //---------------------------------------------------------
 
 void RenderCommand::doRender(bool isPreview) {
+  if (!isPreview && RenderListener::s_active > 0) {
+    // One output render at a time (Franco, 2026-10-02: «il secondo render non
+    // deve proprio partire»). The count goes down on completion, on cancel
+    // and when the progress window is destroyed.
+    DVGui::info(QObject::tr(
+        "A render is already in progress: wait for it to finish or cancel it."));
+    return;
+  }
   bool isWritable = true;
   bool isMultiFrame;
   /*--

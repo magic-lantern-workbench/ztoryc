@@ -18,6 +18,7 @@
 #include "tversion.h"
 
 // Qt includes
+#include <QWindow>
 #include <QFrame>
 #include <QLayout>
 #include <QLabel>
@@ -373,13 +374,22 @@ void Dialog::hideEvent(QHideEvent *event) {
       currentScreen = m_currentScreen;
     }
   }
-  QRect screen = currentScreen->availableGeometry();
+  // Ztoryc: m_currentScreen is set only for a dialog with a saved geometry;
+  // otherwise it stays null, and a dialog that was on no screen when hidden
+  // (a second render progress window, opened off-screen) crashed here on
+  // Cancel (CS2606 sh170, 2026-10-02). Fall back to this window's screen, then
+  // to the primary one; with no screen at all, skip the clamping.
+  if (!currentScreen && windowHandle()) currentScreen = windowHandle()->screen();
+  if (!currentScreen) currentScreen = QGuiApplication::primaryScreen();
+  if (currentScreen) {
+    QRect screen = currentScreen->availableGeometry();
 
-  if (x > screen.right() - 50) x  = screen.right() - 50;
-  if (x < screen.left()) x        = screen.left();
-  if (y > screen.bottom() - 90) y = screen.bottom() - 90;
-  if (y < screen.top()) y         = screen.top();
-  move(QPoint(x, y));
+    if (x > screen.right() - 50) x  = screen.right() - 50;
+    if (x < screen.left()) x        = screen.left();
+    if (y > screen.bottom() - 90) y = screen.bottom() - 90;
+    if (y < screen.top()) y         = screen.top();
+    move(QPoint(x, y));
+  }
   resize(size());
   if (m_name != QString()) {
     QRect r = geometry();
