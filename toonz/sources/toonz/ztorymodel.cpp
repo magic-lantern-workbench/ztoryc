@@ -1686,6 +1686,12 @@ void ZtoryModel::reloadProjectDbIfChangedOnDisk() {
         !writeProjectDbFile(path, merged))
       return;
   }
+  // Released before the model is refreshed and the panels are told: a slot
+  // that saves (saveProjectDb takes the same lock) would otherwise wait the
+  // full 3 s on a lock held by this very process, the UI frozen, and then
+  // write without it (review 2026-10-02). The file is written; what follows
+  // works on `merged`, in memory.
+  lock.unlock();
   readProjectDbBytes(path, merged);
   emit productionReloaded();
   emit assetsChanged();

@@ -21,6 +21,13 @@ QString lockFilePath(const QString &kind, const QString &forPath);
 // Canonical when the file exists (symlinks resolved), absolute otherwise.
 QString canonicalPath(const QString &path);
 
+// This instance holds its own lock for as long as it runs (call once, early).
+void registerInstance();
+
+// True when another Ztoryc instance on this computer is running. A lock left
+// by a crashed instance is recognised (its process is gone) and removed.
+bool otherInstancesRunning();
+
 }  // namespace ZtoryLocks
 
 #endif

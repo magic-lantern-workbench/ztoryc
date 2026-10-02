@@ -1158,10 +1158,20 @@ QPixmap IconGenerator::renderXsheetFrame(TXsheet *xsheet, int row, const TDimens
   // personaggi ZtoRig sono sotto-xsheet deformati da una mesh — non hanno un
   // livello semplice, quindi player.image() e' NULLA e il disegno comune non
   // disegna niente. Non uscivano deformati male: sparivano.
-  scene->renderFrame(ras, row, xsheet, /*checkFlags*/ false,
-                     /*forSceneIcon*/ false);
+  // Ztoryc: the offscreen GL setup throws on failure since the external
+  // clipboard work (PR #4) — it used to fail silently. Here, on the main
+  // thread, an uncaught exception would end the app: the preview just stays
+  // blank, as before (review 2026-10-02).
+  bool rendered = true;
+  try {
+    scene->renderFrame(ras, row, xsheet, /*checkFlags*/ false,
+                       /*forSceneIcon*/ false);
+  } catch (...) {
+    rendered = false;
+  }
   TXshSimpleLevel::m_rasterizePli = rasterizePli;
   TImageCache::instance()->setEnabled(true);
+  if (!rendered) return QPixmap();
   int w = ras->getLx(), h = ras->getLy();
   ras->lock();
   QImage img((const uchar*)ras->getRawData(), w, h, w*4, QImage::Format_ARGB32);
@@ -1192,15 +1202,19 @@ QPixmap IconGenerator::renderXsheetFrameRegion(TXsheet *xsheet, int row,
   // normally driven by the camstand/texture pipeline). Called from the Board's
   // preview timer there is none → its QOpenGLFramebufferObject ctor crashes.
   // Make an offscreen context current first, like the simple overload does.
-  {
+  bool rendered = true;
+  try {  // see renderXsheetFrame: a GL failure throws, the preview stays blank
     TOfflineGL ogl(size);
     ogl.makeCurrent();
     // worldToPlacedAff = identity → placedRect is in camera-local space at row
     scene->renderFrame(ras, row, xsheet, placedRect, TAffine());
     ogl.doneCurrent();
+  } catch (...) {
+    rendered = false;
   }
   TXshSimpleLevel::m_rasterizePli = rasterizePli;
   TImageCache::instance()->setEnabled(true);
+  if (!rendered) return QPixmap();
   int w = ras->getLx(), h = ras->getLy();
   ras->lock();
   QImage img((const uchar*)ras->getRawData(), w, h, w*4, QImage::Format_ARGB32);

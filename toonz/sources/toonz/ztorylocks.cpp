@@ -1,8 +1,10 @@
 #include "ztorylocks.h"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
+#include <QLockFile>
 #include <QStandardPaths>
 
 namespace ZtoryLocks {
@@ -39,6 +41,39 @@ QString lockFilePath(const QString &kind, const QString &forPath) {
           .toHex();
   return QString("%1/%2_%3.lock")
       .arg(locksFolder(), kind, QString::fromLatin1(digest.left(16)));
+}
+
+namespace {
+QString instanceLockName(qint64 pid) {
+  return QString("instance_%1.lock").arg(pid);
+}
+QLockFile *s_instanceLock = nullptr;  // held until the process ends
+}  // namespace
+
+void registerInstance() {
+  if (s_instanceLock) return;
+  s_instanceLock = new QLockFile(
+      locksFolder() + "/" + instanceLockName(QCoreApplication::applicationPid()));
+  s_instanceLock->setStaleLockTime(0);  // stale only when its process is gone
+  s_instanceLock->tryLock(0);
+}
+
+bool otherInstancesRunning() {
+  const qint64 me = QCoreApplication::applicationPid();
+  const QDir dir(locksFolder());
+  for (const QString &name :
+       dir.entryList({"instance_*.lock"}, QDir::Files)) {
+    if (name == instanceLockName(me)) continue;
+    QLockFile other(dir.filePath(name));
+    other.setStaleLockTime(0);
+    // Taking it means its owner is gone: a crashed instance's leftover,
+    // removed by unlock(). Failing to take it means that instance is alive.
+    if (other.tryLock(0))
+      other.unlock();
+    else
+      return true;
+  }
+  return false;
 }
 
 }  // namespace ZtoryLocks

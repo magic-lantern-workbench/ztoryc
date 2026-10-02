@@ -6947,8 +6947,6 @@ void materializeCells(TXshChildLevel *cl, int duration, bool fillToEnd = false) 
   }
 }
 
-// Helper: trim a child xsheet to |keepFrames| frames.
-// Removes cells >= keepFrames and removes stage-object keyframes >= keepFrames.
 // Keeps a pristine copy of the sub-scene at main column `col` for the undo of
 // an operation that changes it IN PLACE (merge). UndoBoardState's snapshot
 // holds only a POINTER to the level: undoing a merge put the main columns back
@@ -6987,6 +6985,8 @@ void backupChildForUndo(int col, ZtoryBoardSnap &before) {
       }
 }
 
+// Helper: trim a child xsheet to |keepFrames| frames.
+// Removes cells >= keepFrames and removes stage-object keyframes >= keepFrames.
 void trimChildXsheetTo(TXshChildLevel *cl, int keepFrames) {
   if (!cl) return;
   TXsheet *xsh = cl->getXsheet();
@@ -7477,24 +7477,7 @@ void ZtoryAnimaticPanel::onRazorRequested(int col, int splitFrame) {
   // gone.  Clone origCL into a standalone level NOW (cloneChild deep-copies the
   // whole sub-scene), orphan its column, and repoint the `before` snapshot at the
   // clone — so undo restores every original drawing.
-  if (origCL) {
-    ColumnCmd::cloneChild(col);
-    TUndoManager::manager()->popUndo(1);  // covered by our UndoBoardState
-    int backupCol = col + 1;
-    TXshLevelP backupLevel;
-    for (int r = r0; r <= r1; r++) {
-      TXshCell cell = mainXsh->getCell(r, backupCol);
-      if (!cell.isEmpty() && cell.m_level && cell.m_level->getChildLevel()) {
-        backupLevel = cell.m_level;
-        break;
-      }
-    }
-    mainXsh->removeColumn(backupCol);  // orphan it; the TXshLevelP keeps it alive
-    mainXsh->updateFrameCount();
-    if (backupLevel)
-      for (auto &s : before.shots)
-        if (s.data.xsheetColumn == col) { s.level = backupLevel; break; }
-  }
+  if (origCL) backupChildForUndo(col, before);  // same helper as the merges
 
   // ── Step 1: materialize held cells for the full shot duration ──────────────
   // Tahoma2D stores drawing cells only at transition points; intermediate

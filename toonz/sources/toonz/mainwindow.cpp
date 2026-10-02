@@ -26,6 +26,7 @@ extern ToggleCommandHandler showMeshToggle;
 #include "ztorymodel.h"
 #include "ztoryrecovery.h"
 #include "ztoryinstance.h"
+#include "ztorylocks.h"
 #include "storyboardpanel.h"
 #include "ztoryanimatic.h"
 
@@ -638,10 +639,14 @@ centralWidget->setLayout(centralWidgetLayout);*/
   setCommandHandler("MI_NewRasterLevel", this,
                     &MainWindow::onNewRasterLevelButtonPressed);
   setCommandHandler(MI_ClearCacheFolder, this, &MainWindow::clearCacheFolder);
-  // remove ffmpegCache if still exists from crashed exit
+  // remove ffmpegCache if still exists from crashed exit. Ztoryc: only when
+  // no other instance is running — the cache is shared, and a second window
+  // starting would delete the frames of a video the first one is importing.
+  ZtoryLocks::registerInstance();
   QString ffmpegCachePath =
       ToonzFolder::getCacheRootFolder().getQString() + "//ffmpeg";
-  if (TSystem::doesExistFileOrLevel(TFilePath(ffmpegCachePath))) {
+  if (!ZtoryLocks::otherInstancesRunning() &&
+      TSystem::doesExistFileOrLevel(TFilePath(ffmpegCachePath))) {
     TSystem::rmDirTree(TFilePath(ffmpegCachePath));
   }
 
@@ -700,10 +705,11 @@ void MainWindow::updateZtoryToolbarDedup() {
 
 MainWindow::~MainWindow() {
   TEnv::saveAllEnvVariables();
-  // cleanup ffmpeg cache
+  // cleanup ffmpeg cache — not while another instance may be using it
   QString ffmpegCachePath =
       ToonzFolder::getCacheRootFolder().getQString() + "//ffmpeg";
-  if (TSystem::doesExistFileOrLevel(TFilePath(ffmpegCachePath))) {
+  if (!ZtoryLocks::otherInstancesRunning() &&
+      TSystem::doesExistFileOrLevel(TFilePath(ffmpegCachePath))) {
     TSystem::rmDirTree(TFilePath(ffmpegCachePath));
   }
 }
