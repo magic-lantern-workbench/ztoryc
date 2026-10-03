@@ -12,6 +12,7 @@
 
 // TnzQt includes
 #include "toonzqt/menubarcommand.h"
+#include "toonzqt/dvdialog.h"
 
 // TnzLib includes
 #include "toonz/txsheethandle.h"
@@ -1156,6 +1157,15 @@ void TKeyframeSelection::pasteKeyframesWithShift(int r0, int r1, int c0,
     if (cellKeyframeData) data = cellKeyframeData->getKeyframeData();
   }
   if (!data) return;
+
+  if (data->losesPlasticPose(
+          m_positions, TApp::instance()->getCurrentXsheet()->getXsheet())) {
+    DVGui::warning(QObject::tr(
+        "These keys hold a Plastic pose, but the column you are pasting on "
+        "has no Plastic skeleton: the pose would be lost.\nNothing was "
+        "pasted."));
+    return;
+  }
 
   // Retrieve corresponding old keyframes
   std::set<TKeyframeSelection::Position> positions(m_positions);

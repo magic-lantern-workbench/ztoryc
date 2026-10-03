@@ -12,6 +12,7 @@
 #include "toonz/txshcolumn.h"
 #include "toonz/preferences.h"
 #include "toonz/doubleparamcmd.h"
+#include "ext/plasticskeletondeformation.h"
 
 #include <assert.h>
 
@@ -79,6 +80,35 @@ void TKeyframeData::setKeyframes(std::set<Position> positions, TXsheet *xsh,
       m_centerData[p] = CenterInfo(center, offset);
     }
   }
+}
+
+//-----------------------------------------------------------------------------
+
+// Moving the end of a walk onto a spare column and back left only the transform
+// keys: the spare column had no skeleton, the pose half was dropped on the way
+// over, and the character stood still from there on (Franco, 2026-10-03).
+bool TKeyframeData::losesPlasticPose(const std::set<Position> &dest,
+                                     TXsheet *xsh) const {
+  if (dest.empty() || !xsh) return false;
+  int r0 = dest.begin()->first, c0 = dest.begin()->second;
+  for (const Position &p : dest) {
+    r0 = std::min(r0, p.first);
+    c0 = std::min(c0, p.second);
+  }
+  for (const auto &kv : m_keyData) {
+    bool hasPose = false;
+    for (const auto &vk : kv.second.m_skeletonKeyframe.m_vertexKeyframes)
+      for (int p = 0; p < SkVD::PARAMS_COUNT && !hasPose; ++p)
+        hasPose = vk.second.m_keyframes[p].m_isKeyframe;
+    if (!hasPose) continue;
+    const int col = c0 + kv.first.second;
+    if (col < 0) return true;  // the camera never holds a pose
+    TXshColumn *column = xsh->getColumn(col);
+    if (!column) return true;  // an empty column: no skeleton there
+    TStageObject *obj = xsh->getStageObject(xsh->getColumnObjectId(col));
+    if (!obj || !obj->getPlasticSkeletonDeformation()) return true;
+  }
+  return false;
 }
 
 //-----------------------------------------------------------------------------

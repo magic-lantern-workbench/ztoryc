@@ -49,6 +49,11 @@ public:
   // data -> xsh
   bool getKeyframes(std::set<Position> &positions, TXsheet *xsh) const;
 
+  // Ztoryc: true when pasting at `dest` (top-left = its min, as getKeyframes)
+  // would put a key holding a Plastic pose on a column with no Plastic
+  // skeleton. setKeyframeWithoutUndo drops that half of the key in silence.
+  bool losesPlasticPose(const std::set<Position> &dest, TXsheet *xsh) const;
+
   // Reads data keyframes and fills in positions set. The first element
   // passed with the set is automatically added to stored positions.
   void getKeyframes(std::set<Position> &positions) const;
