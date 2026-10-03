@@ -1382,6 +1382,18 @@ void PlasticTool::storeDeformation() {
   if (m_mode.getIndex() == ANIMATE_IDX)
     m_deformedSkeleton.invalidate();  // Store the deformed skeleton too
 
+  // The scale fields follow the ROOT, not the selected vertex, yet they were
+  // bound only in onSelectionChanged — which clearSkeletonSelections() above
+  // fires while m_sd is still the OLD deformation. A fresh column showed empty
+  // Scale H/V until a gizmo drag refreshed them (Franco, 2026-10-03).
+  SkVD *rootVd = rootVd_animate();
+  m_scaleXRelay.setParam(rootVd ? rootVd->m_params[SkVD::SCALEX]
+                                : TDoubleParamP());
+  m_scaleYRelay.setParam(rootVd ? rootVd->m_params[SkVD::SCALEY]
+                                : TDoubleParamP());
+  m_scaleXRelay.notifyListeners();
+  m_scaleYRelay.notifyListeners();
+
   emit skelIdsListChanged();
 }
 
@@ -2557,14 +2569,30 @@ bool PlasticTool::onPropertyChanged(std::string propertyName) {
         double w =
             (constraint == 1) ? v : (fabs(v) > 1e-4 ? 1.0 / v : 1.0);
         if (fabs(dst.getValue() - w) > 1e-9) {
+          // Key first, through the setter (interpolation from the
+          // preferences): a bare setValue() on an unkeyed curve made the only
+          // key, which then held on every frame. The undo is the field
+          // edit's snapshot (commitFieldEdit_animate).
+          TDoubleParamP dstParam = dst.getParam();
+          ::setKeyframe(dstParam, dst.frame());
           dst.setValue(w);
           dst.notifyListeners();
         }
       }
     }
+    if (m_fieldEditOpen) {  // a typed value: keys and undo, once
+      globalKeyAfterFieldEdit_animate();
+      commitFieldEdit_animate();
+    }
     updateMatrix();  // the controller affine depends on the scale values
     m_deformedSkeleton.invalidate();
     invalidate();
+  } else if (propertyName == "distanceRelay" || propertyName == "angleRelay" ||
+             propertyName == "soRelay") {
+    if (m_fieldEditOpen) {  // a typed value: keys and undo, once
+      globalKeyAfterFieldEdit_animate();
+      commitFieldEdit_animate();
+    }
   } else if (propertyName == "interpolate") {
     if (m_sd && m_svSel >= 0) {
       // Set interpolation property to the associated skeleton vertex
@@ -2769,6 +2797,21 @@ static void drawFilledHandle(const TPointD &pos, double radius,
 
 //------------------------------------------------------------------------
 
+// "Vertex 15" already says its hook number: printing "(15) Vertex 15" just
+// repeats it. The number stays in front when the name does not carry it
+// (renamed vertices, or names made before they were aligned with the hook).
+static QString vertexLabel(int hookNumber, const QString &name) {
+  // Trailing "_" (added to keep names unique) is NOT stripped: "Vertex 15_"
+  // is not the vertex hooked as 15, and must keep its number in front.
+  const QString &digits = name;
+  int i = digits.size();
+  while (i > 0 && digits[i - 1].isDigit()) --i;
+  bool ok = false;
+  if (i < digits.size() && digits.mid(i).toInt(&ok) == hookNumber && ok)
+    return name;
+  return QString("(%1) ").arg(hookNumber) + name;
+}
+
 static void drawText(const TPointD &pos, const QString &text,
                      double fontScale) {
   // Get the world-to-window affine
@@ -2824,7 +2867,7 @@ void PlasticTool::drawHighlights(const SkDP &sd,
     }
 
     drawText(vx.P() + TPointD(2.0 * handleRadius, 2.0 * handleRadius),
-             QString("(%1) ").arg(hookNumber) + vx.name(), 1.7);
+             vertexLabel(hookNumber, vx.name()), 1.7);
   } else if (m_seHigh >= 0) {
     // Draw a handle at the projection of current mouse position towards the
     // highlighted edge
@@ -2860,7 +2903,7 @@ void PlasticTool::drawSelections(const SkDP &sd,
       assert(hookNumber >= 0);
 
       drawText(vx.P() + TPointD(2.0 * handleRadius, 2.0 * handleRadius),
-               QString("(%1) ").arg(hookNumber) + vx.name(), 1.7);
+               vertexLabel(hookNumber, vx.name()), 1.7);
     }
   }
 }

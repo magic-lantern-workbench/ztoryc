@@ -2999,14 +2999,33 @@ void PlasticTool::leftButtonUp_animate(const TPointD &pos,
 
   if (gizmoDrag && m_dragged && m_sd) {
     // Global key: one key on every channel at this frame, controller included
-    // (keyed BEFORE the undo snapshot, so undo/redo capture them too)
-    if (m_globalKey.getValue()) ::setKeyframe(m_sd, ::frame());
+    // (keyed BEFORE the undo snapshot, so undo/redo capture them too).
+    // Ztoryc: the Global Key SCOPE, as on the vertex paths below — 0 Stage,
+    // 1 Plastic, 2 All. This path keyed the plastic side whatever the scope
+    // and the transform never (Franco, 2026-10-03).
+    const int scope          = m_globalKeyScope.getIndex();
+    const bool globalKey     = m_globalKey.getValue();
+    const bool doTransform   = globalKey && scope != 1;  // Stage or All
+    const bool doFullPlastic = globalKey && scope != 0;  // Plastic or All
+
+    TUndoManager::manager()->beginBlock();
+    if (doTransform) {
+      if (TStageObject *o = stageObject()) {
+        auto *u = new StageTransformKeyUndo(
+            TTool::getApplication()->getCurrentXsheet(), o->getId(),
+            (int)::frame());
+        u->apply();
+        TUndoManager::manager()->add(u);
+      }
+    }
+    if (doFullPlastic) ::setKeyframe(m_sd, ::frame());
 
     AnimateValuesUndo *undo =
         new AnimateValuesUndo(m_svSel.hasSingleObject() ? (int)m_svSel : -1);
     undo->m_oldValues = m_pressedSkDF;
     m_sd->getKeyframeAt(frame(), undo->m_newValues);
     TUndoManager::manager()->add(undo);
+    TUndoManager::manager()->endBlock();
 
     m_dragged = false;
 
@@ -3123,6 +3142,118 @@ void PlasticTool::leftButtonUp_animate(const TPointD &pos,
   // position,
   // we need to update the whole skeleton according to the updated vertex.
   updateMatrix();
+  invalidate();
+}
+
+//------------------------------------------------------------------------
+
+// The toolbar fields have a "global key" of their own (ToolOptionParam-
+// RelayField): it keys the other FIELDS of the selected vertex, whatever the
+// scope, and never the transform — typing a scale in «All» left the column and
+// the rest of the pose unkeyed (Franco, 2026-10-03). Same rule as the drag.
+// No undo here: the whole field edit is one curve snapshot (see below).
+void PlasticTool::globalKeyAfterFieldEdit_animate() {
+  if (!m_sd || !m_globalKey.getValue()) return;
+  const int scope = m_globalKeyScope.getIndex();
+  if (scope != 1) {  // Stage or All
+    if (TStageObject *o = stageObject()) {
+      o->setKeyframeWithoutUndo((int)::frame());
+      o->updateKeyframes();
+    }
+  }
+  if (scope != 0) ::setKeyframe(m_sd, ::frame());  // Plastic or All
+  TTool::getApplication()->getCurrentXsheet()->notifyXsheetChanged();
+}
+
+//------------------------------------------------------------------------
+
+namespace {
+const TStageObject::Channel kFieldXformChannels[] = {
+    TStageObject::T_Angle,  TStageObject::T_X,      TStageObject::T_Y,
+    TStageObject::T_Z,      TStageObject::T_SO,     TStageObject::T_ScaleX,
+    TStageObject::T_ScaleY, TStageObject::T_Scale,  TStageObject::T_Path,
+    TStageObject::T_ShearX, TStageObject::T_ShearY};
+
+// One undo for a whole toolbar field edit: the typed axis, the constrained
+// one, the field's own global keys and ours. Copies of the curves taken before
+// anything was written — the previous undos were taken AFTER, and ⌘Z put
+// back half of the new values (review 2026-10-03, B1-B3).
+class FieldEditUndo final : public TUndo {
+public:
+  struct Curve {
+    TDoubleParamP param, before, after;
+  };
+  std::vector<Curve> m_curves;
+  TStageObjectId m_objId;
+
+  void put(bool after) const {
+    for (const Curve &c : m_curves)
+      c.param->copy(after ? c.after.getPointer() : c.before.getPointer());
+    TXsheetHandle *xh = TTool::getApplication()->getCurrentXsheet();
+    if (TStageObject *o =
+            xh->getXsheet() ? xh->getXsheet()->getStageObject(m_objId) : 0)
+      o->updateKeyframes();
+    xh->notifyXsheetChanged();
+    l_plasticTool.refreshAfterCurveUndo_animate();
+  }
+  void undo() const override { put(false); }
+  void redo() const override { put(true); }
+  int getSize() const override {
+    int n = sizeof(*this);
+    for (const Curve &c : m_curves)
+      n += 2 * (sizeof(TDoubleParam) +
+                c.before->getKeyframeCount() * (int)sizeof(TDoubleKeyframe));
+    return n;
+  }
+  QString getHistoryString() override {
+    return QObject::tr("Plastic Tool : Edit Value");
+  }
+};
+}  // namespace
+
+bool PlasticTool::onPropertyAboutToChange(std::string propertyName) {
+  if (m_mode.getIndex() != ANIMATE_IDX || !m_sd) return false;
+  if (propertyName != "distanceRelay" && propertyName != "angleRelay" &&
+      propertyName != "soRelay" && propertyName != "scaleXRelay" &&
+      propertyName != "scaleYRelay")
+    return false;
+  beginFieldEdit_animate();
+  return true;
+}
+
+void PlasticTool::beginFieldEdit_animate() {
+  m_fieldBefore.clear();
+  auto keep = [this](const TDoubleParamP &p) {
+    if (p) m_fieldBefore.push_back({p, new TDoubleParam(*p)});
+  };
+  SkD::vd_iterator vdt, vdEnd;
+  m_sd->vertexDeformations(vdt, vdEnd);
+  for (; vdt != vdEnd; ++vdt)
+    for (int p = 0; p < SkVD::PARAMS_COUNT; ++p) keep((*vdt).second->m_params[p]);
+  if (TStageObject *o = stageObject())
+    for (TStageObject::Channel ch : kFieldXformChannels) keep(o->getParam(ch));
+  m_fieldEditOpen = true;
+}
+
+void PlasticTool::commitFieldEdit_animate() {
+  if (!m_fieldEditOpen) return;
+  m_fieldEditOpen = false;
+  auto *undo = new FieldEditUndo();
+  if (TStageObject *o = stageObject()) undo->m_objId = o->getId();
+  for (auto &b : m_fieldBefore)
+    undo->m_curves.push_back({b.first, b.second, new TDoubleParam(*b.first)});
+  m_fieldBefore.clear();
+  TUndoManager::manager()->add(undo);
+}
+
+void PlasticTool::refreshAfterCurveUndo_animate() {
+  updateMatrix();
+  m_deformedSkeleton.invalidate();
+  m_distanceRelay.notifyListeners();
+  m_angleRelay.notifyListeners();
+  m_soRelay.notifyListeners();
+  m_scaleXRelay.notifyListeners();
+  m_scaleYRelay.notifyListeners();
   invalidate();
 }
 

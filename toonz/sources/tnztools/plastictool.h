@@ -304,6 +304,9 @@ public:
   void reset() override;
 
   bool onPropertyChanged(std::string propertyName) override;
+  bool onPropertyAboutToChange(std::string propertyName) override;
+  //! Refresh after a curve-snapshot undo/redo (FieldEditUndo).
+  void refreshAfterCurveUndo_animate();
 
 public:
   // Methods reimplemented in each interaction mode
@@ -469,6 +472,16 @@ protected:
                                   const std::map<int, TPointD> &desiredLocal,
                                   bool clampToLimits, bool writeRootOffset = false);
   void leftButtonUp_animate(const TPointD &pos, const TMouseEvent &me);
+  //! Ztoryc: a value typed in a toolbar field (angle, distance, SO, scale)
+  //! honours the Global Key scope like a drag does. Runs inside the field's
+  //! own undo block.
+  void globalKeyAfterFieldEdit_animate();
+  //! The curves a toolbar field edit can touch, copied before it writes, and
+  //! the single undo built from them once it is done.
+  void beginFieldEdit_animate();
+  void commitFieldEdit_animate();
+  std::vector<std::pair<TDoubleParamP, TDoubleParamP>> m_fieldBefore;
+  bool m_fieldEditOpen = false;
   void controllerDrag_animate(const TPointD &pos, const TMouseEvent &me);
   void scaleDrag_animate(const TPointD &pos, const TMouseEvent &me);
   void pivotDrag_animate(const TPointD &pos);

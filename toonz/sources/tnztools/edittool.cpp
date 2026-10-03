@@ -162,6 +162,19 @@ protected:
   TPointD m_firstPos;
 
 public:
+  // «Plastic» scope keys the pose only — but a column with no skeleton has no
+  // pose, and there the global key falls back to the transform (review
+  // 2026-10-03, I1): otherwise it keyed nothing at all.
+  static bool globalKeyIsPoseOnly() {
+    if (Preferences::instance()->getIntValue(GlobalKeyScope) != 1)
+      return false;
+    TTool::Application *app = TTool::getApplication();
+    TXsheet *xsh            = app->getCurrentXsheet()->getXsheet();
+    TStageObject *obj =
+        xsh ? xsh->getStageObject(app->getCurrentObject()->getObjectId()) : 0;
+    return obj && obj->getPlasticSkeletonDeformation();
+  }
+
   DragChannelTool(TStageObject::Channel a0, bool globalKeyframesEnabled)
       : m_globalKeyframesEnabled(globalKeyframesEnabled)
       , m_isStarted(false)
@@ -171,7 +184,9 @@ public:
     m_before.setObjectHandle(app->getCurrentObject());
     m_before.setXsheetHandle(app->getCurrentXsheet());
     m_before.add(a0);
-    if (m_globalKeyframesEnabled) {
+    // Ztoryc: in «Plastic» scope a global key holds the POSE; the transform
+    // keeps only the channel being dragged (setGlobalKeyframe adds the pose).
+    if (m_globalKeyframesEnabled && !globalKeyIsPoseOnly()) {
       m_before.add(TStageObject::T_Angle);
       m_before.add(TStageObject::T_X);
       m_before.add(TStageObject::T_Y);
@@ -197,7 +212,9 @@ public:
     m_before.setXsheetHandle(app->getCurrentXsheet());
     m_before.add(a0);
     m_before.add(a1);
-    if (m_globalKeyframesEnabled) {
+    // Ztoryc: in «Plastic» scope a global key holds the POSE; the transform
+    // keeps only the channel being dragged (setGlobalKeyframe adds the pose).
+    if (m_globalKeyframesEnabled && !globalKeyIsPoseOnly()) {
       m_before.add(TStageObject::T_Angle);
       m_before.add(TStageObject::T_X);
       m_before.add(TStageObject::T_Y);

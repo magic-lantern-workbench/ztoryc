@@ -15,6 +15,7 @@
 #include "toonz/stage2.h"
 #include "toonz/doubleparamcmd.h"
 #include "toonz/preferences.h"
+#include "toonz/preferencesitemids.h"
 #include "toonz/txsheethandle.h"
 #include "toonz/tframehandle.h"
 
@@ -946,7 +947,8 @@ void ToolOptionParamRelayField::updateStatus() {
 
 void ToolOptionParamRelayField::onValueChanged() {
   struct locals {
-    static inline void setKeyframe(TDoubleParamRelayProperty *prop) {
+    static inline void setKeyframe(TDoubleParamRelayProperty *prop,
+                                   bool withUndo) {
       if (!prop) return;
 
       TDoubleParam *param = prop->getParam().getPointer();
@@ -954,7 +956,7 @@ void ToolOptionParamRelayField::onValueChanged() {
 
       double frame = prop->frame();
       if (!param->isKeyframe(frame)) {
-        KeyframeSetter setter(param, -1, true);
+        KeyframeSetter setter(param, -1, withUndo);
         setter.createKeyframe(frame);
       }
     }
@@ -994,6 +996,12 @@ void ToolOptionParamRelayField::onValueChanged() {
   TDoubleParamP param = m_property->getParam();
   if (!param) return;
 
+  // Ztoryc: a tool that snapshots the edit itself (the Plastic tool: the
+  // constrained axis and the global key write more than this one param) gets
+  // a single undo; partial undos here left the axes out of step.
+  const bool toolUndo =
+      m_tool && m_tool->onPropertyAboutToChange(m_property->getName());
+
   TUndoManager *manager = TUndoManager::manager();
   manager->beginBlock();
 
@@ -1004,18 +1012,19 @@ void ToolOptionParamRelayField::onValueChanged() {
       TProperty *prop = m_globalGroup->getProperty(p);
       if (TDoubleParamRelayProperty *relProp =
               dynamic_cast<TDoubleParamRelayProperty *>(prop))
-        locals::setKeyframe(relProp);
+        locals::setKeyframe(relProp, !toolUndo);
     }
   } else {
     // Set a keyframe just for our param
-    locals::setKeyframe(m_property);
+    locals::setKeyframe(m_property, !toolUndo);
   }
 
   // Assign the edited value to the relayed param
   m_property->setValue(newVal);
   notifyTool();
 
-  manager->add(new locals::SetValueUndo(param, oldVal, newVal, frame));
+  if (!toolUndo)
+    manager->add(new locals::SetValueUndo(param, oldVal, newVal, frame));
   manager->endBlock();
 }
 
@@ -1317,7 +1326,13 @@ void PegbarChannelField::onChange(TMeasuredValue *fld, bool addToUndo) {
       else
         modifyConnectedActionId = false;
     }
-    if (m_isGlobalKeyframe) {
+    // Ztoryc: «Plastic» scope keys the pose, not the other transform
+    // channels — same rule as the Animate tool's drag (edittool.cpp).
+    if (m_isGlobalKeyframe &&
+        (Preferences::instance()->getIntValue(GlobalKeyScope) != 1 ||
+         !m_xshHandle->getXsheet()
+              ->getStageObject(m_objHandle->getObjectId())
+              ->getPlasticSkeletonDeformation())) {
       m_before.add(TStageObject::T_Angle);
       m_before.add(TStageObject::T_X);
       m_before.add(TStageObject::T_Y);
@@ -1360,6 +1375,11 @@ void PegbarChannelField::onChange(TMeasuredValue *fld, bool addToUndo) {
     after.setValue(v);
   }
   after.applyValues();
+  // Ztoryc: a typed value under Global Key keyed the transform channels added
+  // to m_before, never the plastic pose — partial keys on a rigged column in
+  // «All» (Franco, 2026-10-03). setGlobalKeyframe() honours the scope, as the
+  // Animate tool's drag already does (edittool.cpp); the undo below replays it.
+  if (m_isGlobalKeyframe && addToUndo) after.setGlobalKeyframe();
 
   TTool::Viewer *viewer = m_tool->getViewer();
   if (viewer) m_tool->invalidate();
@@ -1407,7 +1427,13 @@ void PegbarChannelField::onDelete(bool addToUndo) {
       else
         modifyConnectedActionId = false;
     }
-    if (m_isGlobalKeyframe) {
+    // Ztoryc: «Plastic» scope keys the pose, not the other transform
+    // channels — same rule as the Animate tool's drag (edittool.cpp).
+    if (m_isGlobalKeyframe &&
+        (Preferences::instance()->getIntValue(GlobalKeyScope) != 1 ||
+         !m_xshHandle->getXsheet()
+              ->getStageObject(m_objHandle->getObjectId())
+              ->getPlasticSkeletonDeformation())) {
       m_before.add(TStageObject::T_Angle);
       m_before.add(TStageObject::T_X);
       m_before.add(TStageObject::T_Y);

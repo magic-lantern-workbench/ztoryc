@@ -162,7 +162,10 @@ void TStageObjectValues::setGlobalKeyframe() {
   // silently fail to hold a character: the column froze while the deformation
   // stayed free.
   const int scope = Preferences::instance()->getIntValue(GlobalKeyScope);
-  const bool doStage   = (scope != 1);
+  // A column with no skeleton has no pose: «Plastic» falls back to the
+  // transform there instead of keying nothing.
+  const bool doStage =
+      (scope != 1) || !stageObject->getPlasticSkeletonDeformation();
   const bool doPlastic = (scope != 0);
 
   if (doStage) stageObject->setKeyframeWithoutUndo(m_frame);

@@ -601,6 +601,32 @@ ArrowToolOptionsBox::ArrowToolOptionsBox(
     m_globalKeyScope =
         new ToolOptionCombo(m_tool, globalKeyScopeProp, toolHandle);
 
+  // Ztoryc: the fields never learned that Global Key was on — only the
+  // Skeleton tool's box wired enableGlobalKeyframe(). A value typed here keyed
+  // its own channel alone, Global Key or not: a scale typed in «All» left a
+  // partial key (Franco, 2026-10-03; measured in the saved scene: T_ScaleX and
+  // T_ScaleY only). The drawing number stays out: it is not a pose channel.
+  if (m_globalKey) {
+    auto applyGlobalKey = [this](bool on) {
+      for (MeasuredValueField *f :
+           {(MeasuredValueField *)m_motionPathPosField,
+            (MeasuredValueField *)m_ewPosField,
+            (MeasuredValueField *)m_nsPosField,
+            (MeasuredValueField *)m_zField,
+            (MeasuredValueField *)m_noScaleZField,
+            (MeasuredValueField *)m_soField,
+            (MeasuredValueField *)m_rotationField,
+            (MeasuredValueField *)m_globalScaleField,
+            (MeasuredValueField *)m_scaleHField,
+            (MeasuredValueField *)m_scaleVField,
+            (MeasuredValueField *)m_shearHField,
+            (MeasuredValueField *)m_shearVField})
+        if (f) f->enableGlobalKeyframe(on);
+    };
+    connect(m_globalKey, &QCheckBox::toggled, this, applyGlobalKey);
+    applyGlobalKey(m_globalKey->isChecked());
+  }
+
   m_lockEWPosCheckbox->setObjectName("EditToolLockButton");
   m_lockNSPosCheckbox->setObjectName("EditToolLockButton");
   m_lockEWCenterCheckbox->setObjectName("EditToolLockButton");

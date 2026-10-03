@@ -230,12 +230,15 @@ int PlasticSkeleton::addVertex(const PlasticSkeletonVertex &vx, int parent) {
 
   vx_.m_number = m_imp->m_numbersPool.acquire();
 
-  // Assign a name to the vertex in case none was given
+  // Assign a name to the vertex in case none was given. Numbers count from
+  // the root (0), hook numbers from 1: the +1 makes "Vertex 15" the vertex
+  // hooked as H15. Only the text of new names changes, so files stay
+  // compatible with Tahoma2D and OpenToonz.
   QString name(vx.name());
   if (name.isEmpty())
     name = (v == 0) ? QString("Root")
                     : "Vertex " +
-                          QString::number(vx_.m_number).rightJustified(3, '_');
+                          QString::number(vx_.m_number + 1).rightJustified(3, '_');
 
   // Ensure the name is unique
   while (!setVertexName(v, name)) name += "_";
@@ -276,7 +279,7 @@ int PlasticSkeleton::insertVertex(const PlasticSkeletonVertex &vx, int parent,
   // Assign a name to the vertex in case none was given
   QString name(vx.name());
   if (name.isEmpty())
-    name = "Vertex " + QString::number(vx_.m_number).rightJustified(3, '_');
+    name = "Vertex " + QString::number(vx_.m_number + 1).rightJustified(3, '_');
 
   // Ensure the name is unique
   while (!setVertexName(v, name)) name += "_";

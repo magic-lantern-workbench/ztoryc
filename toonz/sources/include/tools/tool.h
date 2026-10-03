@@ -456,6 +456,12 @@ return true if the method execution can have changed the current tool
     return false;
   }  //!< Does the tasks associated to changes in \p propertyName and
      //!  returns \p true.
+  //! Ztoryc: called by a relay field BEFORE it writes anything. Returning
+  //! true means the tool records the whole edit as ONE undo of its own (it
+  //! gets the after state in onPropertyChanged), and the field adds none.
+  virtual bool onPropertyAboutToChange(std::string propertyName) {
+    return false;
+  }
   virtual TSelection *getSelection() {
     return 0;
   }  //!< Returns a pointer to the tool selection.
