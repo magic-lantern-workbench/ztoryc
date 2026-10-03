@@ -169,7 +169,8 @@ class CellArea final : public QWidget {
                        bool isKeyFrame = false, bool isCamera = false,
                        bool keyHighlight = false,
                        optional<QColor> rightColor = boost::none,
-                       optional<QColor> leftBottomColor = boost::none);
+                       optional<QColor> leftBottomColor = boost::none,
+                       optional<QColor> rightBottomColor = boost::none);
   void drawEndOfLevelMarker(QPainter &p, QRect rect, bool isNextEmpty,
                             bool isStopFrame = false, bool isLooped = false);
   void drawCellMarker(QPainter &p, int markId, QRect rect,

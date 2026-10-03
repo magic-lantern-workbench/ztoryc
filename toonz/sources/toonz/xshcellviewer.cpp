@@ -1984,7 +1984,8 @@ void CellArea::drawCurrentTimeIndicator(QPainter &p, const QPoint &xy,
 void CellArea::drawFrameMarker(QPainter &p, const QPoint &xy, QColor color,
                                bool isKeyFrame, bool isCamera,
                                bool keyHighlight, optional<QColor> rightColor,
-                               optional<QColor> leftBottomColor) {
+                               optional<QColor> leftBottomColor,
+                               optional<QColor> rightBottomColor) {
   QColor outlineColor = Qt::black;
   QPoint frameAdj     = m_viewer->getFrameZoomAdjustment();
   QRect dotRect       = (isCamera)
@@ -2031,8 +2032,10 @@ void CellArea::drawFrameMarker(QPainter &p, const QPoint &xy, QColor color,
       };
       optional<QColor> lt = optional<QColor>(color);
       optional<QColor> lb = leftBottomColor ? reg(leftBottomColor) : lt;
-      m_viewer->drawTriPartPredefinedPath(p, diamondPath, diamondCenter, lt, lb,
-                                          reg(rightColor), outlineColor);
+      optional<QColor> rt = reg(rightColor);
+      optional<QColor> rb = rightBottomColor ? reg(rightBottomColor) : rt;
+      m_viewer->drawQuadPartPredefinedPath(p, diamondPath, diamondCenter, lt,
+                                           lb, rt, rb, outlineColor);
     } else
       m_viewer->drawPredefinedPath(p, diamondPath, diamondCenter, color,
                                    outlineColor);
@@ -3612,6 +3615,7 @@ void CellArea::drawKeyframe(QPainter &p, const QRect toBeUpdated) {
         QColor color                    = d.leftTop;
         optional<QColor> rightColor     = d.right;
         optional<QColor> leftBottom     = d.leftBottom;
+        optional<QColor> rightBottom    = d.rightBottom;
 
         int x = xy.x();
         int y = xy.y();
@@ -3629,7 +3633,7 @@ void CellArea::drawKeyframe(QPainter &p, const QRect toBeUpdated) {
         drawFrameMarker(p, QPoint(x, y), color, true,
                         (col < 0 || isPegNarrow),
                         (m_keyHighlight == QPoint(row, col)), rightColor,
-                        leftBottom);
+                        leftBottom, rightBottom);
       }
     }
 
@@ -4332,6 +4336,32 @@ void CellArea::mousePressEvent(QMouseEvent *event) {
         return;
       }
 
+      // Slide (Ztoryc): Shift+Option on the drag bar slides the selected
+      // block, on every selected column. Option alone stays the overwrite
+      // move; the selection is taken whichever kind it is (cells, or cells
+      // with keys).
+      if (isInDragArea && !isCellEmpty &&
+          (event->modifiers() & Qt::AltModifier) &&
+          (event->modifiers() & Qt::ShiftModifier) &&
+          !(event->modifiers() & Qt::ControlModifier)) {
+        int sr0 = row, sc0 = col, sr1 = row, sc1 = col;
+        TCellSelection *current = dynamic_cast<TCellSelection *>(
+            TApp::instance()->getCurrentSelection()->getSelection());
+        if (current && current->isCellSelected(row, col))
+          current->getSelectedCells(sr0, sc0, sr1, sc1);
+        else if (TXshColumn *column = xsh->getColumn(col))
+          column->getLevelRange(row, sr0, sr1);
+        m_viewer->getKeyframeSelection()->selectNone();
+        m_viewer->getCellSelection()->makeCurrent();
+        m_viewer->getCellSelection()->selectCells(sr0, sc0, sr1, sc1);
+        TApp::instance()->getCurrentSelection()->notifySelectionChanged();
+        setDragTool(XsheetGUI::DragTool::makeBlockSlideTool(m_viewer));
+        m_viewer->dragToolClick(event);
+        event->accept();
+        update();
+        return;
+      }
+
       if (isInDragArea) {
         TXshColumn *column = xsh->getColumn(col);
         if (column && !m_viewer->getCellSelection()->isCellSelected(row, col)) {
@@ -4579,11 +4609,11 @@ void CellArea::mouseMoveEvent(QMouseEvent *event) {
 #ifdef MACOSX
     m_tooltip = tr(
         "Drag: move  |  Shift: insert  |  Option: overwrite  |  "
-        "Cmd: copy  |  Cmd+Option: swap");
+        "Shift+Option: slide  |  Cmd: copy  |  Cmd+Option: swap");
 #else
     m_tooltip = tr(
         "Drag: move  |  Shift: insert  |  Alt: overwrite  |  "
-        "Ctrl: copy  |  Ctrl+Alt: swap");
+        "Shift+Alt: slide  |  Ctrl: copy  |  Ctrl+Alt: swap");
 #endif
   } else if (isZeraryColumn)
     m_tooltip = QString::fromStdWString(column->getZeraryFxColumn()

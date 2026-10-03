@@ -97,6 +97,8 @@ protected:
   //! della trasformazione, e per loro il diamante e' bianco pieno o mezzo.
   virtual bool isPoseKeyframe() const { return false; }
   virtual bool isFullPoseKeyframe() const { return false; }
+  //! Ztoryc: some transform channel has a key here, the pose not counted.
+  virtual bool isStageKeyframe() const { return isKeyframe(); }
 
   //! True quando il click deve considerare la posa: c'e' un rig plastic E il
   //! Global Key scope la include (scope come tetto — con Stage il navigator
@@ -151,6 +153,7 @@ protected:
   bool isFullKeyframe() const override;
   bool isPoseKeyframe() const override;
   bool isFullPoseKeyframe() const override;
+  bool isStageKeyframe() const override;
   bool isPoseInScope() const override;
   void toggle() override;
   void goNext() override;

@@ -15,6 +15,13 @@
 //   [] bianco | oro            chiavi su tutto (chiave "All")
 //   [] oro pieno               posa completa
 //   [| bianco-su-oro / vuoto   entrambi parziali
+//   oro | bianco-sopra/vuoto   posa completa, trasformazione parziale
+//   bianco | oro-sopra/vuoto   trasformazione completa, posa parziale
+//   [| oro / vuoto             solo posa, parziale
+//
+// Le ultime tre dal 2026-10-03 (Franco): prima ricadevano in oro pieno e in
+// bianco|oro, e lo stesso glifo diceva due cose diverse. La meta' destra ora
+// ha due quarti: quello in basso vuoto segna sempre "qualcosa e' parziale".
 //
 // Sta qui, e non nei due chiamanti, perche' lo xsheet (CellArea::drawKeyframe)
 // e il KeyframeNavigator del viewer devono restare la STESSA lingua: se
@@ -34,41 +41,54 @@
 
 #include "toonzqt/ztorytheme.h"
 #include "toonz/tstageobject.h"
+#include "tdoubleparam.h"
 #include "ext/plasticskeletondeformation.h"
 
 namespace ZtoryTheme {
 
 struct KeyDiamond {
-  QColor leftTop, leftBottom, right;  // QColor() invalido = regione vuota
+  // QColor() invalido = regione vuota. La meta' destra ha due quarti.
+  QColor leftTop, leftBottom, right, rightBottom;
 };
 
-//! \p stageFull: la trasformazione di colonna ha chiavi su tutti i canali.
-//! \p plasticAny / \p plasticFull: la posa plastic ha almeno una / tutte le
-//! deformazioni di vertice con chiavi. Presuppone che una chiave ci sia (il
-//! diamante si disegna solo su un frame che ha una chiave).
-inline KeyDiamond keyDiamond(bool stageFull, bool plasticAny,
+//! \p stageAny / \p stageFull: la trasformazione di colonna ha una / tutte
+//! le chiavi dei canali. \p plasticAny / \p plasticFull: la posa plastic ha
+//! almeno una / tutte le deformazioni di vertice con chiavi. Presuppone che una
+//! chiave ci sia (il diamante si disegna solo su un frame che ha una chiave).
+inline KeyDiamond keyDiamond(bool stageAny, bool stageFull, bool plasticAny,
                              bool plasticFull) {
-  const QColor white  = Qt::white;
-  const QColor g      = gold();
-  const QColor hollow = QColor();
-
+  const QColor w = Qt::white;
+  const QColor g = gold();
+  const QColor o = QColor();  // vuoto
   if (!plasticAny)  // Solo trasformazione.
-    return {white, white, stageFull ? white : hollow};
-  if (stageFull)  // Chiavi su tutto (la chiave "All"): bianco | oro netto.
-    return {white, white, g};
+    return stageFull ? KeyDiamond{w, w, w, w} : KeyDiamond{w, w, o, o};
+  if (stageFull)
+    return plasticFull ? KeyDiamond{w, w, g, g}   // chiave su tutto
+                       : KeyDiamond{w, w, g, o};  // posa parziale
   if (plasticFull)
-    // La posa e' l'intenzione ed e' completa: oro pieno. Una trasformazione
-    // parziale dovuta alla meccanica del drag e' deliberatamente assorbita
-    // qui — e' quello che l'animatore ha chiesto con un Global Key di portata
-    // Plastic.
-    return {g, g, g};
-  // Posa parziale sopra una trasformazione non completa: entrambi i sistemi
-  // presenti ma incompleti.
-  return {white, g, hollow};
+    return stageAny ? KeyDiamond{g, g, w, o}   // trasformazione parziale
+                    : KeyDiamond{g, g, g, g};  // solo posa, completa
+  return stageAny ? KeyDiamond{w, g, o, o}   // entrambi parziali
+                  : KeyDiamond{g, g, o, o};  // solo posa, parziale
+}
+
+//! Almeno un canale della trasformazione ha una chiave alla riga \p row —
+//! senza contare la posa, che TStageObject::isKeyframe puo' includere.
+inline bool stageTransformAny(TStageObject *pegbar, int row) {
+  if (!pegbar) return false;
+  static const TStageObject::Channel kChannels[] = {
+      TStageObject::T_Angle,  TStageObject::T_X,      TStageObject::T_Y,
+      TStageObject::T_Z,      TStageObject::T_SO,     TStageObject::T_ScaleX,
+      TStageObject::T_ScaleY, TStageObject::T_Scale,  TStageObject::T_Path,
+      TStageObject::T_ShearX, TStageObject::T_ShearY};
+  for (TStageObject::Channel ch : kChannels)
+    if (TDoubleParam *p = pegbar->getParam(ch))
+      if (p->isKeyframe(row)) return true;
+  return false;
 }
 
 //! Tutte e tre le regioni dello stesso colore (selezione, o marker semplice).
-inline KeyDiamond keyDiamondSolid(const QColor &c) { return {c, c, c}; }
+inline KeyDiamond keyDiamondSolid(const QColor &c) { return {c, c, c, c}; }
 
 //! Stato della posa plastic di \p pegbar alla riga \p row.
 //! \p any = almeno una deformazione di vertice ha una chiave,
@@ -110,7 +130,8 @@ inline void plasticPoseState(TStageObject *pegbar, int row, bool &any,
 inline KeyDiamond keyDiamondForStageObject(TStageObject *pegbar, int row) {
   bool any = false, full = false;
   plasticPoseState(pegbar, row, any, full);
-  return keyDiamond(pegbar && pegbar->isFullKeyframe(row), any, full);
+  return keyDiamond(stageTransformAny(pegbar, row),
+                    pegbar && pegbar->isFullKeyframe(row), any, full);
 }
 
 //! Riempie le tre regioni di \p path: meta' sinistra divisa in alto/basso,
@@ -134,7 +155,8 @@ inline void fillKeyRegions(QPainter &p, const QPainterPath &path,
   const qreal th = midY - bb.top(), bh = bb.bottom() - midY;
   fillRegion(d.leftTop, QRectF(bb.left(), bb.top(), lw, th));
   fillRegion(d.leftBottom, QRectF(bb.left(), midY, lw, bh));
-  fillRegion(d.right, QRectF(midX, bb.top(), rw, bb.height()));
+  fillRegion(d.right, QRectF(midX, bb.top(), rw, th));
+  fillRegion(d.rightBottom, QRectF(midX, midY, rw, bh));
 }
 
 //! Diamante inscritto in \p r (punte sugli assi verticale/orizzontale).

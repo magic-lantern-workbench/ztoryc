@@ -216,7 +216,8 @@ void KeyframeNavigator::updateKeyGlyph(QAction *visibleAct) {
   // doveva sapere che c'era. Il glifo mostra la verita' del frame qualunque
   // sia lo scope; e' il suggerimento a raccontare l'azione scope-dipendente.
   ZtoryTheme::KeyDiamond d =
-      hasKey ? ZtoryTheme::keyDiamond(stageFull, poseAny, poseFull)
+      hasKey ? ZtoryTheme::keyDiamond(isStageKeyframe(), stageFull, poseAny,
+                                      poseFull)
              : ZtoryTheme::keyDiamondSolid(QColor());
   const QColor outline = hasKey ? QColor(0, 0, 0) : QColor(150, 150, 150);
 
@@ -343,6 +344,12 @@ bool ViewerKeyframeNavigator::isPoseKeyframe() const {
   bool any = false, full = false;
   ZtoryTheme::plasticPoseState(getStageObject(), getCurrentFrame(), any, full);
   return any;
+}
+
+//-------------------------------------------------------------------
+
+bool ViewerKeyframeNavigator::isStageKeyframe() const {
+  return ZtoryTheme::stageTransformAny(getStageObject(), getCurrentFrame());
 }
 
 //-------------------------------------------------------------------

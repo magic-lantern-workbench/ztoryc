@@ -809,6 +809,16 @@ public:
                                  optional<QColor> rightFill,
                                  optional<QColor> outline,
                                  int lineWidth = 1) const;
+  //! Four-region form: the right half split too, \p rightFill on top and
+  //! \p rightBottomFill below (Ztoryc diamond: the hollow lower quarter marks
+  //! the partial side when the other one is complete).
+  void drawQuadPartPredefinedPath(QPainter &p, PredefinedPath which, QPoint xy,
+                                  optional<QColor> leftTopFill,
+                                  optional<QColor> leftBottomFill,
+                                  optional<QColor> rightFill,
+                                  optional<QColor> rightBottomFill,
+                                  optional<QColor> outline,
+                                  int lineWidth = 1) const;
 
   //---------
 

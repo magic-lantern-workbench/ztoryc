@@ -734,6 +734,212 @@ XsheetGUI::DragTool *XsheetGUI::DragTool::makeLevelRollingTool(
 }
 
 //=============================================================================
+// Slide DragTool (Ztoryc) — Shift+Option on the drag bar slides the selected
+// block up or down, on every selected column: the block keeps its length, the
+// drawing before it gets shorter or longer and the one after it the opposite,
+// so nothing past them moves (the editors' "slide"). Option alone stays
+// Tahoma's overwrite move (Franco, 2026-10-03).
+//=============================================================================
+namespace {
+
+struct SlideColumn {
+  int col;
+  std::vector<TXshCell> before, after;              // rows lo..hi
+  TStageObject::KeyframeMap keysBefore, keysAfter;  // keys in lo..hi
+};
+
+TStageObject *slideStageObject(TXsheet *xsh, int col) {
+  return xsh->getStageObject(xsh->getColumnObjectId(col));
+}
+
+TStageObject::KeyframeMap keysIn(TXsheet *xsh, int col, int lo, int hi) {
+  TStageObject::KeyframeMap all, out;
+  slideStageObject(xsh, col)->getKeyframes(all);
+  for (const auto &kv : all)
+    if (kv.first >= lo && kv.first <= hi) out.insert(kv);
+  return out;
+}
+
+void putKeys(TXsheet *xsh, int col, int lo, int hi,
+             const TStageObject::KeyframeMap &keys) {
+  TStageObject *obj = slideStageObject(xsh, col);
+  for (int r = lo; r <= hi; r++)
+    if (obj->isKeyframe(r)) obj->removeKeyframeWithoutUndo(r);
+  for (const auto &kv : keys) obj->setKeyframeWithoutUndo(kv.first, kv.second);
+}
+
+class BlockSlideUndo final : public TUndo {
+public:
+  int m_lo = 0, m_hi = -1;
+  bool m_keys = false;
+  int m_r0, m_c0, m_r1, m_c1, m_delta;  // the block, for the selection
+  std::vector<SlideColumn> m_cols;
+
+  void apply(bool after) const {
+    TXsheet *xsh = TApp::instance()->getCurrentXsheet()->getXsheet();
+    for (const SlideColumn &s : m_cols) {
+      const std::vector<TXshCell> &cells = after ? s.after : s.before;
+      for (int r = m_lo; r <= m_hi; r++) xsh->setCell(r, s.col, cells[r - m_lo]);
+      if (m_keys)
+        putKeys(xsh, s.col, m_lo, m_hi, after ? s.keysAfter : s.keysBefore);
+    }
+    TApp::instance()->getCurrentXsheet()->notifyXsheetChanged();
+    TApp::instance()->getCurrentScene()->setDirtyFlag(true);
+  }
+  void undo() const override { apply(false); }
+  void redo() const override { apply(true); }
+  int getSize() const override {
+    return sizeof(*this) + (int)m_cols.size() * (m_hi - m_lo + 1) * 2 *
+                               (int)sizeof(TXshCell);
+  }
+  QString getHistoryString() override { return QObject::tr("Slide Cells"); }
+};
+
+class BlockSlideTool final : public XsheetGUI::DragTool {
+  int m_r0 = 0, m_c0 = 0, m_r1 = -1, m_c1 = -1;
+  int m_clickRow = 0, m_delta = 0;
+  std::vector<int> m_columns;                     // the movable ones
+  std::map<std::pair<int, int>, TXshCell> m_orig;  // (col,row) -> before drag
+
+  void saveBefore(TXsheet *xsh, int r, int c) {
+    auto key = std::make_pair(c, r);
+    if (!m_orig.count(key)) m_orig[key] = xsh->getCell(r, c);
+  }
+  void set(TXsheet *xsh, int r, int c, const TXshCell &cell) {
+    saveBefore(xsh, r, c);
+    xsh->setCell(r, c, cell);
+  }
+
+  // Rebuilt from the untouched cells at every step, so dragging back and
+  // forth never accumulates anything.
+  void applyTo(int delta) {
+    TXsheet *xsh = getViewer()->getXsheet();
+    delta        = std::max(delta, -m_r0);  // the block cannot leave row 0
+    if (delta == m_delta) return;
+    for (const auto &kv : m_orig)
+      xsh->setCell(kv.first.second, kv.first.first, kv.second);
+    m_delta = delta;
+    if (delta == 0) {
+      TApp::instance()->getCurrentXsheet()->notifyXsheetChanged();
+      return;
+    }
+    const int len = m_r1 - m_r0 + 1;
+    for (int c : m_columns) {
+      std::vector<TXshCell> block(len);
+      for (int i = 0; i < len; i++) block[i] = xsh->getCell(m_r0 + i, c);
+      const TXshCell before = m_r0 > 0 ? xsh->getCell(m_r0 - 1, c) : TXshCell();
+      const TXshCell after  = xsh->getCell(m_r1 + 1, c);
+      if (delta < 0) {  // up: what follows grows back into the gap
+        for (int i = 0; i < len; i++) set(xsh, m_r0 + delta + i, c, block[i]);
+        for (int r = m_r1 + delta + 1; r <= m_r1; r++) set(xsh, r, c, after);
+      } else {  // down: what precedes grows into the gap
+        for (int r = m_r0; r < m_r0 + delta; r++) set(xsh, r, c, before);
+        for (int i = 0; i < len; i++) set(xsh, m_r0 + delta + i, c, block[i]);
+      }
+    }
+    TApp::instance()->getCurrentXsheet()->notifyXsheetChanged();
+  }
+
+  // Keys inside the block travel with it, when keys follow the exposure.
+  // A key already sitting where one would land stops them all: the cells
+  // still slide, nothing is overwritten.
+  bool moveKeys(TXsheet *xsh) {
+    for (int c : m_columns) {
+      TStageObject *obj = slideStageObject(xsh, c);
+      for (const auto &kv : keysIn(xsh, c, m_r0, m_r1)) {
+        const int dest = kv.first + m_delta;
+        if (dest < 0) return false;
+        if ((dest < m_r0 || dest > m_r1) && obj->isKeyframe(dest)) return false;
+      }
+    }
+    for (int c : m_columns) {
+      TStageObject::KeyframeMap keys = keysIn(xsh, c, m_r0, m_r1);
+      TStageObject *obj              = slideStageObject(xsh, c);
+      for (const auto &kv : keys) obj->removeKeyframeWithoutUndo(kv.first);
+      for (const auto &kv : keys)
+        obj->setKeyframeWithoutUndo(kv.first + m_delta, kv.second);
+    }
+    return true;
+  }
+
+public:
+  explicit BlockSlideTool(XsheetViewer *viewer) : XsheetGUI::DragTool(viewer) {}
+
+  void onClick(const CellPosition &pos) override {
+    getViewer()->getCellSelection()->getSelectedCells(m_r0, m_c0, m_r1, m_c1);
+    m_clickRow = pos.frame();
+    m_delta    = 0;
+    m_orig.clear();
+    m_columns.clear();
+    TXsheet *xsh = getViewer()->getXsheet();
+    for (int c = m_c0; c <= m_c1; c++) {
+      TXshColumn *column = xsh->getColumn(c);
+      if (!column || column->isLocked() || column->getSoundColumn() ||
+          column->getFolderColumn())
+        continue;
+      m_columns.push_back(c);
+    }
+  }
+
+  void onDrag(const CellPosition &pos) override {
+    applyTo(pos.frame() - m_clickRow);
+    refreshCellsArea();
+  }
+
+  void onRelease(const CellPosition &pos) override {
+    applyTo(pos.frame() - m_clickRow);
+    if (m_delta == 0 || m_orig.empty()) return;
+    TXsheet *xsh = getViewer()->getXsheet();
+
+    auto *undo    = new BlockSlideUndo();
+    undo->m_lo    = std::min(m_r0, m_r0 + m_delta);
+    undo->m_hi    = std::max(m_r1, m_r1 + m_delta);
+    undo->m_keys  = Preferences::instance()->isKeyframesFollowExposureEnabled();
+    undo->m_r0    = m_r0;
+    undo->m_c0    = m_c0;
+    undo->m_r1    = m_r1;
+    undo->m_c1    = m_c1;
+    undo->m_delta = m_delta;
+    for (int c : m_columns) {
+      SlideColumn s;
+      s.col = c;
+      for (int r = undo->m_lo; r <= undo->m_hi; r++) {
+        auto it = m_orig.find(std::make_pair(c, r));
+        s.before.push_back(it != m_orig.end() ? it->second : xsh->getCell(r, c));
+        s.after.push_back(xsh->getCell(r, c));
+      }
+      if (undo->m_keys) s.keysBefore = keysIn(xsh, c, undo->m_lo, undo->m_hi);
+      undo->m_cols.push_back(s);
+    }
+    if (undo->m_keys) {
+      if (!moveKeys(xsh))
+        DVGui::warning(QObject::tr(
+            "The cells slid, but the keys inside the block stayed: a key "
+            "already sits where one of them would land."));
+      for (SlideColumn &s : undo->m_cols)
+        s.keysAfter = keysIn(xsh, s.col, undo->m_lo, undo->m_hi);
+    }
+    TUndoManager::manager()->add(undo);
+    TApp::instance()->getCurrentScene()->setDirtyFlag(true);
+    TApp::instance()->getCurrentXsheet()->notifyXsheetChanged();
+
+    // Only the columns that moved: a locked one left in the selection looked
+    // slid when it was not.
+    getViewer()->getCellSelection()->selectCells(
+        m_r0 + m_delta, m_columns.front(), m_r1 + m_delta, m_columns.back());
+    TApp::instance()->getCurrentSelection()->notifySelectionChanged();
+    refreshCellsArea();
+  }
+};
+
+}  // namespace
+
+XsheetGUI::DragTool *XsheetGUI::DragTool::makeBlockSlideTool(
+    XsheetViewer *viewer) {
+  return new BlockSlideTool(viewer);
+}
+
+//=============================================================================
 // LevelMover tool
 //-----------------------------------------------------------------------------
 namespace {
@@ -1738,6 +1944,17 @@ class CellKeyframeMoverTool final : public LevelMoverTool {
     for (auto const &p : m_kfStart)
       dst.insert(
           TKeyframeSelection::Position(p.first + dRow, p.second + dCol));
+
+    // Keys stay at the source during the drag: leaving them there loses
+    // nothing, carrying them onto a column with no skeleton loses the pose.
+    if (data->losesPlasticPose(dst, xsh)) {
+      delete data;
+      DVGui::warning(QObject::tr(
+          "These keys hold a Plastic pose, but the destination column has no "
+          "Plastic skeleton: the pose would be lost.\nThe keys stayed where "
+          "they were."));
+      return;
+    }
 
     CrossColumnKeyframeUndo *undo =
         new CrossColumnKeyframeUndo(m_kfStart, dst, data);

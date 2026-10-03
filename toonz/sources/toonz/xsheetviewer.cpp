@@ -1074,6 +1074,17 @@ void XsheetViewer::drawTriPartPredefinedPath(
     QPainter &p, PredefinedPath which, QPoint xy, optional<QColor> leftTopFill,
     optional<QColor> leftBottomFill, optional<QColor> rightFill,
     optional<QColor> outline, int lineWidth) const {
+  drawQuadPartPredefinedPath(p, which, xy, leftTopFill, leftBottomFill,
+                             rightFill, rightFill, outline, lineWidth);
+}
+
+//-----------------------------------------------------------------------------
+
+void XsheetViewer::drawQuadPartPredefinedPath(
+    QPainter &p, PredefinedPath which, QPoint xy, optional<QColor> leftTopFill,
+    optional<QColor> leftBottomFill, optional<QColor> rightFill,
+    optional<QColor> rightBottomFill, optional<QColor> outline,
+    int lineWidth) const {
   QPainterPath path = orientation()->path(which).translated(xy);
 
   // The three-region fill IS the keyframe-diamond grammar, and it lives in
@@ -1084,9 +1095,9 @@ void XsheetViewer::drawTriPartPredefinedPath(
   auto reg = [](const optional<QColor> &c) {
     return c ? *c : QColor();
   };
-  ZtoryTheme::fillKeyRegions(
-      p, path,
-      {reg(leftTopFill), reg(leftBottomFill), reg(rightFill)});
+  ZtoryTheme::fillKeyRegions(p, path,
+                             {reg(leftTopFill), reg(leftBottomFill),
+                              reg(rightFill), reg(rightBottomFill)});
 
   if (outline) {
     QPen oldPen = p.pen();

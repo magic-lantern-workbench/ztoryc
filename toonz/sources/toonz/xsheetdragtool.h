@@ -82,6 +82,8 @@ public:
   // Alt+SmartTab: move boundary between two adjacent levels without changing
   // total frame count (true rolling edit). invert=true for upper smart tab.
   static DragTool *makeLevelRollingTool(XsheetViewer *viewer, bool invert);
+  // Ztoryc: Shift+Option on the drag bar — slide the selected block.
+  static DragTool *makeBlockSlideTool(XsheetViewer *viewer);
 };
 
 void setPlayRange(int r0, int r1, int step, bool withUndo = true);

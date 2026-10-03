@@ -366,9 +366,13 @@ transform** (position, rotation, scale…) and the **plastic pose** (the skeleto
 shape). Ztoryc shows both in a single diamond, in the xsheet and on the viewer's
 **Set Key** button alike:
 
-- the **right half empty** means the key is **partial**;
-- the **left half** says *which* system holds it — **white** for the transform,
-  **gold** for the plastic pose, or white over gold when a partial key holds both.
+- the **left half** says *which* system holds the key — **white** for the
+  transform, **gold** for the plastic pose, or white over gold when a partial key
+  holds both;
+- the **right half** says how complete it is: full when everything is keyed,
+  empty when the key is **partial**. When one system is complete and the other
+  only partly keyed, the right half is split: its upper quarter shows the
+  partial system, the lower quarter stays empty.
 
 ![Keyframe diamond legend](images/keyframe_diamond_legend.svg)
 
@@ -789,10 +793,13 @@ Un personaggio riggato ha **due cose indipendenti** su cui puoi mettere delle ch
 forma dello scheletro). Ztoryc le mostra entrambe in un solo diamante, sia nell'xsheet
 sia sul bottone **Set Key** del viewer:
 
-- **metà destra vuota** = la chiave è **parziale**;
-- la **metà sinistra** dice *quale* sistema la tiene — **bianco** per la trasformazione,
-  **oro** per la posa plastic, oppure bianco sopra e oro sotto quando una chiave parziale
-  le tiene entrambe.
+- la **metà sinistra** dice *quale* sistema tiene la chiave — **bianco** per la
+  trasformazione, **oro** per la posa plastic, oppure bianco sopra e oro sotto quando una
+  chiave parziale le tiene entrambe;
+- la **metà destra** dice quanto è completa: piena quando c'è tutto, vuota quando la
+  chiave è **parziale**. Quando un sistema è completo e l'altro solo in parte, la metà
+  destra si divide: il quarto in alto mostra il sistema parziale, quello in basso resta
+  vuoto.
 
 ![Legenda del diamante chiave](images/keyframe_diamond_legend.svg)
 
