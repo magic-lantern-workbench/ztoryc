@@ -76,6 +76,32 @@ void removeDir(const QString &dir) {
   if (!dir.isEmpty() && QDir(dir).exists()) QDir(dir).removeRecursively();
 }
 
+//! Ztoryc: work left WITHOUT saving (quit, or another scene opened and the
+//! changes discarded) — the snapshot is moved to `kept/` beside it instead of
+//! being deleted, and kept there for a week. Deleting it threw away the only
+//! copy of those changes: Franco closed without saving after a pin/Auto Bezier
+//! accident and the walk cycle could not be recovered (2026-10-02; Drive's
+//! trash held only older snapshots).
+void keepInsteadOfRemove(const QString &dir) {
+  if (dir.isEmpty() || !QDir(dir).exists()) return;
+  const QString keptRoot = QFileInfo(dir).absolutePath() + "/kept";
+  QDir().mkpath(keptRoot);
+  const QString dst = keptRoot + "/" + QFileInfo(dir).fileName() + "_" +
+                      QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss");
+  if (!QDir().rename(dir, dst)) return;  // left where it is: never lost
+  // A week is enough to notice; older ones go. The age is the time it was
+  // KEPT, read from the name: a rename keeps the folder's modification time,
+  // so a snapshot untouched for a week was pruned the moment it was kept.
+  const QDateTime limit = QDateTime::currentDateTime().addDays(-7);
+  for (const QFileInfo &fi :
+       QDir(keptRoot).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+    const QDateTime kept = QDateTime::fromString(
+        fi.fileName().right(15), "yyyyMMdd-HHmmss");
+    if (kept.isValid() && kept < limit)
+      QDir(fi.absoluteFilePath()).removeRecursively();
+  }
+}
+
 //! Copia \p src su \p dst, mettendo prima da parte in \p backupDir cio' che
 //! \p dst conteneva. Mai sovrascrivere senza una copia.
 bool replaceFile(const QString &src, const QString &dst,
@@ -306,9 +332,9 @@ void ZtoryRecovery::afterSceneSaved() {
 }
 
 void ZtoryRecovery::onSceneSwitched() {
-  // Si e' lasciata la scena: salvata (gia' tolto) o scartata a domanda di
-  // Tahoma. In tutti e due i casi il suo recupero non serve.
-  removeDir(m_activeDir);
+  // Si e' lasciata la scena: salvata (gia' tolto da afterSceneSaved) o
+  // scartata a domanda di Tahoma. Se scartata, il recupero va in kept/.
+  keepInsteadOfRemove(m_activeDir);
   m_activeDir.clear();
   // Dopo che il caricamento e' finito del tutto.
   QTimer::singleShot(0, this, &ZtoryRecovery::checkForRecovery);
@@ -321,7 +347,8 @@ void ZtoryRecovery::onToolEditingFinished() {
 }
 
 void ZtoryRecovery::onAboutToQuit() {
-  removeDir(m_activeDir);
+  // Quitting with a snapshot still active means changes left unsaved.
+  keepInsteadOfRemove(m_activeDir);
   m_activeDir.clear();
 }
 
