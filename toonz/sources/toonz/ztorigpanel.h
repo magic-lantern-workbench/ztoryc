@@ -267,6 +267,12 @@ private:
   //! others behind and vanish the moment you selected a different column.
   std::vector<CharPart> characterParts() const;
 
+  //! Copy Pose: column NAME -> vertex name -> ANGLE, DISTANCE, SO. By name, so
+  //! reordering the columns between copy and paste cannot send a pose to the
+  //! wrong part. A member, not a static: no global state outside ZtoryModel.
+  QMap<QString, QMap<QString, QVector<double>>> m_poseClip;
+  QString columnName(int col) const;
+
   //! Index of the action named \p name inside \p sd, or -1. The parts of one
   //! action are tied together by NAME: each column stores its own deltas, and
   //! their indices need not line up.

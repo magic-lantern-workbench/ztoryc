@@ -17,6 +17,7 @@
 #include "toonz/txshcell.h"
 #include "toonz/txshcolumn.h"
 #include "toonz/txsheet.h"
+#include "toonz/stage.h"
 #include "toonz/txsheethandle.h"
 
 #include <QCheckBox>
@@ -388,6 +389,18 @@ bool isRootColumn(TXsheet *xsh, int c) {
   return obj && !obj->getParent().isColumn();
 }
 
+// The root column of the character `c` belongs to (itself if it is one).
+int rootColumnOf(TXsheet *xsh, int c) {
+  for (int guard = 0; c >= 0 && guard < 64; guard++) {
+    TStageObject *obj = xsh->getStageObject(TStageObjectId::ColumnId(c));
+    if (!obj) return -1;
+    const TStageObjectId parent = obj->getParent();
+    if (!parent.isColumn()) return c;
+    c = parent.getIndex();
+  }
+  return -1;
+}
+
 struct InsertOptions {
   int at      = 0;    // first row
   int repeats = 1;
@@ -398,7 +411,17 @@ struct InsertOptions {
   // 2026-09-27: «se mi metto sul frame 10 e faccio un insert di una clip da
   // 20 ftg deve slittare tutto di 20 frame»). Off = overwrite in place.
   bool insert = true;
+  // ATTACH: the clip starts from where the character is on the frame before
+  // `at` — position, and a foot pinned there stays planted — instead of
+  // jumping back to where it was recorded. Pins on other vertices are switched
+  // off for the clip's length (Franco, 2026-10-03).
+  bool attach = true;
+  bool usePins = true;  // false: the clip's pins are left out (IK declined)
 };
+
+namespace {
+bool isPinParam(int p) { return p >= SkVD::PIN && p <= SkVD::PINWY; }
+}  // namespace
 
 // Every animated curve of the character's xsheet: the columns' movement, the
 // skeleton's vertices, the pose sliders — what an insert pushes forward.
@@ -456,6 +479,94 @@ QStringList insertClip(TXsheet *xsh, const Clip &clip, const InsertOptions &o,
   const double total   = period * o.repeats;
   const int rowsTotal  = int(std::ceil(total));
 
+  // ATTACH, measured BEFORE the room is made: shifting the later keys would
+  // change the interpolated values on the frame before `at`.
+  // Per character root column: the offset (inches) that makes the clip start
+  // where the character is. A cross-column pin held both on that frame and at
+  // the clip's start decides it (the foot stays exactly planted); otherwise
+  // the root's own position.
+  QMap<int, TPointD> attachOffset;
+  struct PinOff { TDoubleParam *pin; double restoreValue; };
+  std::vector<PinOff> pinsToSwitchOff;
+  if (o.attach && o.at > 0) {
+    const double prev = o.at - 1;
+    // the clip's values at its first frame, by curve identity
+    auto clipValue0 = [&](ClipCurve::Kind kind, const QString &col, int ch,
+                          const QString &name, double *v) {
+      for (const ClipCurve &cv : clip.curves)
+        if (cv.kind == kind && cv.column == col && cv.channel == ch &&
+            cv.name == name) {
+          *v = cv.keys->getValue(0);
+          return true;
+        }
+      return false;
+    };
+    QSet<int> roots;
+    for (const ClipCurve &cv : clip.curves) {
+      const int col = columnByName(xsh, cv.column);
+      const int r   = col >= 0 ? rootColumnOf(xsh, col) : -1;
+      if (r >= 0) roots.insert(r);
+    }
+    for (int r : roots) {
+      TStageObject *robj = xsh->getStageObject(TStageObjectId::ColumnId(r));
+      if (!robj) continue;
+      const QString rname = columnName(xsh, r);
+      double cx = 0, cy = 0;
+      const bool hasX = clipValue0(ClipCurve::Stage, rname, TStageObject::T_X,
+                                   QString(), &cx);
+      const bool hasY = clipValue0(ClipCurve::Stage, rname, TStageObject::T_Y,
+                                   QString(), &cy);
+      TDoubleParam *rx = robj->getParam(TStageObject::T_X);
+      TDoubleParam *ry = robj->getParam(TStageObject::T_Y);
+      TPointD off(hasX && rx ? rx->getValue(prev) - cx : 0,
+                  hasY && ry ? ry->getValue(prev) - cy : 0);
+      // A foot planted on both sides of the join wins. With both feet planted
+      // (double support) their offsets are averaged: taking the last one
+      // found made the result depend on the vertex names' order.
+      TPointD plantedSum;
+      int plantedCount = 0;
+      for (int cc = 0; cc < xsh->getColumnCount(); cc++) {
+        if (rootColumnOf(xsh, cc) != r) continue;
+        TStageObject *obj = xsh->getStageObject(TStageObjectId::ColumnId(cc));
+        const PlasticSkeletonDeformationP &sd =
+            obj ? obj->getPlasticSkeletonDeformation() : PlasticSkeletonDeformationP();
+        if (!sd) continue;
+        const QString col = columnName(xsh, cc);
+        PlasticSkeletonDeformation::vd_iterator vb, ve;
+        sd->vertexDeformations(vb, ve);
+        for (; vb != ve; ++vb) {
+          const QString vname = *(*vb).first;
+          SkVD *vd            = (*vb).second;
+          if (!vd->m_params[SkVD::PIN] ||
+              vd->m_params[SkVD::PIN]->getValue(prev) < 0.5)
+            continue;
+          double clipPin = 0, wx = 0, wy = 0;
+          const bool clipPinned =
+              o.usePins &&
+              clipValue0(ClipCurve::Vertex, col, SkVD::PIN, vname, &clipPin) &&
+              clipPin >= 0.5;
+          if (clipPinned && vd->m_params[SkVD::PINWX] &&
+              vd->m_params[SkVD::PINWY] &&
+              vd->m_params[SkVD::PINWX]->getKeyframeCount() > 0 &&
+              clipValue0(ClipCurve::Vertex, col, SkVD::PINWX, vname, &wx) &&
+              clipValue0(ClipCurve::Vertex, col, SkVD::PINWY, vname, &wy)) {
+            plantedSum += TPointD(
+                (vd->m_params[SkVD::PINWX]->getValue(prev) - wx) / Stage::inch,
+                (vd->m_params[SkVD::PINWY]->getValue(prev) - wy) / Stage::inch);
+            plantedCount++;
+          } else if (!clipPinned) {
+            // pinned before the join, not by the clip: off for the clip
+            pinsToSwitchOff.push_back(
+                {vd->m_params[SkVD::PIN].getPointer(),
+                 vd->m_params[SkVD::PIN]->getValue(prev)});
+          }
+        }
+      }
+      if (plantedCount > 0) off = plantedSum * (1.0 / plantedCount);
+      attachOffset[r] = off;
+    }
+  }
+
   // INSERT: first make room. Every animated curve of the character — also
   // those the clip does not touch — moves its keys from `at` on by the
   // clip's length, and every column gets empty rows there.
@@ -490,7 +601,28 @@ QStringList insertClip(TXsheet *xsh, const Clip &clip, const InsertOptions &o,
     undo->m_rows     = rowsTotal;
   }
 
+  // One period's travel of each character root (stage X/Y, inches), from
+  // its keys: what each repeat adds when the walk goes on.
+  QMap<int, TPointD> rootStep;
+  if (o.travel && clip.rows > 1)
+    for (const ClipCurve &cv : clip.curves) {
+      if (cv.kind != ClipCurve::Stage ||
+          (cv.channel != TStageObject::T_X && cv.channel != TStageObject::T_Y))
+        continue;
+      const int col = columnByName(xsh, cv.column);
+      const int n   = cv.keys->getKeyframeCount();
+      if (col < 0 || !isRootColumn(xsh, col) || n < 2) continue;
+      const double last = cv.keys->getKeyframe(n - 1).m_frame;
+      if (last <= 0) continue;
+      const double s = (cv.keys->getValue(last) - cv.keys->getValue(0)) *
+                       clip.rows / last;
+      if (cv.channel == TStageObject::T_X) rootStep[col].x = s;
+      else rootStep[col].y = s;
+    }
+
   for (const ClipCurve &cv : clip.curves) {
+    if (!o.usePins && cv.kind == ClipCurve::Vertex && isPinParam(cv.channel))
+      continue;  // IK declined: the clip plays without its pins
     TDoubleParam *dst = targetParam(xsh, cv);
     if (!dst) {
       const QString what = cv.kind == ClipCurve::Vertex
@@ -516,24 +648,63 @@ QStringList insertClip(TXsheet *xsh, const Clip &clip, const InsertOptions &o,
     if (o.travel && cv.kind == ClipCurve::Stage &&
         (cv.channel == TStageObject::T_X || cv.channel == TStageObject::T_Y)) {
       const int c = columnByName(xsh, cv.column);
-      const int n = cv.keys->getKeyframeCount();
-      if (c >= 0 && isRootColumn(xsh, c) && n > 1 && clip.rows > 1) {
-        const double last = cv.keys->getKeyframe(n - 1).m_frame;
-        if (last > 0)
-          step = (cv.keys->getValue(last) - cv.keys->getValue(0)) *
-                 clip.rows / last;
+      if (c >= 0 && rootStep.contains(c))
+        step = cv.channel == TStageObject::T_X ? rootStep[c].x : rootStep[c].y;
+    }
+    // Ztoryc: a cross-column pin holds its vertex on a SCENE-space target
+    // (PinWX/PinWY, stage placement units = inches * Stage::inch). It must
+    // travel with the character, or every repeat after the first is pulled
+    // back to the first take's footprints and the IK wrecks the poses
+    // (Franco's walk cycle, 2026-10-02).
+    if (o.travel && cv.kind == ClipCurve::Vertex &&
+        (cv.channel == SkVD::PINWX || cv.channel == SkVD::PINWY)) {
+      const int root = rootColumnOf(xsh, columnByName(xsh, cv.column));
+      if (root >= 0 && rootStep.contains(root))
+        step = (cv.channel == SkVD::PINWX ? rootStep[root].x
+                                          : rootStep[root].y) *
+               Stage::inch;
+    }
+    double attach = 0.0;
+    if (!attachOffset.isEmpty()) {
+      const int col  = columnByName(xsh, cv.column);
+      const int root = col >= 0 ? rootColumnOf(xsh, col) : -1;
+      if (root >= 0 && attachOffset.contains(root)) {
+        const TPointD &a = attachOffset[root];
+        if (cv.kind == ClipCurve::Stage && col == root &&
+            (cv.channel == TStageObject::T_X || cv.channel == TStageObject::T_Y))
+          attach = cv.channel == TStageObject::T_X ? a.x : a.y;
+        else if (cv.kind == ClipCurve::Vertex &&
+                 (cv.channel == SkVD::PINWX || cv.channel == SkVD::PINWY))
+          attach = (cv.channel == SkVD::PINWX ? a.x : a.y) * Stage::inch;
       }
     }
     for (int r = 0; r < o.repeats; r++)
       for (int i = 0; i < cv.keys->getKeyframeCount(); i++) {
         TDoubleKeyframe kf = cv.keys->getKeyframe(i);
         kf.m_frame = o.at + r * period + kf.m_frame * stretch;
-        if (kf.m_type != TDoubleKeyframe::Expression) kf.m_value += r * step;
+        if (kf.m_type != TDoubleKeyframe::Expression)
+          kf.m_value += attach + r * step;
         kf.m_speedIn.x *= stretch;
         kf.m_speedOut.x *= stretch;
         dst->setKeyframe(kf);
       }
   }
+  // Pins held before the join on vertices the clip does not pin: off for the
+  // clip — left on they fight its poses (the walk cycle of 2026-10-02) — and
+  // back as they were after it, where the following animation expects them.
+  for (const PinOff &p : pinsToSwitchOff) {
+    if (!before.count(p.pin)) before[p.pin] = new TDoubleParam(*p.pin);
+    TDoubleKeyframe off(o.at, 0.0);
+    off.m_type = off.m_prevType = TDoubleKeyframe::Constant;
+    p.pin->setKeyframe(off);
+    const double end = o.at + total;
+    if (p.pin->getValue(end) < 0.5 && !p.pin->isKeyframe(end)) {
+      TDoubleKeyframe on(end, p.restoreValue);
+      on.m_type = on.m_prevType = TDoubleKeyframe::Constant;
+      p.pin->setKeyframe(on);
+    }
+  }
+
   // Every curve that changed — shifted, pasted or both — as it was and is.
   for (const auto &b : before) {
     ClipUndo::Curve u;
@@ -755,6 +926,11 @@ void ZtoRigClips::showInsertDialog(QWidget *parent) {
       QObject::tr("Repeats move on (a walk goes forward)"), &dlg);
   auto *inPlace = new QRadioButton(QObject::tr("Repeats in place"), &dlg);
   travel->setChecked(true);
+  auto *attach = new QCheckBox(
+      QObject::tr("Attach to the previous frame (starts where the character "
+                  "is; other pins are switched off for the clip)"),
+      &dlg);
+  attach->setChecked(true);
   form->addRow(QObject::tr("At frame:"), at);
   form->addRow(QObject::tr("Repeat:"), repeats);
   form->addRow(QObject::tr("Speed:"), speed);
@@ -762,6 +938,7 @@ void ZtoRigClips::showInsertDialog(QWidget *parent) {
   form->addRow(QString(), overwrite);
   form->addRow(QString(), travel);
   form->addRow(QString(), inPlace);
+  form->addRow(QString(), attach);
   lay->addLayout(form);
   // A clip saved before the drawings were always kept has none to offer.
   auto sync = [&]() {
@@ -788,6 +965,42 @@ void ZtoRigClips::showInsertDialog(QWidget *parent) {
   o.drawings = what->isEnabled() && what->currentIndex() == 0;
   o.travel   = travel->isChecked();
   o.insert   = !overwrite->isChecked();
+  o.attach   = attach->isChecked();
+  // The clip pins feet but the character's IK is off: ask. Its pins would act
+  // anyway (planting is never gated by the IK switch), so «No» leaves them out
+  // and the clip plays in place.
+  {
+    QSet<int> needIk;
+    for (const ClipCurve &cv : clip.curves) {
+      if (cv.kind != ClipCurve::Vertex || cv.channel != SkVD::PIN) continue;
+      bool pins = false;
+      for (int i = 0; i < cv.keys->getKeyframeCount() && !pins; i++)
+        pins = cv.keys->getKeyframe(i).m_value >= 0.5;
+      const int col = columnByName(xsh, cv.column);
+      TStageObject *obj =
+          col >= 0 ? xsh->getStageObject(TStageObjectId::ColumnId(col)) : nullptr;
+      const PlasticSkeletonDeformationP &sd =
+          obj ? obj->getPlasticSkeletonDeformation() : PlasticSkeletonDeformationP();
+      if (pins && sd && !sd->pinsEnabled()) needIk.insert(col);
+    }
+    if (!needIk.isEmpty()) {
+      const auto answer = QMessageBox::question(
+          parent, title,
+          QObject::tr("The clip uses inverse kinematics (pinned feet), which is "
+                      "off for this character. Switch it on?\n\nNo: the clip is "
+                      "inserted without its pins, in place."),
+          QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+      if (answer == QMessageBox::Yes) {
+        for (int col : needIk)
+          xsh->getStageObject(TStageObjectId::ColumnId(col))
+              ->getPlasticSkeletonDeformation()
+              ->enablePins(true);
+      } else {
+        o.usePins = false;
+        o.travel  = false;
+      }
+    }
+  }
   auto *undo   = new ClipUndo();
   undo->m_xsh  = xsh;
   undo->m_name = clip.name;

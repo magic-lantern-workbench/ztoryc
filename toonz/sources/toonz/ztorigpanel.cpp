@@ -4,6 +4,9 @@
 #include "ztorigclips.h"
 
 #include "tapp.h"
+#include "tdoubleparam.h"
+#include <array>
+#include <cmath>
 #include "menubarcommandids.h"
 
 #include "toonz/preferences.h"
@@ -13,6 +16,7 @@
 #include "toonz/tcolumnhandle.h"
 #include "toonz/tframehandle.h"
 #include "toonz/tscenehandle.h"
+#include "toonz/tstageobject.h"
 #include "toonz/tstageobjectid.h"
 #include "toonz/tstageobjecttree.h"
 #include "toonz/txshlevel.h"
@@ -613,6 +617,49 @@ void ZtoRigAngleTrack::contextMenuEvent(QContextMenuEvent *e) {
 // ZtoRigPanel
 //----------------------------------------------------------------------------
 
+namespace {
+// Copy Pose / Paste Pose (Franco, 2026-10-03): closing a walk loop by
+// repeating the first key on the last one. Only the SHAPE travels — the
+// joints' ANGLE and DISTANCE and the stacking order — never the placement
+// (root, pins and their targets): at the destination the planted foot stays
+// where it is and the body takes the copied form. Copying the whole key
+// brought the character back to the start; Record Pose in Part mode did the
+// job, but in four steps.
+const int kShapeParams[] = {SkVD::ANGLE, SkVD::DISTANCE, SkVD::SO};
+
+
+class PastePoseUndo final : public TUndo {
+public:
+  struct Curve {
+    TDoubleParamP param, before, after;
+  };
+  std::vector<Curve> m_curves;
+  std::vector<TStageObjectId> m_objects;  // their transform got keyed too
+  // copy() and not «=»: the assignment changes the keys without telling the
+  // deformation and the viewer (same as the clip undo).
+  void put(bool after) const {
+    for (const Curve &c : m_curves)
+      c.param->copy(after ? c.after.getPointer() : c.before.getPointer());
+    TXsheet *xsh = TApp::instance()->getCurrentXsheet()->getXsheet();
+    for (const TStageObjectId &id : m_objects)
+      if (TStageObject *o = xsh ? xsh->getStageObject(id) : nullptr)
+        o->updateKeyframes();
+    TApp::instance()->getCurrentXsheet()->notifyXsheetChanged();
+    TApp::instance()->getCurrentScene()->setDirtyFlag(true);
+  }
+  void undo() const override { put(false); }
+  void redo() const override { put(true); }
+  int getSize() const override {
+    int n = sizeof(*this);
+    for (const Curve &c : m_curves)
+      n += 2 * (int(sizeof(TDoubleParam)) +
+                c.before->getKeyframeCount() * int(sizeof(TDoubleKeyframe)));
+    return n;
+  }
+  QString getHistoryString() override { return QObject::tr("Paste Pose"); }
+};
+}  // namespace
+
 ZtoRigPanel::ZtoRigPanel(QWidget *parent) : TPanel(parent) {
   auto *root    = new QWidget(this);
   auto *rootLay = new QVBoxLayout(root);
@@ -633,6 +680,135 @@ ZtoRigPanel::ZtoRigPanel(QWidget *parent) : TPanel(parent) {
       tr("Store the pose authored at the current frame as a new action.\n"
          "Nothing changes on screen: the new dial starts at 0."));
   lay->addWidget(m_recordBt);
+  {
+    auto *poseRow = new QHBoxLayout();
+    auto *copyBt  = new QPushButton(tr("Copy Pose"), posesTab);
+    auto *pasteBt = new QPushButton(tr("Paste Pose"), posesTab);
+    copyBt->setToolTip(
+        tr("Copy the shape of the character's pose at the current frame —\n"
+           "joint angles, bone lengths, stacking order — from every part."));
+    pasteBt->setToolTip(
+        tr("Paste the copied shape at the current frame, keeping the\n"
+           "character's position and its pins here: a planted foot stays\n"
+           "where it is. To close a walk loop: copy the first key, paste on\n"
+           "the last."));
+    poseRow->addWidget(copyBt);
+    poseRow->addWidget(pasteBt);
+    lay->addLayout(poseRow);
+    connect(copyBt, &QPushButton::clicked, this, [this]() {
+      m_poseClip.clear();
+      for (const CharPart &part : characterParts()) {
+        PlasticSkeletonDeformation::vd_iterator vb, ve;
+        part.m_sd->vertexDeformations(vb, ve);
+        for (; vb != ve; ++vb) {
+          SkVD *vd = (*vb).second;
+          if (!vd) continue;
+          QVector<double> v(3, 0.0);
+          for (int i = 0; i < 3; i++)
+            if (vd->m_params[kShapeParams[i]])
+              v[i] = vd->m_params[kShapeParams[i]]->getValue(part.m_frame);
+          m_poseClip[columnName(part.m_col)][*(*vb).first] = v;
+        }
+      }
+    });
+    connect(pasteBt, &QPushButton::clicked, this, [this]() {
+      if (m_poseClip.isEmpty()) return;
+      // The Global Key scope, as when posing by hand (onGuideCommit): 0 Stage,
+      // 1 Plastic, 2 All. Pasting only the moved shape left the transform
+      // unkeyed in «All» (Franco, 2026-10-03). Every part of the character,
+      // since the paste reaches all of them.
+      const int scope       = Preferences::instance()->getIntValue(GlobalKeyScope);
+      const bool keyXform   = scope != 1;  // Stage or All
+      const bool keyFullPose = scope != 0;  // Plastic or All
+      const int xFrame      = (int)currentFrame();
+      TXsheet *xsh = TApp::instance()->getCurrentXsheet()->getXsheet();
+      const std::vector<CharPart> parts = characterParts();
+      auto stageOf = [xsh](const CharPart &part) -> TStageObject * {
+        return xsh ? xsh->getStageObject(TStageObjectId::ColumnId(part.m_col))
+                   : nullptr;
+      };
+      static const TStageObject::Channel kXform[] = {
+          TStageObject::T_Angle,  TStageObject::T_X,      TStageObject::T_Y,
+          TStageObject::T_Z,      TStageObject::T_SO,     TStageObject::T_ScaleX,
+          TStageObject::T_ScaleY, TStageObject::T_Scale,  TStageObject::T_Path,
+          TStageObject::T_ShearX, TStageObject::T_ShearY};
+
+      // Snapshot every curve the paste can touch BEFORE touching any: the
+      // shape, the global pose key and the transform key are one undo.
+      auto *undo = new PastePoseUndo();
+      auto track = [undo](TDoubleParam *p) {
+        if (!p) return;
+        PastePoseUndo::Curve c;
+        c.param  = p;
+        c.before = new TDoubleParam(*p);
+        undo->m_curves.push_back(c);
+      };
+      for (const CharPart &part : parts) {
+        PlasticSkeletonDeformation::vd_iterator vb, ve;
+        part.m_sd->vertexDeformations(vb, ve);
+        for (; vb != ve; ++vb)
+          if (SkVD *vd = (*vb).second)
+            for (int p = 0; p < SkVD::PARAMS_COUNT; p++)
+              track(vd->m_params[p].getPointer());
+        TStageObject *obj = stageOf(part);
+        if (keyXform && obj) {
+          for (TStageObject::Channel ch : kXform) track(obj->getParam(ch));
+          undo->m_objects.push_back(obj->getId());
+        }
+      }
+
+      bool changed = false;
+      for (const CharPart &part : parts) {
+        const QString colName = columnName(part.m_col);
+        if (!m_poseClip.contains(colName)) continue;
+        const auto &verts = m_poseClip[colName];
+        PlasticSkeletonDeformation::vd_iterator vb, ve;
+        part.m_sd->vertexDeformations(vb, ve);
+        for (; vb != ve; ++vb) {
+          SkVD *vd = (*vb).second;
+          const QString name = *(*vb).first;
+          if (!vd || !verts.contains(name)) continue;
+          const QVector<double> &v = verts[name];
+          for (int i = 0; i < 3; i++) {
+            TDoubleParam *p = vd->m_params[kShapeParams[i]].getPointer();
+            if (!p) continue;
+            const double now = p->getValue(part.m_frame);
+            if (std::abs(now - v[i]) < 1e-9 && p->isKeyframe(part.m_frame))
+              continue;
+            TDoubleKeyframe kf;
+            if (p->isKeyframe(part.m_frame)) {
+              kf = p->getKeyframeAt(part.m_frame);
+            } else {
+              kf.m_frame = part.m_frame;
+              // the kind of the segment it lands in, so the curve keeps its feel
+              const int k = p->getPrevKeyframe(part.m_frame);
+              if (k >= 0) kf.m_type = p->getKeyframe(k).m_type;
+            }
+            kf.m_value = v[i];
+            p->setKeyframe(kf);
+            changed = true;
+          }
+        }
+      }
+      if (!changed && !keyXform && !keyFullPose) {
+        delete undo;
+        return;
+      }
+      for (const CharPart &part : parts) {
+        TStageObject *obj = stageOf(part);
+        if (!obj) continue;
+        if (keyFullPose) obj->setPlasticPoseKeyframe(xFrame);
+        if (keyXform) obj->setKeyframeWithoutUndo(xFrame);
+        obj->updateKeyframes();
+      }
+      for (PastePoseUndo::Curve &c : undo->m_curves)
+        c.after = new TDoubleParam(*c.param);
+      TUndoManager::manager()->add(undo);
+      TApp::instance()->getCurrentXsheet()->notifyXsheetChanged();
+      TApp::instance()->getCurrentScene()->setDirtyFlag(true);
+      refreshValues();
+    });
+  }
   // The character's library (ztoriglibrary.h): what is recorded here goes
   // back to the character, and what the library got comes into this copy.
   {
@@ -826,6 +1002,15 @@ PlasticSkeletonDeformationP ZtoRigPanel::currentDeformation() const {
   if (!obj) return PlasticSkeletonDeformationP();
 
   return obj->getPlasticSkeletonDeformation();
+}
+
+//-----------------------------------------------------------------------------
+
+QString ZtoRigPanel::columnName(int col) const {
+  TXsheet *xsh = TApp::instance()->getCurrentXsheet()->getXsheet();
+  TStageObject *obj =
+      xsh ? xsh->getStageObject(TStageObjectId::ColumnId(col)) : nullptr;
+  return obj ? QString::fromStdString(obj->getName()) : QString::number(col);
 }
 
 //-----------------------------------------------------------------------------
