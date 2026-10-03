@@ -461,6 +461,21 @@ m_param->setKeyframe(kf);
 */
 }
 
+// Ztoryc: a Plastic pin switch ("Pin" vertex param) is ON from the key where
+// its value reaches 0.5. Its keys must step: made smooth — Auto Bezier on every
+// key, an ease, a Speed In/Out segment — the value crosses 0.5 halfway along
+// the ramp and the pin switches on frames BEFORE its key, the IK re-solving the
+// poses there (Franco's walk cycle, 2026-10-02). Same rule as the drawing
+// number above, for the same reason: interpolating a switch means nothing.
+bool KeyframeSetter::isStepOnlyCurve(const TDoubleParam *curve) {
+  if (!curve) return false;
+  // The switch, and the pin targets — created stepped on purpose: made smooth,
+  // the planted point would slide between two keys.
+  const std::string &name = curve->getName();
+  return name == "Pin" || name == "PinTX" || name == "PinTY" ||
+         name == "PinWX" || name == "PinWY";
+}
+
 void KeyframeSetter::setAutoBezier(TDoubleParam *curve,
                                    const std::set<int> &kIndices,
                                    bool enableUndo) {
@@ -569,6 +584,7 @@ void KeyframeSetter::setEasePreset(TDoubleParam *curve,
   // Drawing numbers are integers picked from a level: an eased ramp between
   // two of them means nothing. Same reason as setTangents.
   if (curve->getName() == "W_DrawingNumber") return;
+  if (isStepOnlyCurve(curve)) return;
 
   const int n = curve->getKeyframeCount();
   if (n < 2) return;
@@ -628,6 +644,7 @@ void KeyframeSetter::setTangents(TDoubleParam *curve,
   // Drawing numbers are integers picked from a level: a smooth curve through
   // them means nothing.
   if (curve->getName() == "W_DrawingNumber") return;
+  if (isStepOnlyCurve(curve)) return;
 
   const int n = curve->getKeyframeCount();
   if (n < 2) return;
@@ -736,6 +753,9 @@ void KeyframeSetter::setType(int kIndex, TDoubleKeyframe::Type type) {
     // type)
     type = TDoubleKeyframe::Linear;
   }
+  // A pin switch only ever steps (see isStepOnlyCurve).
+  if (isStepOnlyCurve(m_param.getPointer()) && kIndex + 1 < m_param->getKeyframeCount())
+    type = TDoubleKeyframe::Constant;
   if (type == keyframe.m_type) return;
 
   // I'm going to change kIndex. Make sure it is selected. set the dirty flag
@@ -1018,6 +1038,9 @@ void KeyframeSetter::setAllParams(
     nextKeyframe = m_param->getKeyframe(m_kIndex + 1);
   else
     comboType = TDoubleKeyframe::Linear;
+  if (isStepOnlyCurve(m_param.getPointer()) &&
+      m_kIndex + 1 < m_param->getKeyframeCount())
+    comboType = TDoubleKeyframe::Constant;  // a pin switch only steps
 
   // I'm going to change kIndex. Make sure it is selected. set the dirty flag
   m_undo->addKeyframe(m_kIndex);

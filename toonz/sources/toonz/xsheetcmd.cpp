@@ -2438,6 +2438,9 @@ public:
                                                 vdfEnd1(vdfs1.end());
     for (; vdft0 != vdfEnd0; ++vdft0, ++vdft1) {
       for (int p = 0; p < SkVD::PARAMS_COUNT; ++p) {
+        // Ztoryc: the pin switch keeps its stepped keys — interpolated, it
+        // switches on before its key (see KeyframeSetter::isStepOnlyCurve).
+        if (p >= SkVD::PIN && p <= SkVD::PINWY) continue;  // pin switch, targets
         TDoubleKeyframe &vkf0 = vdft0->second.m_keyframes[p];
         TDoubleKeyframe &vkf1 = vdft1->second.m_keyframes[p];
         vkf0.m_type           = m_type;

@@ -224,6 +224,10 @@ public:
   bool isFullKeyframe(double frame) const;
   void deleteKeyframe(double frame);
 
+  //! Ztoryc: PIN, PINT* and PINW* are switches, held until the next key —
+  //! never interpolated. Forces every key of those curves to Constant.
+  void makePinCurvesStep();
+
   void saveData(TOStream &os) override;
   void loadData(TIStream &is) override;
 

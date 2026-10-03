@@ -170,6 +170,10 @@ public:
   static void setAutoBezier(TDoubleParam *curve, const std::set<int> &kIndices,
                             bool enableUndo = true);
 
+  //! Ztoryc: the Plastic pin curves (Pin, PinTX/TY, PinWX/WY) are switches,
+  //! held until the next key: never eased, never interpolated.
+  static bool isStepOnlyCurve(const TDoubleParam *curve);
+
   //! Flattens the tangent at each of \p kIndices: the curve arrives and leaves
   //! horizontally. That is how an EXTREME is marked -- the contact, the apex,
   //! the point where the movement stops and starts again -- and it is also the

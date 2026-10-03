@@ -153,7 +153,28 @@ bool SkVD::setKeyframe(const SkVD::Keyframe &values) {
       keyWasSet = true;
     }
 
+  if (keyWasSet) makePinCurvesStep();
   return keyWasSet;
+}
+
+//------------------------------------------------------------------
+
+// A pin curve's LAST key is often Linear — harmless while it is the last, since
+// a type describes the segment AFTER the key. Pasting keys later on turns that
+// segment live, and the target slid from the old plant to the pasted one: the
+// foot drifted over the whole last stretch of the walk (Franco, 2026-10-03).
+// Every path that writes whole keys (paste, load) comes through here.
+void SkVD::makePinCurvesStep() {
+  for (int p = PIN; p <= PINWY; ++p) {
+    TDoubleParam *param = m_params[p].getPointer();
+    if (!param) continue;
+    for (int k = 0; k < param->getKeyframeCount(); ++k) {
+      TDoubleKeyframe kf = param->getKeyframe(k);
+      if (kf.m_type == TDoubleKeyframe::Constant) continue;
+      kf.m_type = TDoubleKeyframe::Constant;
+      param->setKeyframe(k, kf);
+    }
+  }
 }
 
 //------------------------------------------------------------------
@@ -174,6 +195,7 @@ bool SkVD::setKeyframe(const SkVD::Keyframe &values, double frame,
       keyWasSet = true;
     }
 
+  if (keyWasSet) makePinCurvesStep();
   return keyWasSet;
 }
 
@@ -234,6 +256,7 @@ void SkVD::loadData(TIStream &is) {
 
     if (p >= PARAMS_COUNT) is.skipCurrentTag();
   }
+  makePinCurvesStep();  // scenes saved with a Linear pin key heal on load
 }
 
 //**************************************************************************************
