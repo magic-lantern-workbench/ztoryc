@@ -440,24 +440,24 @@ not portable.
   build to confirm no level-naming regression — the underscore frame format is
   the part to exercise.)*
 
-#### ✨ New (2026-09-29)
+#### 🆕 Found 2026-10-03
 
-- ❓ **Level aliases collide for PSD layers → a sequence render swaps or drops
-  layers** — `toonzlib/tcolumnfx.cpp`, `TLevelColumnFx::getAlias()`. The alias
-  was built with `path.withFrame(fid)`, which re-parses the file name as an
-  image sequence. Under the **Standard** file-path rule a PSD layer path such
-  as `ch_sofia#corpo#group.psd` becomes `ch.1.psd` at frame 1 — everything
-  after the first `_` is taken as the frame part — so **every layer of that
-  PSD gets the same alias**. The raster loader caches images by alias
-  (`LevelFxBuilder`, `alias + "_image"`), so in a sequence render one layer
-  receives another layer's cached image (a mouth drawn where the body should
-  be) or none (the part disappears); the same frame rendered alone is
-  correct. Measured with per-layer image hashes: at frame 1 of a 60-frame
-  render one character loaded 2 layers out of 13. **Fix:** the full path
-  string plus the frame id spelled out (`|frame=<fid>`), no parsing — an
-  alias only has to be unique and stable. Verified in Ztoryc on macOS; the
-  upstream function is the same code. To reproduce on stock: a PSD whose file
-  name contains `_`, imported in group mode, rendered as a range.
+- ❓ **Pasting keys on a column with no Plastic skeleton silently drops the pose** — `toonzlib/tstageobject.cpp`, `TStageObject::setKeyframeWithoutUndo(int, const Keyframe &)`: `if (m_skeletonDeformation) ... setKeyframe(k.m_skeletonKeyframe, ...)` — on a column without a deformation the plastic half of the key is discarded with no warning. Moving a stretch of Plastic animation onto a spare column and back leaves only the transform keys: the character stands still from there on. Lost a walk's ending on Ztoryc (CS2606 sh190, measured in the saved scene: transform keys at 63–93, plastic keys stopping at 57). Ztoryc's fix is at the paste/drag sites (`toonz/keyframedata.cpp` `losesPlasticPose`, `keyframeselection.cpp`, `xsheetdragtool.cpp`): refuse and warn. *(Diagnosed on Ztoryc; the drop is stock code. Upstream the cross-column key drag does not exist — the paste path is the one to propose.)*
+
+#### 🆕 Found 2026-10-02
+
+- ✅ **A mask column shares its cache alias with an ordinary column showing the same drawing** — `toonzlib/tcolumnfx.cpp`, `TLevelColumnFx::getAlias`: the alias is path + frame (+ render data + the masks the column *undergoes*), but not whether the column *is* a mask. A drawing used twice — the eye white shown in one column and, in another, as the clipping mask of the pupil — gives both columns one alias. Called as an ordinary layer (where it must draw nothing: `doCompute` returns unless `m_applyMask`/`m_plasticMask`), the mask column is served the eye white from the cache and draws it over the pupil. Only in some renders (output, not preview; depends on resolution), because whether the cache is hit depends on the tiles. Measured on Ztoryc (CS2606 sh160, layer-by-layer dumps of the sub-xsheet composite). Fix: append `maskcol` (+`_apply`/`_plastic`) to the alias of mask columns. *(Diagnosed and fixed on Ztoryc; stock code.)*
+- ✅ **Raster clipping masks crop the wrong part of the mask image when scaled** — `toonzlib/tcolumnfx.cpp`, `TLevelColumnFx::doCompute`, raster branch: `assert(info.m_affine.isTranslation()); tileRectD += TPointD(lx_2 - a13, ly_2 - a23);`. A raster column used as a mask returns `canHandle() == true` when `m_applyMask` is set ("so it is not cached"), so it receives the WHOLE affine, scale included; the crop then ignores the scale (the assert is silent in release) and takes the wrong region of the mask image. Symptom: a clipped level (a pupil inside an eye) renders fine inside its sub-xsheet (scale 1) and vanishes in the main xsheet / final render when the character is scaled and the eye is off-centre in its image. Measured on Ztoryc with `tcomposer` (CS2606 sh160): mask shape 3092 px, region actually used 903 px → pupil erased. Fix: map the tile rect through `info.m_affine.inv()` (+2 px margin for the filter); identical to the old code when the affine is a translation. *(Diagnosed and fixed on Ztoryc; stock code — not yet reproduced on Tahoma2D stock.)*
+
+#### 🆕 Found 2026-09-28
+
+- ✅ **MEMORY LEAK: every `TXshSoundColumn::getCell` leaks a heap `TXshCell`** — `toonzlib/txshsoundcolumn.cpp`, `getCell()`: `TXshCell *cell = new TXshCell(soundLevel, ...); soundLevel->release(); return *cell;` — the cell is never deleted (the manual `release()` only compensates the level's reference count). Identical in Tahoma2D master and OpenToonz master. Any code that scans the xsheet cell by cell through sound columns leaks 48 bytes per cell: on a storyboard with three sound columns of 7,883 frames a working session reached **32 GB** — `heap` counted 87 million `TSmartPointerT<TXshLevel>` blocks (the leaked cells). Fix: a small per-thread ring of reused cells (no manual release; each slot holds a real reference, dropped when reused). *(Measured on Ztoryc; the leak is stock code — on stock it grows with every sound-column cell read, e.g. xsheet scrolling and scans.)*
+- ❓ **Every icon/thumbnail render builds a new offscreen GL context** — `toonzlib/toonzscene.cpp`, `ToonzScene::renderFrame` → `TOfflineGL::TOfflineGL` → `QtOfflineGL::createContext` → `QOpenGLFramebufferObject` → `QOpenGLFunctions::initializeOpenGLFunctions` (every GL symbol resolved again through `dlsym`). Measured with `sample` on macOS (Apple M4): ~80% of a storyboard thumbnail render is context creation, not drawing. Reusing one context (or a small pool keyed by size) would make every icon generator faster. *(Diagnosed on Ztoryc, not measured on stock; performance, not a bug.)*
+
+#### 🆕 Found 2026-09-27
+
+- ✅ **CRASH: tool option controls never unregister from the tools' properties** — `include/tproperty.h`, `common/tproperty.cpp`. Every `ToolOptionControl` subclass calls `m_property->addListener(this)` in its constructor (`tnztools/tooloptionscontrols.cpp`, 15 sites) and nothing ever calls `removeListener`. The tools — and their properties — live for the whole session; the tool options bars do not (one per room, rebuilt when rooms are re-applied). A destroyed bar leaves its controls registered, and the next `notifyListeners()` calls freed memory. **Caught under lldb** (debug build, MallocScribble/PreScribble): crash in `TProperty::notifyListeners` from `PlasticTool::onSelectionChanged` on a column switch, the property (`vertexName`) had 8 listeners, the first pointing at reallocated memory (`0xaaaaaaaa…`). Fix at the root, for every control: `TProperty::Listener` keeps the properties it listens to and unregisters in its destructor (inline — a nested class is not exported from the DLL on Windows); `~TProperty` removes itself from its listeners; copy/assignment keep the old semantics with the bookkeeping; `notifyListeners` iterates a copy. *(Our trigger was Ztoryc re-applying rooms on opening a character scene; the missing unregister is stock code — to reproduce on stock: rebuild a room's tool options bar, then change a tool property.)*
+- ❓ **PSD layer load leaves the file open on failure** — `common/psdlib/psd.cpp`, `TPSDReader::load`. `openFile(); doImage(); fclose(m_file);` all inside a `try` whose `catch (...)` swallows: if `doImage` throws, `fclose` is skipped. On Windows the PSD stays locked — also for Photoshop. Fix: `m_file = nullptr` after the normal close, `fclose` in the `catch` when still open. *(Diagnosed by review, not reproduced.)*
 
 ### 2.2 — Features that can go upstream as they are
 

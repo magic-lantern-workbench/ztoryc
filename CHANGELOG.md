@@ -1,3 +1,59 @@
+## [2026-10-03] — camminate con IK e Plastic: pin a scatto, Copy/Paste Pose, Global Key ovunque; slide delle celle, due diamanti nuovi
+
+Sessione locale sul Mac, sul lavoro vero di CS2606 (Messina, sh190 e sh230). Commit `ac0265cea`,
+`30fc7c6a3`, `b60909c09`, `26de1dfe0`, `b2fe7dde5`, `974355793`. Collaudati da Franco: lo **slide** delle
+celle e i **campi dell'Animate tool** con la Global Key; il resto e' installato e compila, da collaudare
+(elenco in ANIMATIC_TASKS, ZtoRig). Review 2026-10-03: licenze OK; tre bloccanti del revisore (undo dei
+campi del Plastic preso dopo la scrittura) e gli importanti concreti corretti prima del commit, su
+richiesta di Franco, ma non ancora collaudati.
+
+### Added
+- **Slide di un blocco di celle** — ⇧⌥ Shift+Option sulla barra laterale, su una o piu' colonne: il blocco
+  scorre intero, il disegno prima si accorcia/allunga e quello dopo il contrario, un solo ⌘Z. ⌥ Option da
+  solo resta «sovrascrivi». Le chiavi dentro il blocco scorrono se «le chiavi seguono l'esposizione». Hint
+  vicino al cursore aggiornato. **Collaudato.**
+- **Copy Pose / Paste Pose** (pannello ZtoRig, Pose): copia la forma (angoli, lunghezze, stacking order) di
+  tutte le parti del personaggio e la incolla senza toccare radice e pin — per chiudere il ciclo.
+- **Insert Clip** aggancia la clip al fotogramma precedente (casella attiva di default), spegne i pin che la
+  clip non usa, chiede se attivare l'IK, e i bersagli dei pin viaggiano col passo.
+- **Due diamanti nuovi**: oro | quarto bianco + quarto vuoto = posa completa, transform parziale; bianco |
+  quarto oro + quarto vuoto = transform completo, posa parziale (e «solo posa parziale» non mostra piu' un
+  bianco che non c'e'). Legenda del manuale rigenerata da script (`docs/images/keyframe_diamond_legend.py`).
+
+### Fixed
+- **Pin che slittavano incollando chiavi**: un'ultima chiave di pin lineare diventava viva al primo incolla e
+  il bersaglio scivolava per tutto il tratto prima. Le curve dei pin sono ora sempre a scatto, anche
+  incollando, annullando e all'apertura della scena; protette anche dall'editor delle curve.
+- **Posa persa spostando chiavi** su una colonna senza scheletro Plastic (il finale dello sh190 svuotato):
+  ora incolla e trascinamento si rifiutano e avvisano. Il finale di Franco e' stato recuperato da una
+  snapshot in `sh190_finale.tnz`.
+- **Global Key su All che metteva chiavi parziali**: Paste Pose, maniglia del controller, campi del Plastic
+  tool e campi dell'Animate tool (la cui casella Global Key non era mai collegata ai campi) ora rispettano
+  la portata Stage/Plastic/All; in Plastic l'Animate tool chiava solo il canale mosso piu' la posa.
+- Campi Scale H/V del Plastic vuoti finche' non si usava la maniglia.
+- Nomi dei vertici nuovi allineati al numero di aggancio; l'etichetta non ripete il numero.
+- Snapshot di recovery tenute 7 giorni in `kept/` invece di cancellate.
+
+### Open
+- **Scale V a 6000% con «Mass» nei campi del controller**: corretta la causa piu' probabile (undo dei campi
+  preso dopo la scrittura, asse vincolato chiavato fuori dal setter) — da riprodurre e collaudare
+  (ANIMATIC_TASKS, ZtoRig, P1).
+
+### Notes per il rilascio
+- Le scene salvate con chiavi di pin non a scatto cambiano comportamento all'apertura (i pin diventano a
+  scatto): formato compatibile, comportamento diverso — da dire nelle note.
+- Insert Clip con «aggancia» attivo di default e lo slide sono cambi di comportamento: rilascio minor.
+- Su Windows Shift+Alt e' spesso la scorciatoia di cambio lingua della tastiera: lo slide potrebbe non
+  arrivare all'app; da verificare sul Dell e, se serve, offrire un'alternativa.
+
+### Upstream candidates
+- `TStageObject::setKeyframeWithoutUndo(int, const Keyframe&)`: su una colonna senza deformazione la parte
+  plastic della chiave viene scartata in silenzio.
+
+### Notes
+- La onion skin che mostrava solo lo scheletro era uno stato della sessione: col riavvio e' tornata. La
+  correzione provata e' stata tolta.
+
 ## [2026-10-02b] — seconda finestra dal menu, PR #4 di Rodney, clipping mask nel render, FCPXML in sync; memoria e testina (28/09)
 
 Sessione locale sul Mac, collaudata da Franco su CS2606 (Messina). Commit `d36bf4868`, `77a99bf38`,

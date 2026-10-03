@@ -719,6 +719,33 @@ Milestone:
 
 ## 🦴 ZtoRig / personaggio
 
+### 🟡 CORRETTO 2026-10-03 (`b2fe7dde5`), DA RIPRODURRE E COLLAUDARE — Scale V a 6000% con «Mass» nei campi del controller (P1)
+
+Review del 2026-10-03: l'undo dei campi era preso DOPO la scrittura (⌘Z rimetteva meta' dei valori nuovi,
+assi scollati) e l'asse vincolato veniva chiavato fuori dal setter. Ora una modifica scritta nei campi e' un
+solo undo a fotografia delle curve presa prima (`FieldEditUndo`, hook `TTool::onPropertyAboutToChange`).
+Collaudo: Mass, scrivere H, controllare V = 1/H, ⌘Z una volta → tutto com'era, anche sugli altri frame.
+Testo originale:
+
+Franco, CS2606: scrivendo nei campi Scale H/V del Plastic tool con vincolo **Mass**, Scale V e' saltato
+oltre il 6000%, non proporzionato a H; rimesso 100/100 si e' sistemato su quel frame, ma un altro frame
+restava deformato finche' 3-4 ⌘Z non l'hanno riportato. **Quasi certamente nato oggi**: il calcolo del
+secondo asse `w = 1/v` in `PlasticTool::onPropertyChanged` (ramo scaleXRelay/scaleYRelay), la chiave
+globale aggiunta ai campi (`globalKeyAfterFieldEdit_animate`, che chiava tutta la deformazione) e il nuovo
+`ParamUndo` dell'asse vincolato. Finche' non e' risolto: **non usare Mass/A-R nei campi**, usare la
+maniglia. Prima di correggere: riprodurlo e salvare la scena, leggere i valori SCALEX/SCALEY nel file.
+
+### 🟡 FATTO 2026-10-03, DA COLLAUDARE
+
+- Pin a scatto anche incollando chiavi (`SkVD::makePinCurvesStep`, anche all'apertura della scena).
+- Paste Pose, maniglia del controller, campi del Plastic tool e dell'Animate tool rispettano la portata
+  della Global Key (Stage/Plastic/All); in Plastic l'Animate tool chiava solo il canale mosso + la posa.
+- Avviso invece della perdita della posa quando si incollano/trascinano chiavi su una colonna senza scheletro.
+- Nomi dei vertici nuovi = numero di aggancio; etichetta senza il doppio numero.
+- Due diamanti nuovi (posa completa + transform parziale, transform completo + posa parziale).
+- Copy/Paste Pose, Insert Clip con aggancio e spegnimento dei pin, snapshot di recovery tenuti 7 giorni.
+- `sh190_finale.tnz` (Messina): finale 58-119 trapiantato da `sh190_rec2133.tnz` — Franco lo controlla.
+
 ### 🆕 2026-09-25 — Edit mesh: taglio per percorso e cancellazione di un pezzo (richiesta di Franco)
 
 - **Taglio**: clic sul vertice di partenza e su quello d'arrivo, con ANTEPRIMA
