@@ -69,8 +69,12 @@ ZtoryShotContext ztoryCurrentShotContext() {
 
     ctx.shotIndex = 0;
     ctx.column    = -1;
-    ctx.firstRow  = 0;
-    ctx.lastRow   = std::max(0, top->getFrameCount() - 1);
+    // NET rows, like the export's: grossShotSpan adds the dissolve head and
+    // tail back. The scene's whole length already contains them, and taken as
+    // net it started the words late by the head (review 2026-10-04, B2).
+    ctx.firstRow  = ZtoryShotOps::xdInHeadOffset(top);
+    ctx.lastRow   = std::max(ctx.firstRow, top->getFrameCount() - 1 -
+                                              ZtoryShotOps::xdOutTailCount(top));
     ctx.subXsheet = top;
     ctx.ownScene  = true;
     return ctx;
@@ -96,6 +100,14 @@ ZtoryShotContext ztoryCurrentShotContext() {
     ctx.subXsheet = cur;
     ctx.firstRow  = r0;
     ctx.lastRow   = r1;
+    // The column's cell range includes the dissolve material exposed around
+    // the shot: the shot's own span is the NET one grossShotSpan expects.
+    int netStart = 0, netDuration = 0;
+    if (ZtoryShotOps::shotTrueSpan(top, col, netStart, netDuration) &&
+        netDuration > 0) {
+      ctx.firstRow = netStart;
+      ctx.lastRow  = netStart + netDuration - 1;
+    }
     const std::vector<ShotData> &shots = ZtoryModel::instance()->shots();
     for (int i = 0; i < (int)shots.size(); i++)
       if (shots[i].xsheetColumn == col) { ctx.shotIndex = i; break; }
@@ -155,7 +167,9 @@ QString ztoryExtractShotAudio(const ZtoryShotContext &ctx) {
       scene->getProperties()->getOutputProperties()->getFrameRate();
   int r0, r1, headLost;
   grossShotSpan(ctx, r0, r1, headLost);
-  TSoundTrackP st = cols[0]->mixingTogether(cols, r0, r1, fps);
+  // The end is exclusive downstream (getOverallSoundTrack): r1 + 1, or the
+  // last row was cut while audioMs and the cells counted it.
+  TSoundTrackP st = cols[0]->mixingTogether(cols, r0, r1 + 1, fps);
   if (!st || st->getSampleCount() == 0) return QString();
 
   const QString cacheRoot = ToonzFolder::getCacheRootFolder().getQString();
