@@ -1,4 +1,5 @@
 #include "ztorylipsync.h"
+#include "ztoryshotops.h"
 
 #include "ztoryvosk.h"
 #include "ztoryphonemes.h"
@@ -121,6 +122,20 @@ ZtoryShotContext ztoryCurrentShotContext() {
 
 //-----------------------------------------------------------------------------
 
+// The shot's GROSS span in main-xsheet rows: the incoming dissolve's head and
+// the outgoing one's tail included. During a dissolve both shots are on
+// screen, so a voice over those frames belongs to both (Franco, 2026-10-04: a
+// narrator whose words carry over into the shot that shows what is told).
+// headLost = head rows that fall before row 0 and have no audio.
+static void grossShotSpan(const ZtoryShotContext &ctx, int &r0, int &r1,
+                          int &headLost) {
+  const int head = ZtoryShotOps::xdInHeadOffset(ctx.subXsheet);
+  const int tail = ZtoryShotOps::xdOutTailCount(ctx.subXsheet);
+  r0             = std::max(0, ctx.firstRow - head);
+  r1             = ctx.lastRow + tail;
+  headLost       = head - (ctx.firstRow - r0);
+}
+
 QString ztoryExtractShotAudio(const ZtoryShotContext &ctx) {
   if (!ctx.isValid()) return QString();
   ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
@@ -138,8 +153,9 @@ QString ztoryExtractShotAudio(const ZtoryShotContext &ctx) {
 
   const double fps =
       scene->getProperties()->getOutputProperties()->getFrameRate();
-  TSoundTrackP st =
-      cols[0]->mixingTogether(cols, ctx.firstRow, ctx.lastRow, fps);
+  int r0, r1, headLost;
+  grossShotSpan(ctx, r0, r1, headLost);
+  TSoundTrackP st = cols[0]->mixingTogether(cols, r0, r1, fps);
   if (!st || st->getSampleCount() == 0) return QString();
 
   const QString cacheRoot = ToonzFolder::getCacheRootFolder().getQString();
@@ -1130,12 +1146,20 @@ QString ztoryPrepareLipSync(const ZtoryShotContext &ctx,
   // sceglie anche il MOTORE, quindi doveva diventare una scelta esplicita.
   req.language = Preferences::instance()->getLipSyncLanguage();
   req.fps = scene->getProperties()->getOutputProperties()->getFrameRate();
-  // La sotto-scena parte dal fotogramma 1, e l'audio estratto parte
-  // dall'inizio dello shot: i due zeri coincidono.
-  req.firstFrame = 1;
+  // L'audio estratto parte dall'inizio NETTO dello shot. Nella sotto-scena
+  // quell'inizio e' il fotogramma 1, tranne con una dissolvenza in entrata: le
+  // prime righe sono la testa ferma della dissolvenza (XD-in) e il contenuto
+  // vero, audio iniettato compreso, parte dopo. Partire da 1 anticipava le
+  // parole e le bocche di tutta la testa (Franco, 2026-10-04, CS2606).
+  // The wav is the GROSS span (see grossShotSpan): its instant 0 is row 1 of
+  // the sub-scene, the dissolve head included — unless part of the head falls
+  // before the start of the animatic and has no audio.
+  int r0, r1, headLost;
+  grossShotSpan(ctx, r0, r1, headLost);
+  req.firstFrame = 1 + headLost;
   // Durata vera dell'audio, dalle righe dello shot: e' il metro con cui si
   // scarta la coda inventata dal riempimento a 30 secondi.
-  req.audioMs = int((ctx.lastRow - ctx.firstRow + 1) * 1000.0 / req.fps);
+  req.audioMs = int((r1 - r0 + 1) * 1000.0 / req.fps);
   return QString();
 }
 
@@ -1180,6 +1204,10 @@ QList<int> ztoryWriteLipSyncColumns(TXsheet *sub,
                                     int lastFrame, int *orphanWords) {
   QList<int> created;
   if (!sub) return created;
+  // lastFrame arriva NETTO (durata dello shot): le celle coprono anche la
+  // testa e la coda delle dissolvenze, come l'audio (grossShotSpan).
+  lastFrame += ZtoryShotOps::xdInHeadOffset(sub) +
+               ZtoryShotOps::xdOutTailCount(sub);
   int orphans = 0;
   for (const ZtoryCharacterTrack &t : tracks) {
     // Le parole senza personaggio NON spariscono in silenzio: prima l'intera

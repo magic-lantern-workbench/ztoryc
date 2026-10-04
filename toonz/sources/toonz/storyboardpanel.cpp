@@ -7028,13 +7028,18 @@ static QList<int> injectAudioForShot(ToonzScene *scene, TXsheet *mainXsh,
   }
   QList<int> injected;
   int audioIdx = 0;
-  // Incoming cross-dissolve: the sub-scene carries headHalf hold copies at
-  // rows 0..headHalf-1 and the REAL content starts at row headHalf. The wav
-  // slice is NET ([shotR0, shotR1] comes from shotTrueSpan, extras excluded),
-  // so it must be placed at row headHalf — at row 0 it would play headHalf
-  // frames early. The head-hold rows stay silent (that material belongs to
-  // the previous shot's dissolve window).
-  int headOffset = ZtoryShotOps::xdInHeadOffset(childXsh);
+  // Cross-dissolves: the sub-scene carries the incoming head (XD-in) at rows
+  // 0..head-1 and the outgoing tail (XD-out) after the net content. Both
+  // shots are on screen there, so the audio is the GROSS span — head, shot,
+  // tail — and a voice over the dissolve is in both shots (Franco,
+  // 2026-10-04). It used to be the net slice placed at row head, leaving the
+  // dissolve rows silent. Head rows before the animatic's frame 0 have no
+  // audio: the slice then starts later, at the row that matches.
+  const int headOffset = ZtoryShotOps::xdInHeadOffset(childXsh);
+  const int tailCount  = ZtoryShotOps::xdOutTailCount(childXsh);
+  const int grossR0    = std::max(0, shotR0 - headOffset);
+  const int grossR1    = shotR1 + tailCount;
+  const int placeAt    = headOffset - (shotR0 - grossR0);
   int mainCols = mainXsh->getColumnCount();
   for (int mc = 0; mc < mainCols; mc++) {
     TXshColumn *col = mainXsh->getColumn(mc);
@@ -7046,14 +7051,14 @@ static QList<int> injectAudioForShot(ToonzScene *scene, TXsheet *mainXsh,
     bool overlaps = false;
     for (int li = 0; li < srcSc->getColumnLevelCount() && !overlaps; li++) {
       ColumnLevel *cl = srcSc->getColumnLevel(li);
-      if (cl && cl->getVisibleStartFrame() <= shotR1 &&
-          cl->getVisibleEndFrame() >= shotR0)
+      if (cl && cl->getVisibleStartFrame() <= grossR1 &&
+          cl->getVisibleEndFrame() >= grossR0)
         overlaps = true;
     }
     if (!overlaps) continue;
 
     // Render the slice. toFrame is exclusive (same convention as scrub()).
-    TSoundTrackP st = srcSc->getOverallSoundTrack(shotR0, shotR1 + 1, fps);
+    TSoundTrackP st = srcSc->getOverallSoundTrack(grossR0, grossR1 + 1, fps);
     if (!st || st->getSampleCount() == 0) continue;
 
     audioIdx++;
@@ -7088,8 +7093,8 @@ static QList<int> injectAudioForShot(ToonzScene *scene, TXsheet *mainXsh,
     injectedLevels.append(lv);
     exportLog(QString("[%1] audio-trim wrote %2 (frames %3-%4)")
                   .arg(baseName, absWav.getQString())
-                  .arg(shotR0)
-                  .arg(shotR1));
+                  .arg(grossR0)
+                  .arg(grossR1));
 
     // Insert a new sound column at the end of the child xsheet.
     int newCol = childXsh->getColumnCount();
@@ -7101,7 +7106,7 @@ static QList<int> injectAudioForShot(ToonzScene *scene, TXsheet *mainXsh,
     // insertColumnLevel(): it takes ownership and places the visible start at
     // the target frame — headOffset, where the shot's real content begins.
     dstSc->adoptLevel(new ColumnLevel(lv->getSoundLevel(), 0, 0, 0, fps),
-                      headOffset);
+                      placeAt);
 
     // Mark column as reserved audio (visible in xsheet but !a drawing col)
     TStageObject *obj = childXsh->getStageObjectTree()
