@@ -938,8 +938,7 @@ void PlasticSkeletonDeformation::getKeyframeAt(double frame,
 //------------------------------------------------------------------
 
 void PlasticSkeletonDeformation::setKeyframe(double frame) {
-  m_imp->m_skelIdsParam->setKeyframe(frame);
-  makeSkeletonIdsStep();
+  keySkeletonIdAt(frame);  // Constant, never the default (Linear) type
 
   SkVDSet::iterator dt, dEnd(m_imp->m_vds.end());
   for (dt = m_imp->m_vds.begin(); dt != dEnd; ++dt) dt->m_vd.setKeyframe(frame);
@@ -947,10 +946,33 @@ void PlasticSkeletonDeformation::setKeyframe(double frame) {
 
 //------------------------------------------------------------------
 
+// Every key Constant, in place. TDoubleParam::setKeyframe(const
+// TDoubleKeyframe&) APPENDING after the last key turns the old last key into
+// k.m_prevType (Linear when None — and TDoubleKeyframe's constructor leaves
+// m_prevType uninitialized) and the new one into Linear: a key written at the
+// end opened a ramp between two skeleton ids (review 2026-10-04, B1).
+static void keepSkeletonIdsConstant(TDoubleParam *p) {
+  for (int k = 0; k < p->getKeyframeCount(); ++k) {
+    TDoubleKeyframe kf = p->getKeyframe(k);
+    if (kf.m_type == TDoubleKeyframe::Constant) continue;
+    kf.m_type = TDoubleKeyframe::Constant;
+    p->setKeyframe(k, kf);
+  }
+}
+
+static TDoubleKeyframe constantSkeletonIdKey(double frame, int id) {
+  TDoubleKeyframe kf(frame, id);
+  kf.m_type = kf.m_prevType = TDoubleKeyframe::Constant;
+  return kf;
+}
+
 // Found on CS2606 sh230 (Franco, 2026-10-04): keys 19 -> 2 and 59 -> 1 with a
 // Linear segment between; the whole walk on 20-58 ran on skeleton 1 only
 // because 1.98 truncates to 1. Deleting the key at 59 put the walk's pose on
 // skeleton 2 and the character twisted.
+// LOAD-TIME conversion of old curves (resampled so every integer frame keeps
+// its skeleton). Writes keep the curve Constant on their own: resampling after
+// a write would bake whatever ramp the write had just opened.
 bool PlasticSkeletonDeformation::makeSkeletonIdsStep() {
   TDoubleParam *p = m_imp->m_skelIdsParam.getPointer();
   const int n     = p->getKeyframeCount();
@@ -962,9 +984,7 @@ bool PlasticSkeletonDeformation::makeSkeletonIdsStep() {
   // What each integer frame shows today, as Constant keys.
   std::vector<TDoubleKeyframe> keys;
   auto add = [&keys](double frame, int id) {
-    TDoubleKeyframe kf(frame, id);
-    kf.m_type = TDoubleKeyframe::Constant;
-    keys.push_back(kf);
+    keys.push_back(constantSkeletonIdKey(frame, id));
   };
   for (int k = 0; k < n; ++k) {
     const TDoubleKeyframe kf = p->getKeyframe(k);
@@ -979,6 +999,7 @@ bool PlasticSkeletonDeformation::makeSkeletonIdsStep() {
   }
   while (p->getKeyframeCount() > 0) p->deleteKeyframe(p->getKeyframe(0).m_frame);
   for (const TDoubleKeyframe &kf : keys) p->setKeyframe(kf);
+  keepSkeletonIdsConstant(p);  // the append made the last one Linear
   return true;
 }
 
@@ -987,10 +1008,8 @@ bool PlasticSkeletonDeformation::makeSkeletonIdsStep() {
 void PlasticSkeletonDeformation::keySkeletonIdAt(double frame) {
   TDoubleParam *p = m_imp->m_skelIdsParam.getPointer();
   if (p->isKeyframe(frame)) return;
-  makeSkeletonIdsStep();  // so the value read below is the one shown
-  TDoubleKeyframe kf(frame, skeletonId(frame));
-  kf.m_type = TDoubleKeyframe::Constant;
-  p->setKeyframe(kf);
+  p->setKeyframe(constantSkeletonIdKey(frame, skeletonId(frame)));
+  keepSkeletonIdsConstant(p);
 }
 
 //------------------------------------------------------------------
@@ -999,8 +1018,10 @@ bool PlasticSkeletonDeformation::setKeyframe(const SkDKey &keyframe) {
   bool keyWasSet = false;
 
   if (keyframe.m_skelIdKeyframe.m_isKeyframe) {
-    m_imp->m_skelIdsParam->setKeyframe(keyframe.m_skelIdKeyframe);
-    makeSkeletonIdsStep();
+    TDoubleKeyframe kf(keyframe.m_skelIdKeyframe);
+    kf.m_type = kf.m_prevType = TDoubleKeyframe::Constant;
+    m_imp->m_skelIdsParam->setKeyframe(kf);
+    keepSkeletonIdsConstant(m_imp->m_skelIdsParam.getPointer());
     keyWasSet = true;
   }
 
@@ -1031,8 +1052,9 @@ bool PlasticSkeletonDeformation::setKeyframe(const SkDKey &keyframe,
     TDoubleKeyframe kf(keyframe.m_skelIdKeyframe);
     kf.m_frame = frame;
 
+    kf.m_type = kf.m_prevType = TDoubleKeyframe::Constant;
     m_imp->m_skelIdsParam->setKeyframe(kf);
-    makeSkeletonIdsStep();
+    keepSkeletonIdsConstant(m_imp->m_skelIdsParam.getPointer());
     keyWasSet = true;
   }
 
