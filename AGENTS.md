@@ -575,6 +575,20 @@ When the user says **"sessione chiusa"**, automatically:
 
 Eseguire **prima di ogni release** (trigger: utente dice "prepara release" o "chiudi sessione con release"):
 
+### 0. Review PRIMA di lanciare la CI — OBBLIGATORIO
+
+Prima di alzare la versione e lanciare i workflow, si eseguono **`ztoryc-reviewer`** e
+**`license-guard`** su **tutti i commit dal rilascio precedente non ancora revisionati**
+(quelli dopo l'ultimo report in `~/ZtorYc/reviews/`). I bloccanti si correggono **prima**
+del rilascio, o Franco decide esplicitamente di rimandarli. Il push protetto da SCANOSS
+non basta: guarda le licenze, non i difetti.
+
+> Aggiunto il 2026-10-04 su indicazione di Franco: la 0.16.0 e' partita con la review di
+> fine sessione ancora da fare; la review, arrivata dopo la pubblicazione, ha trovato un
+> difetto che poteva far cambiare scheletro ai personaggi prima del tempo (B1). La 0.16.0
+> e' stata cancellata (zero download) e sostituita dalla 0.16.1 — un'ora e tre quarti di
+> CI in piu', e una release da cancellare.
+
 ### 1. Diff dal tag precedente
 
 ```bash

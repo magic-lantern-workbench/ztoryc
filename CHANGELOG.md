@@ -1,7 +1,15 @@
-## [2026-10-04] — rilascio 0.16.0; scheletro a scatto, pin sopra il controller, onion skin, audio delle dissolvenze
+## [2026-10-04] — rilascio 0.16.1; scheletro a scatto, pin sopra il controller, onion skin, audio delle dissolvenze, chiavi uguali ferme
 
 Sessione locale sul Mac, collaudata da Franco su CS2606 (sh230). Commit `05164ec0f`, `9606578e9`, `0656a2ae3`,
-`9b2bb6365` (versione 0.16.0). Rilascio lanciato il 2026-10-04 (le tre CI insieme).
+`9b2bb6365` (0.16.0), `81f8686b5`, `c4995e529`, `d3b4067da`, `44fae288d` (0.16.1).
+**Rilascio**: la 0.16.0 e' stata pubblicata e poi **cancellata** (release e tag, su richiesta di Franco: zero
+download) perche' la review di fine sessione ha trovato un difetto della curva dello scheletro (B1); al suo posto la
+**0.16.1**, con le note complete. Review 2026-10-04: licenze OK; B1, B2 e I1 corretti prima del rilascio.
+
+### Added
+- **Due chiavi uguali tengono ferma la posa fra loro** (`d3b4067da`): le operazioni sulle chiavi (incolla, sposta,
+  inserisci) rendono lineare ogni tratto fra due chiavi di uguale valore, canale per canale; il Function Editor a
+  mano non si tocca. Da collaudare.
 
 ### Fixed
 - **La curva dello scheletro Plastic interpolava** (chiavi 19 → 2 e 59 → 1 con tratto lineare: il troncamento
@@ -16,7 +24,10 @@ Sessione locale sul Mac, collaudata da Franco su CS2606 (sh230). Commit `05164ec
   fotogramma. **Collaudato.**
 - Passando da Build ad Animate lo scheletro si vede subito (la matrice dello strumento non si aggiornava).
 - **Shot esportati con dissolvenze**: audio lordo (testa + shot + coda), lip sync sullo stesso tratto e
-  allineato. Da collaudare.
+  allineato, anche dal pannello Lip Sync (`c4995e529`). Da collaudare.
+- **Curva dello scheletro che tornava lineare scrivendo chiavi** (`81f8686b5`, review B1): ogni scrittura la tiene
+  a scatto; la ricostruzione resta solo all'apertura delle scene vecchie (che vengono convertite senza segnare la
+  scena come modificata).
 
 ### Notes
 - Il controller che non funzionava nel render: Franco non lo riproduce (ANIMATIC_TASKS, «non riprodotto»).

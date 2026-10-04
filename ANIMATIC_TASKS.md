@@ -137,17 +137,7 @@ degli status).
   personaggio dalle proporzioni umane. Vedi `DESIGN_openpose.md`; § 8 dice cosa
   procurare prima di cominciare (un JSON vero da DWPose, il personaggio, un
   video di prova).
-- ✅ **Render sbagliato sh110 — CAUSA TROVATA E CORRETTA** (2026-09-29, collaudato
-  da Franco sul Mac). Non era OpenGL ne' il Plastic: `TLevelColumnFx::getAlias`
-  usava `path.withFrame(fid)`, che con la regola dei nomi Standard riduce
-  `ch_sofia#corpo#group.psd` a `ch.1.psd` → tutti gli strati PSD di un
-  personaggio con lo stesso alias → la cache delle immagini del render
-  (`LevelFxBuilder`) li scambiava, solo in sequenza. Commit `d2bc410c`, su master. Misurato con le righe
-  `LEVELRENDER`/`PLASTICRENDER` (`ZTORYC_PLASTIC_DIAG=1`), metodo: stesso
-  fotogramma da solo (buono) e dentro una sequenza (cattivo).
-  **Aperto:** perche' Windows (0.10 e 0.15) rendeva bene la stessa scena, dallo
-  stesso progetto su Drive. Le due modifiche OpenGL fatte lungo la strada sono state tolte.
-  **Venerdi' (deciso da Franco):** `ztoryc-reviewer` in modalita' «debito» sui file
+- **Debito dal 29/09 (deciso da Franco):** `ztoryc-reviewer` in modalita' «debito» sui file
   del 29/09 — `tcolumnfx.cpp`, `plasticdeformerfx.cpp`, `kitsuconnectdialog.cpp/.h`,
   `kitsuclient.cpp/.h`, `ztorykitsusync.cpp`, `ztoryproductionpanel.cpp/.h` — e
   collaudo delle modifiche Kitsu (popup di riconnessione, conferma col nome).
@@ -736,6 +726,16 @@ globale aggiunta ai campi (`globalKeyAfterFieldEdit_animate`, che chiava tutta l
 maniglia. Prima di correggere: riprodurlo e salvare la scena, leggere i valori SCALEX/SCALEY nel file.
 
 ### 🟡 FATTO 2026-10-03, DA COLLAUDARE
+
+Collaudati da Franco il 3-4/10 (e archiviati): slide delle celle, campi dell'Animate tool e maniglia del
+controller con la Global Key, scheletro a scatto, pin che tiene sopra il controller, sgancio esatto del pin,
+onion skin del pupazzo. Restano:
+- **Shot esportati con dissolvenze** (`0656a2ae3`, 4/10): audio lordo dal fotogramma 1, lip sync allineato.
+- **Due chiavi uguali ferme** (`d3b4067da`, 4/10): incolla una copia di una chiave, fra le due nessun movimento.
+- **Scheletro che non anticipa** (`81f8686b5`, 4/10): rig a due scheletri, chiave globale dopo l'ultima, il
+  cambio di scheletro resta dov'era.
+- Dalla review del 4/10, annotati e non corretti: deriva dei pin solo su TransX/Y (pin secondari multi-colonna
+  esclusi), onion skin che ricalcola il controller per ogni fantasma, copione del solo shot contro audio lordo.
 
 - Pin a scatto anche incollando chiavi (`SkVD::makePinCurvesStep`, anche all'apertura della scena).
 - Paste Pose, maniglia del controller, campi del Plastic tool e dell'Animate tool rispettano la portata
