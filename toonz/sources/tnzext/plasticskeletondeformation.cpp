@@ -1,6 +1,7 @@
 
 
 // TnzCore includes
+#include <cmath>
 #include "tstream.h"
 
 // TnzBase includes
@@ -938,9 +939,58 @@ void PlasticSkeletonDeformation::getKeyframeAt(double frame,
 
 void PlasticSkeletonDeformation::setKeyframe(double frame) {
   m_imp->m_skelIdsParam->setKeyframe(frame);
+  makeSkeletonIdsStep();
 
   SkVDSet::iterator dt, dEnd(m_imp->m_vds.end());
   for (dt = m_imp->m_vds.begin(); dt != dEnd; ++dt) dt->m_vd.setKeyframe(frame);
+}
+
+//------------------------------------------------------------------
+
+// Found on CS2606 sh230 (Franco, 2026-10-04): keys 19 -> 2 and 59 -> 1 with a
+// Linear segment between; the whole walk on 20-58 ran on skeleton 1 only
+// because 1.98 truncates to 1. Deleting the key at 59 put the walk's pose on
+// skeleton 2 and the character twisted.
+bool PlasticSkeletonDeformation::makeSkeletonIdsStep() {
+  TDoubleParam *p = m_imp->m_skelIdsParam.getPointer();
+  const int n     = p->getKeyframeCount();
+  bool needed     = false;
+  for (int k = 0; k + 1 < n && !needed; ++k)
+    needed = p->getKeyframe(k).m_type != TDoubleKeyframe::Constant;
+  if (!needed) return false;
+
+  // What each integer frame shows today, as Constant keys.
+  std::vector<TDoubleKeyframe> keys;
+  auto add = [&keys](double frame, int id) {
+    TDoubleKeyframe kf(frame, id);
+    kf.m_type = TDoubleKeyframe::Constant;
+    keys.push_back(kf);
+  };
+  for (int k = 0; k < n; ++k) {
+    const TDoubleKeyframe kf = p->getKeyframe(k);
+    int id = (int)p->getValue(kf.m_frame);
+    add(kf.m_frame, id);
+    if (k + 1 == n || kf.m_type == TDoubleKeyframe::Constant) continue;
+    const double next = p->getKeyframe(k + 1).m_frame;
+    for (double f = std::floor(kf.m_frame) + 1; f < next; f += 1.0) {
+      const int v = (int)p->getValue(f);
+      if (v != id) add(f, id = v);
+    }
+  }
+  while (p->getKeyframeCount() > 0) p->deleteKeyframe(p->getKeyframe(0).m_frame);
+  for (const TDoubleKeyframe &kf : keys) p->setKeyframe(kf);
+  return true;
+}
+
+//------------------------------------------------------------------
+
+void PlasticSkeletonDeformation::keySkeletonIdAt(double frame) {
+  TDoubleParam *p = m_imp->m_skelIdsParam.getPointer();
+  if (p->isKeyframe(frame)) return;
+  makeSkeletonIdsStep();  // so the value read below is the one shown
+  TDoubleKeyframe kf(frame, skeletonId(frame));
+  kf.m_type = TDoubleKeyframe::Constant;
+  p->setKeyframe(kf);
 }
 
 //------------------------------------------------------------------
@@ -950,6 +1000,7 @@ bool PlasticSkeletonDeformation::setKeyframe(const SkDKey &keyframe) {
 
   if (keyframe.m_skelIdKeyframe.m_isKeyframe) {
     m_imp->m_skelIdsParam->setKeyframe(keyframe.m_skelIdKeyframe);
+    makeSkeletonIdsStep();
     keyWasSet = true;
   }
 
@@ -981,6 +1032,7 @@ bool PlasticSkeletonDeformation::setKeyframe(const SkDKey &keyframe,
     kf.m_frame = frame;
 
     m_imp->m_skelIdsParam->setKeyframe(kf);
+    makeSkeletonIdsStep();
     keyWasSet = true;
   }
 
@@ -2874,8 +2926,10 @@ void PlasticSkeletonDeformation::loadData(TIStream &is) {
           is.skipCurrentTag();
       }
       is.matchEndTag();
-    } else if (tagName == "SkelIdsParam")
+    } else if (tagName == "SkelIdsParam") {
       is >> *m_imp->m_skelIdsParam, is.matchEndTag();
+      makeSkeletonIdsStep();  // same skeleton on every frame, now as steps
+    }
     else if (tagName == "Skeletons") {
       while (is.openChild(tagName)) {
         if (tagName == "SkelId")

@@ -535,6 +535,15 @@ public:
   int skeletonId(double frame)
       const;  //!< Returns the \a active skeleton id by xsheet frame
 
+  //! Ztoryc: the skeleton-id curve is a switch — every key Constant. A Linear
+  //! segment slid the id between two keys and the truncation picked the
+  //! skeleton, so the active skeleton hung on a LATER key. Rewritten so every
+  //! integer frame keeps the skeleton it had. Returns true when it changed.
+  bool makeSkeletonIdsStep();
+  //! Ztoryc: keys the skeleton id at \p frame with the skeleton active
+  //! there (Constant), if no key is there — part of a global key.
+  void keySkeletonIdAt(double frame);
+
   // Vertex deformations-related methods
 
   int vertexDeformationsCount() const;

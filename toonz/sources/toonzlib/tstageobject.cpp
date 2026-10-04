@@ -1102,6 +1102,9 @@ void TStageObject::setPlasticPoseKeyframe(double frame) {
   // land at a time no evaluation ever samples.
   frame = paramsTime(frame);
 
+  // Ztoryc: which skeleton the pose is on belongs to the key too.
+  sd->keySkeletonIdAt((int)frame);
+
   PlasticSkeletonDeformation::vd_iterator vdt, vdEnd;
   sd->vertexDeformations(vdt, vdEnd);
   for (; vdt != vdEnd; ++vdt) {

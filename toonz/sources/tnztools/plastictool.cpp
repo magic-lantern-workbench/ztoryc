@@ -228,7 +228,10 @@ void setKeyframe(const PlasticSkeletonDeformationP &sd, double frame) {
 
 void setKeyframe(const PlasticSkeletonDeformationP &sd, double frame,
                  int skelId) {
-  // NOTE: The skeleton ids parameter is NOT affected
+  // Ztoryc: the skeleton id IS keyed (Constant): a global key locks which
+  // skeleton the pose is on, or deleting a later key could swap it (sh230,
+  // 2026-10-04).
+  sd->keySkeletonIdAt(frame);
 
   SkD::vd_iterator vdt, vdEnd;
   sd->vertexDeformations(vdt, vdEnd);
