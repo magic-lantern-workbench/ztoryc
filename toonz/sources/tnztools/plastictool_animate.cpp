@@ -2319,8 +2319,10 @@ void PlasticTool::bakePinsToFK_animate() {
     writeBackAngles_animate(t, plantedByT[t], plantedByT[t], false);
 
   // 4. Bake the rigid translation the planting added into the controller's
-  //    TransX/TransY (mapped through the controller's linear part → exact
-  //    even under an active squash/rotation)
+  //    TransX/TransY — as is, not through the controller's linear part: the
+  //    pivot is the deformed root and moves with the skeleton, so the
+  //    squash/rotation about it is unchanged (same fix as the last-pin
+  //    release, 2026-10-04)
   if (rvd && rootIdx >= 0 && rvd->m_params[SkVD::TRANSX] &&
       rvd->m_params[SkVD::TRANSY]) {
     for (double t : bakeTimes) {
@@ -2328,9 +2330,7 @@ void PlasticTool::bakePinsToFK_animate() {
       m_sd->storeDeformedSkeleton(skelId, t, fk);  // unpinned + angle-baked
       TPointD delta = plantedByT[t][rootIdx] - fk.vertex(rootIdx).P();
       if (norm2(delta) < 1e-12) continue;
-      TAffine ctrl = m_sd->getSquashControllerAffine(skelId, t);
-      TPointD d(ctrl.a11 * delta.x + ctrl.a12 * delta.y,
-                ctrl.a21 * delta.x + ctrl.a22 * delta.y);
+      const TPointD d = delta;
       TPointD base =
           origTransByT.count(t) ? origTransByT[t] : TPointD();
       ::setKeyframe(rvd->m_params[SkVD::TRANSX], t);
@@ -2843,8 +2843,8 @@ void PlasticTool::togglePinAtCurrentFrame() {
   // (angles are translation-invariant), which used to shift the whole
   // character. Transfer it to the controller's TransX/TransY — keyed with a
   // confinement key one frame earlier so the still-pinned frames before this
-  // one are untouched — mapped through the controller's linear part so the
-  // DISPLAYED pose stays identical even under an active squash/rotation.
+  // one are untouched — so the DISPLAYED pose stays identical, also under an
+  // active squash/rotation (see below why the vector is not remapped).
   if (pinned && wasLastPin && !planted.empty()) {
     m_deformedSkeleton.invalidate();
     PlasticSkeleton &ds = deformedSkeleton();  // fresh: un-pinned, angle-baked
@@ -2854,10 +2854,13 @@ void PlasticTool::togglePinAtCurrentFrame() {
       TPointD t = pt->second - ds.vertex(v).P();
       if (norm2(t) > 1e-12 && rvd->m_params[SkVD::TRANSX] &&
           rvd->m_params[SkVD::TRANSY]) {
-        const TAffine ctrl =
-            m_sd->getSquashControllerAffine(::skeletonId(), frame);
-        TPointD d(ctrl.a11 * t.x + ctrl.a12 * t.y,
-                  ctrl.a21 * t.x + ctrl.a22 * t.y);
+        // NOT mapped through the controller's linear part: its pivot is the
+        // DEFORMED root, which moves with the whole skeleton by -t, so the
+        // scale/rotation about it is unchanged and the displayed points move
+        // by exactly -t. Mapping it through a 1.04 x 0.96 scale left a
+        // residual (A - I) t — 16 units on a 397-unit transfer (Franco,
+        // 2026-10-04, sh230).
+        const TPointD d = t;
         // Confine the transfer to the un-pinned gap: it holds until the NEXT
         // pin activation, where planting takes over and the controller must
         // be back to its pre-transfer value (otherwise the advancement would

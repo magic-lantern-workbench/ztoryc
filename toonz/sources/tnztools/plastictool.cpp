@@ -2518,6 +2518,13 @@ bool PlasticTool::onPropertyChanged(std::string propertyName) {
       break;
     }
 
+    // The tool matrix carries the controller affine in Animate only
+    // (updateMatrix): without this the skeleton was drawn with the OTHER
+    // mode's matrix until the next frame change — on a character carried by
+    // the controller's TransX it sat far away, as if missing (Franco,
+    // 2026-10-04).
+    updateMatrix();
+
     // Update context menus
     enableCommands();
 
@@ -3047,11 +3054,22 @@ void PlasticTool::drawOnionSkinSkeletons_animate(double pixelSize) {
     double sdFrame = obj->paramsTime(double(osRows[r].first - 1));
 
     PlasticSkeleton skel;
-    m_sd->storeDeformedSkeleton(m_sd->skeletonId(sdFrame), sdFrame, skel);
+    const int skelId = m_sd->skeletonId(sdFrame);
+    m_sd->storeDeformedSkeleton(skelId, sdFrame, skel);
 
     UCHAR alpha = 255 - 255.0 * OnionSkinMask::getOnionSkinFade(
                                     abs(osRows[r].first - currentRow));
+    // The tool matrix carries the CURRENT frame's controller affine; a ghost
+    // needs its own frame's. A walk carried by the controller's TransX drew
+    // every ghost skeleton where the current frame is, away from its drawing
+    // (Franco, 2026-10-04).
+    const TAffine ghostAff =
+        m_sd->getSquashControllerAffine(::skeletonId(), ::sdFrame()).inv() *
+        m_sd->getSquashControllerAffine(skelId, sdFrame);
+    glPushMatrix();
+    tglMultMatrix(ghostAff);
     drawSkeleton(skel, pixelSize, alpha);
+    glPopMatrix();
   }
 }
 

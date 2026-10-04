@@ -1604,6 +1604,37 @@ void PlasticSkeletonDeformation::plantPins(int skelId, double frame,
   bool anyStageOwned = false;
 
   const tcg::list<PlasticSkeleton::vertex_type> &verts = skeleton.vertices();
+
+  // The controller's translation (TransX/TransY on the root) is applied AFTER
+  // the planting, and a local target is a step value captured with the
+  // controller of ITS frame. Where the controller moves between two pinned
+  // keys — a last-pin release transfers the walk into it — the in-betweens
+  // carried the planted hand along with it while the keys looked right
+  // (Franco, 2026-10-04, sh230: target 558 -> 161, TransX -1753 -> -1372).
+  // The target is corrected by the controller's drift since then, so the pin
+  // holds in the scene. The pivot follows the deformed root, so a rigid shift
+  // of the solution moves the image by exactly that shift: no remapping.
+  const SkVD *rootVd = 0;
+  for (auto vt = verts.begin(); vt != verts.end(); ++vt)
+    if (vt->parent() < 0) {
+      auto rt = m_imp->m_vds.find(vt->name());
+      if (rt != m_imp->m_vds.end()) rootVd = &rt->m_vd;
+      break;
+    }
+  auto controllerTrans = [rootVd](double f) {
+    if (!rootVd || !rootVd->m_params[SkVD::TRANSX] ||
+        !rootVd->m_params[SkVD::TRANSY])
+      return TPointD();
+    return TPointD(rootVd->m_params[SkVD::TRANSX]->getValue(f),
+                   rootVd->m_params[SkVD::TRANSY]->getValue(f));
+  };
+  // Frame of the target key in effect at `frame` (the curves are step).
+  auto targetKeyFrame = [frame](const TDoubleParam &p) {
+    if (p.getKeyframeCount() == 0 || p.isKeyframe(frame)) return frame;
+    const int k = p.getPrevKeyframe(frame);
+    return p.getKeyframe(k >= 0 ? k : 0).m_frame;
+  };
+
   for (auto vt = verts.begin(); vt != verts.end(); ++vt) {
     auto it = m_imp->m_vds.find(vt->name());
     if (it == m_imp->m_vds.end()) continue;
@@ -1642,6 +1673,8 @@ void PlasticSkeletonDeformation::plantPins(int skelId, double frame,
       continue;
     TPointD target(vd.m_params[SkVD::PINTX]->getValue(frame),
                    vd.m_params[SkVD::PINTY]->getValue(frame));
+    target -= controllerTrans(frame) -
+              controllerTrans(targetKeyFrame(*vd.m_params[SkVD::PINTX]));
     pins.push_back(
         {(int)vt.m_idx, target,
          locals::activationFrame(*vd.m_params[SkVD::PIN], frame)});

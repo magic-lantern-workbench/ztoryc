@@ -590,9 +590,24 @@ void StageBuilder::addCell(PlayerSet &players, ToonzScene *scene, TXsheet *xsh,
 
 //-----------------------------------------------------------------------------
 
+// A Plastic puppet holds ONE drawing for the whole shot: the pose lives in
+// the deformation, not in the cell. "Same cell" does not mean "same image"
+// there, and skipping the repeats left the onion skin with the skeleton ghosts
+// and no drawing (Franco, 2026-10-03 and 2026-10-04, CS2606 sh230).
+static bool isPlasticDeformed(TXsheet *xsh, int col) {
+  TStageObject *obj = xsh->getStageObject(TStageObjectId::ColumnId(col));
+  if (!obj) return false;
+  if (obj->getPlasticSkeletonDeformation()) return true;
+  const TStageObjectId parentId = obj->getParent();
+  if (!parentId.isColumn()) return false;
+  TStageObject *parent = xsh->getStageObject(parentId);
+  return parent && parent->getPlasticSkeletonDeformation();
+}
+
 static bool alreadyAdded(TXsheet *xsh, int row, int index,
                          const std::vector<std::pair<int, double>> &rows,
                          int col) {
+  if (isPlasticDeformed(xsh, col)) return false;
   int i;
   for (i = 0; i < index; i++)
     if (xsh->getCell(rows[i].first, col) ==
