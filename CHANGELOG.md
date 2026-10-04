@@ -1,3 +1,33 @@
+## [2026-10-04] — rilascio 0.16.0; scheletro a scatto, pin sopra il controller, onion skin, audio delle dissolvenze
+
+Sessione locale sul Mac, collaudata da Franco su CS2606 (sh230). Commit `05164ec0f`, `9606578e9`, `0656a2ae3`,
+`9b2bb6365` (versione 0.16.0). Rilascio lanciato il 2026-10-04 (le tre CI insieme).
+
+### Fixed
+- **La curva dello scheletro Plastic interpolava** (chiavi 19 → 2 e 59 → 1 con tratto lineare: il troncamento
+  dava lo scheletro 1 solo grazie alla chiave successiva; cancellandola la corsa finiva sullo scheletro
+  frontale). Ora sempre a scatto, convertita conservando lo scheletro di ogni fotogramma; la chiave globale
+  chiava anche lo scheletro. **Collaudato.**
+- **Pin e controller**: il bersaglio di un pin acceso si corregge della deriva del TransX/Y del controller
+  (la mano scivolava negli intermedi fra 95 e 100); togliendo l'ultimo pin (e uscendo dall'IK) lo
+  spostamento passa al controller esatto, senza la scala (scarto del 4% con Mass). **Collaudato.**
+- **Onion skin del pupazzo Plastic**: i fantasmi del disegno non venivano saltati piu' per cella uguale (era
+  la causa trovata il 3/10 e tolta per errore), gli scheletri fantasma usano il controller del loro
+  fotogramma. **Collaudato.**
+- Passando da Build ad Animate lo scheletro si vede subito (la matrice dello strumento non si aggiornava).
+- **Shot esportati con dissolvenze**: audio lordo (testa + shot + coda), lip sync sullo stesso tratto e
+  allineato. Da collaudare.
+
+### Notes
+- Il controller che non funzionava nel render: Franco non lo riproduce (ANIMATIC_TASKS, «non riprodotto»).
+- Spostare chiavi su una colonna senza scheletro: tenuto l'avviso, niente scheletro che viaggia con le
+  chiavi (decisione di Franco).
+- Lo scarto residuo di 16 unita' al fotogramma 100 della sh230 e' il vecchio sgancio del pin: va rifatto lo
+  sgancio o tolte le chiavi PinTX/PinTY della mano al 100.
+
+### Upstream candidates
+- Curva dello scheletro Plastic che interpola, con troncamento all'intero.
+
 ## [2026-10-03] — camminate con IK e Plastic: pin a scatto, Copy/Paste Pose, Global Key ovunque; slide delle celle, due diamanti nuovi
 
 Sessione locale sul Mac, sul lavoro vero di CS2606 (Messina, sh190 e sh230). Commit `ac0265cea`,

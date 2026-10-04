@@ -1359,7 +1359,10 @@ Resta aperta la voce qui sotto, in «Kitsu / produzione»: domande accodate a og
 
 ---
 
-### 🔴 APERTO — il controller funziona nel viewer e non nel render
+### 🟢 NON RIPRODOTTO (2026-10-04) — il controller funziona nel viewer e non nel render
+
+Franco, 2026-10-04: «mi pare funzioni bene anche nel render» (CS2606, dopo il lavoro col controller del
+3/10). Non si chiude: resta da osservare; se ricapita, confrontare le due matrici come scritto sotto.
 
 Franco, 2026-08-05: «forse e' il nostro controller (quella specie di animate tool
 legato allo skeleton) che se lo uso per riposizionare un elemento funziona nel
