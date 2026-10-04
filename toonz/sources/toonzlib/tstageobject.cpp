@@ -974,6 +974,39 @@ TStageObject::Keyframe TStageObject::getKeyframe(int frame) const {
 
 //-----------------------------------------------------------------------------
 
+// Ztoryc: a segment between two keys of the SAME value is a hold, and must
+// hold. Speed In/Out handles (computed from the neighbours) made a pasted copy
+// of a key "breathe": the curve left with a speed and came back, and the
+// character moved between two identical poses (Franco, 2026-10-04). Only for
+// keys written by key operations (paste, move, insert — they all come here);
+// a bump shaped by hand in the Function Editor is not touched.
+static void holdEqualNeighbours(TDoubleParam *p, double frame) {
+  if (!p || !p->isKeyframe(frame)) return;
+  const int n = p->getKeyframeCount();
+  int i       = 0;
+  while (i < n && p->getKeyframe(i).m_frame != frame) ++i;
+  if (i == n) return;
+  auto flatten = [p](int a) {  // the segment that starts at key a
+    TDoubleKeyframe kf = p->getKeyframe(a);
+    switch (kf.m_type) {
+    case TDoubleKeyframe::SpeedInOut:
+    case TDoubleKeyframe::EaseInOut:
+    case TDoubleKeyframe::EaseInOutPercentage:
+    case TDoubleKeyframe::Exponential:
+      kf.m_type = TDoubleKeyframe::Linear;
+      p->setKeyframe(a, kf);
+      break;
+    default:  // Constant, Linear, expressions, files: left alone
+      break;
+    }
+  };
+  const double v = p->getKeyframe(i).m_value;
+  if (i > 0 && std::abs(p->getKeyframe(i - 1).m_value - v) < 1e-9)
+    flatten(i - 1);
+  if (i + 1 < n && std::abs(p->getKeyframe(i + 1).m_value - v) < 1e-9)
+    flatten(i);
+}
+
 void TStageObject::setKeyframeWithoutUndo(int frame,
                                           const TStageObject::Keyframe &k) {
   KeyframeMap &keyframes = lazyData().m_keyframes;
@@ -1021,6 +1054,23 @@ void TStageObject::setKeyframeWithoutUndo(int frame,
     keyWasSet = m_skeletonDeformation->setKeyframe(k.m_skeletonKeyframe, frame,
                                                    k.m_easeIn, k.m_easeOut) ||
                 keyWasSet;
+
+  if (keyWasSet) {
+    for (TDoubleParam *p :
+         {m_rot.getPointer(), m_x.getPointer(), m_y.getPointer(),
+          m_z.getPointer(), m_so.getPointer(), m_posPath.getPointer(),
+          m_scalex.getPointer(), m_scaley.getPointer(), m_scale.getPointer(),
+          m_shearx.getPointer(), m_sheary.getPointer()})
+      holdEqualNeighbours(p, frame);
+    if (m_skeletonDeformation) {
+      PlasticSkeletonDeformation::vd_iterator vdt, vdEnd;
+      m_skeletonDeformation->vertexDeformations(vdt, vdEnd);
+      for (; vdt != vdEnd; ++vdt)
+        if (SkVD *vd = (*vdt).second)
+          for (int p = 0; p < SkVD::PARAMS_COUNT; ++p)
+            holdEqualNeighbours(vd->m_params[p].getPointer(), frame);
+    }
+  }
 
   if (keyWasSet) keyframes[frame] = k;
 
