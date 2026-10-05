@@ -5963,6 +5963,16 @@ void StoryboardPanel::onDeleteShot() {
   if (toDelete.empty() && m_selectedShotIndex >= 0) toDelete.push_back(m_selectedShotIndex);
   if (toDelete.empty()) return;
 
+  // A structural operation on the MAIN xsheet: close any open sub-scene first,
+  // as Add/Copy/Cut already do.  In Ztoryc X the Board shares its panel with
+  // the xsheet, so it is one click away while inside a shot — and from there
+  // deleteColumns() acted on the sub-scene, destroying the drawing column (the
+  // main-xsheet index of the shot is also a valid column index inside it).
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  if (scene)
+    while (scene->getChildStack()->getAncestorCount() > 0)
+      CommandManager::instance()->execute("MI_CloseChild");
+
   auto before = captureSnapshot();
 
   // Usa data.xsheetColumn (non l'indice Board) per identificare le colonne
