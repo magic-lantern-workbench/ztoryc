@@ -4368,7 +4368,7 @@ ZtoryPanelNavigator::ZtoryPanelNavigator(QWidget *parent)
       m_lightShowBtn->blockSignals(false);
       if (!show && m_lightEditBtn->isChecked()) m_lightEditBtn->setChecked(false);
     }
-    if (m_shotIdx >= 0) refreshPreview();
+    if (hasValidShot()) refreshPreview();
   });
 
   toggleLay->addWidget(autoMatchBtn);
@@ -4387,7 +4387,7 @@ ZtoryPanelNavigator::ZtoryPanelNavigator(QWidget *parent)
   m_refreshTimer->setSingleShot(true);
   m_refreshTimer->setInterval(800);
   connect(m_refreshTimer, &QTimer::timeout, this, [this]() {
-    if (m_shotIdx >= 0) refreshPreview();
+    if (hasValidShot()) refreshPreview();
   });
 
   // --- Connections ---
@@ -4416,11 +4416,11 @@ ZtoryPanelNavigator::ZtoryPanelNavigator(QWidget *parent)
   });
 
   connect(m_prevBtn, &QToolButton::clicked, this, [this]() {
-    if (m_shotIdx < 0 || m_panelIdx <= 0) return;
+    if (!hasValidShot() || m_panelIdx <= 0) return;
     setActivePanel(m_panelIdx - 1, m_syncEnabled);
   });
   connect(m_nextBtn, &QToolButton::clicked, this, [this]() {
-    if (m_shotIdx < 0) return;
+    if (!hasValidShot()) return;
     const auto &panels = ZtoryModel::instance()->shot(m_shotIdx).panels;
     if (m_panelIdx >= (int)panels.size() - 1) return;
     setActivePanel(m_panelIdx + 1, m_syncEnabled);
@@ -4430,7 +4430,7 @@ ZtoryPanelNavigator::ZtoryPanelNavigator(QWidget *parent)
   });
 
   auto onTextChanged = [this]() {
-    if (m_blockSignals || m_shotIdx < 0) return;
+    if (m_blockSignals || !hasValidShot()) return;
     const auto &panels = ZtoryModel::instance()->shot(m_shotIdx).panels;
     if (m_panelIdx < 0 || m_panelIdx >= (int)panels.size()) return;
     PanelData &pd = ZtoryModel::instance()->shot(m_shotIdx).panels[m_panelIdx];
@@ -4488,13 +4488,20 @@ void ZtoryPanelNavigator::onShotDataChanged(int shotIdx) {
 }
 
 void ZtoryPanelNavigator::onModelReset() {
-  if (m_shotIdx < 0) return;
+  // The shot list may have changed under m_shotIdx: re-bind to the sub-scene
+  // we are in before reading anything through it.
+  syncFromScene();
+  if (!hasValidShot()) return;
   refreshPreview();
   refreshTextFields();
 }
 
+bool ZtoryPanelNavigator::hasValidShot() const {
+  return m_shotIdx >= 0 && m_shotIdx < ZtoryModel::instance()->shotCount();
+}
+
 void ZtoryPanelNavigator::onFrameSwitched() {
-  if (!m_syncEnabled || m_shotIdx < 0) return;
+  if (!m_syncEnabled || !hasValidShot()) return;
   refreshActivePanelFromFrame();
 }
 
@@ -4503,7 +4510,7 @@ void ZtoryPanelNavigator::onXsheetChanged() {
   // the user jumps from one shot to another without xsheetSwitched firing
   // (e.g. via timeline navigation or direct cell double-click).
   syncFromScene();
-  if (m_shotIdx >= 0) m_refreshTimer->start();
+  if (hasValidShot()) m_refreshTimer->start();
 }
 
 void ZtoryPanelNavigator::syncFromScene() {
@@ -4519,12 +4526,18 @@ void ZtoryPanelNavigator::syncFromScene() {
   AncestorNode *node = cs->getAncestorInfo(0);
   if (!node) return;
   int newSi = ZtoryModel::instance()->shotIndexForCol(node->m_col);
-  if (newSi < 0) return;
+  if (newSi < 0) {
+    // This sub-scene has no entry in the model (yet): keeping the previous
+    // index would show — and read — another shot's data. Clear instead; the
+    // next modelReset re-binds once the model has caught up.
+    if (m_shotIdx >= 0) onReturnToMain();
+    return;
+  }
   if (newSi != m_shotIdx) onShotActivated(node->m_col);
 }
 
 void ZtoryPanelNavigator::setActivePanel(int panelIdx, bool updateFrame) {
-  if (m_shotIdx < 0) return;
+  if (!hasValidShot()) return;
   const auto &panels = ZtoryModel::instance()->shot(m_shotIdx).panels;
   if (panelIdx < 0 || panelIdx >= (int)panels.size()) return;
 
@@ -4586,7 +4599,7 @@ void ZtoryPanelNavigator::drawLightRubberBand() {
 // Writes the placed/removed gizmo into ZtoryModel and notifies — the Board
 // mirrors the change (thumbnail re-bake + .ztoryc save) via shotDataChanged.
 void ZtoryPanelNavigator::commitLightEdit(bool remove) {
-  if (m_shotIdx < 0) return;
+  if (!hasValidShot()) return;
   auto &panels = ZtoryModel::instance()->shot(m_shotIdx).panels;
   if (m_panelIdx < 0 || m_panelIdx >= (int)panels.size()) return;
   PanelData &pd = panels[m_panelIdx];
@@ -4666,7 +4679,7 @@ bool ZtoryPanelNavigator::eventFilter(QObject *obj, QEvent *e) {
 }
 
 void ZtoryPanelNavigator::refreshPreview() {
-  if (m_shotIdx < 0) return;
+  if (!hasValidShot()) return;
   const auto &shot = ZtoryModel::instance()->shot(m_shotIdx);
   if (m_panelIdx >= (int)shot.panels.size()) return;
 
@@ -4767,7 +4780,7 @@ void ZtoryPanelNavigator::showEvent(QShowEvent *e) {
 
 void ZtoryPanelNavigator::resizeEvent(QResizeEvent *e) {
   TPanel::resizeEvent(e);
-  if (m_shotIdx < 0) return;
+  if (!hasValidShot()) return;
   // Cheap immediate feedback: rescale the cached pixmap (keeps aspect), then
   // re-render at the new resolution only after the resize burst settles —
   // refreshPreview() does a full sub-scene render and lagged on every tick.
@@ -4786,14 +4799,14 @@ void ZtoryPanelNavigator::resizeEvent(QResizeEvent *e) {
     m_resizeRenderTimer->setSingleShot(true);
     m_resizeRenderTimer->setInterval(250);
     connect(m_resizeRenderTimer, &QTimer::timeout, this, [this]() {
-      if (m_shotIdx >= 0) refreshPreview();
+      if (hasValidShot()) refreshPreview();
     });
   }
   m_resizeRenderTimer->start();
 }
 
 void ZtoryPanelNavigator::refreshTextFields() {
-  if (m_shotIdx < 0) return;
+  if (!hasValidShot()) return;
   const auto &panels = ZtoryModel::instance()->shot(m_shotIdx).panels;
   if (m_panelIdx >= (int)panels.size()) return;
 
@@ -4807,9 +4820,8 @@ void ZtoryPanelNavigator::refreshTextFields() {
 }
 
 void ZtoryPanelNavigator::refreshInfoLabels() {
-  if (m_shotIdx < 0) return;
+  if (!hasValidShot()) return;
   ZtoryModel *m = ZtoryModel::instance();
-  if (m_shotIdx >= m->shotCount()) return;
   const ShotData &shot = m->shot(m_shotIdx);
   int n   = (int)shot.panels.size();
   int fps = m->fps() > 0 ? m->fps() : 24;
@@ -4843,7 +4855,7 @@ void ZtoryPanelNavigator::refreshInfoLabels() {
 }
 
 void ZtoryPanelNavigator::refreshActivePanelFromFrame() {
-  if (m_shotIdx < 0) return;
+  if (!hasValidShot()) return;
   const auto &panels = ZtoryModel::instance()->shot(m_shotIdx).panels;
   int frame = TApp::instance()->getCurrentFrame()->getFrame();
   for (int i = 0; i < (int)panels.size(); i++) {

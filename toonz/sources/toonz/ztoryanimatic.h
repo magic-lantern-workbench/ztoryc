@@ -731,6 +731,10 @@ private:
   void refreshActivePanelFromFrame();
   void refreshInfoLabels();    // updates header + panel info + shot info
   void syncFromScene();        // (re)bind m_shotIdx to whatever sub-scene we're in
+  //! m_shotIdx is an index into ZtoryModel::m_shots, kept across calls: the
+  //! model can shrink (or lag behind the xsheet) under it. Every use goes
+  //! through this check instead of «m_shotIdx >= 0».
+  bool hasValidShot() const;
 
   int           m_shotIdx      = -1;
   int           m_panelIdx     = 0;

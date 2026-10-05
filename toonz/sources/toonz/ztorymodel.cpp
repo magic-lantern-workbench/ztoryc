@@ -3364,7 +3364,20 @@ int ZtoryModel::shotIndexForCol(int col) const {
       }
     }
     if (!isChild) continue;
-    if (c == col) return childIdx;
+    if (c == col) {
+      // The ordinal comes from the xsheet; the caller indexes m_shots with it.
+      // An Animatic "+" writes the xsheet and leaves m_shots to catch up
+      // later (through the Board), so the model can be one shot short: return
+      // "not found" rather than an index past the end (Windows crash in the
+      // Panel Navigator, 2026-10-04, 0.14.1).
+      if (childIdx >= (int)m_shots.size()) {
+        qWarning("[ZTORY] shotIndexForCol: col %d -> idx %d but model has %d "
+                 "shots (stale)",
+                 col, childIdx, (int)m_shots.size());
+        return -1;
+      }
+      return childIdx;
+    }
     childIdx++;
   }
   return -1;
