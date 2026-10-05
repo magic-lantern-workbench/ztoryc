@@ -51,6 +51,16 @@ void cloneChildToPosition(int srcCol, int dstCol);
 void pasteSharedClip(const std::vector<ZtoryClipEntry> &clip, int insertCol,
                      TXsheet *xsh, ToonzScene *scene);
 
+// Make sure every level the scene exposes (sub-scenes included, recursively)
+// is in the scene cast.  The Board's Cut drops the cut shot's levels from the
+// cast (the clip alone keeps them alive), and so does an undo/redo of a Delete;
+// a level exposed in the cells but missing from the cast is NOT saved by Save
+// All (it saves only the level set), so a drawing made in a pasted shot never
+// reached disk until the scene was reopened.  A name freed meanwhile and taken
+// by another level gets the returning level renamed, never two levels sharing
+// a name.
+void returnUsedLevelsToCast(ToonzScene *scene);
+
 // Cell count of a column (r1 - r0 + 1), or 24 if empty/invalid.
 int colDuration(TXsheet *xsh, int col);
 

@@ -5929,6 +5929,11 @@ void UndoBoardState::undo() const {
   m_panel->restoreFromSnapshot(m_before);
   if (ztoryAudioSnapDiffers(m_before.audio, m_after.audio))
     ztoryRestoreAudioSnap(m_before.audio);
+  // The insert above skips a level whose name was taken meanwhile; this one
+  // renames it instead, and also covers levels the snapshot brings back that
+  // were never in m_removedLevels.
+  ZtoryShotOps::returnUsedLevelsToCast(
+      TApp::instance()->getCurrentScene()->getScene());
 }
 
 void UndoBoardState::redo() const {
@@ -5944,6 +5949,10 @@ void UndoBoardState::redo() const {
       for (const TXshLevelP &lvl : m_removedLevels)
         ls->removeLevel(lvl.getPointer(), false);
   }
+  // Redo of a Paste after a Cut: the snapshot re-exposes the cut shot without
+  // going through pasteSharedClip, so its levels would stay out of the cast.
+  ZtoryShotOps::returnUsedLevelsToCast(
+      TApp::instance()->getCurrentScene()->getScene());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -31,6 +31,7 @@
 #include "tdoublekeyframe.h"
 
 #include <algorithm>
+#include <set>
 #include <string>
 
 namespace ZtoryShotOps {
@@ -257,8 +258,45 @@ void cloneChildToPosition(int srcCol, int dstCol) {
   app->getCurrentXsheet()->notifyXsheetChanged();
 }
 
+void returnUsedLevelsToCast(ToonzScene *scene) {
+  TXsheet *top  = scene ? scene->getChildStack()->getTopXsheet() : nullptr;
+  TLevelSet *ls = scene ? scene->getLevelSet() : nullptr;
+  if (!top || !ls) return;
+  std::set<TXshLevel *> levels;
+  top->getUsedLevels(levels);  // recursive: sub-scenes and what they use
+  bool changed = false;
+  for (TXshLevel *level : levels) {
+    // Only the kinds that live in the cast.  getUsedLevels also returns the
+    // levels OWNED by their column — zerary fx (color cards...) and the
+    // sound-text notes (the XD-in/XD-out columns): unnamed, never in the
+    // level set, and saved with the column.  Putting them in the cast would
+    // write spurious levels into the .tnz.
+    if (!level->getSimpleLevel() && !level->getChildLevel() &&
+        !level->getPaletteLevel() && !level->getSoundLevel())
+      continue;
+    TXshLevel *sameName = ls->getLevel(level->getName());
+    if (sameName == level) continue;
+    if (sameName) {
+      const std::wstring base = level->getName();
+      std::wstring name;
+      int n = 1;
+      do name = base + L"_" + std::to_wstring(n++);
+      while (ls->hasLevel(name));
+      level->setName(name);
+    }
+    ls->insertLevel(level);
+    changed = true;
+  }
+  if (changed) {
+    TSceneHandle *sh = TApp::instance()->getCurrentScene();
+    sh->setDirtyFlag(true);
+    sh->notifyCastChange();
+  }
+}
+
 void pasteSharedClip(const std::vector<ZtoryClipEntry> &clip, int insertCol,
                      TXsheet *xsh, ToonzScene *scene) {
+  bool cutReinserted = false;
   for (int ci = 0; ci < (int)clip.size(); ci++) {
     int pos = insertCol + ci;
     const ZtoryClipEntry &ce = clip[ci];
@@ -268,6 +306,7 @@ void pasteSharedClip(const std::vector<ZtoryClipEntry> &clip, int insertCol,
       if (ce.cutLevel) {
         for (int r = 0; r < ce.duration; r++)
           xsh->setCell(r, pos, TXshCell(ce.cutLevel, TFrameId(r + 1)));
+        cutReinserted = true;
       } else if (scene) {
         TXshLevel *xl = scene->createNewLevel(CHILD_XSHLEVEL);
         if (xl && xl->getChildLevel()) {
@@ -298,6 +337,7 @@ void pasteSharedClip(const std::vector<ZtoryClipEntry> &clip, int insertCol,
       }
     }
   }
+  if (cutReinserted) returnUsedLevelsToCast(scene);
 }
 
 int colDuration(TXsheet *xsh, int col) {
