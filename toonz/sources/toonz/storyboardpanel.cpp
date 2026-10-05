@@ -2841,12 +2841,34 @@ void StoryboardPanel::ensureShotUuids() {
   // The Board's uuid only: taking the model's at the same POSITION gave a new
   // shot (a clone, just pasted) the uuid of whichever shot the stale model
   // list had there. A legacy shot without one got it from pushTrackingToBoard,
-  // which saveZtoryc now runs first. The model entry follows the Board's.
-  int n = qMin((int)m_shots.size(), m->shotCount());
+  // which saveZtoryc now runs first.
+  //
+  // The model entry follows the Board's only when it is the SAME shot: found
+  // by the uuid the Board had before resolving, never by position (or, both
+  // lists without uuids and of equal length, a legacy scene just loaded).
+  // The model's list can be a shot behind the
+  // Board's: an Add from the Animatic reaches the Board through its incremental
+  // path, which never touches the model.  Writing by position then shifted
+  // every later uuid by one, and the next pushTrackingToBoard (the other Board
+  // instances save right after) handed each shot the technique and tasks of
+  // the one after it.
+  QHash<QString, int> modelByUuid;  // same matching as pushTrackingToBoard
+  for (int i = 0; i < m->shotCount(); i++) {
+    const QString &u = m->shot(i).uuid;
+    if (u.isEmpty()) continue;
+    modelByUuid[u] = modelByUuid.contains(u) ? -1 : i;  // -1: claimed twice
+  }
+  const bool sameLength = m->shotCount() == (int)m_shots.size();
   for (int i = 0; i < (int)m_shots.size(); i++) {
-    QString &bu = m_shots[i].data.uuid;
+    QString &bu          = m_shots[i].data.uuid;
+    const QString before = bu;
     resolveUuid(bu);
-    if (i < n) m->shot(i).uuid = bu;
+    int mi = -1;
+    if (!before.isEmpty())
+      mi = modelByUuid.value(before, -1);
+    else if (sameLength && m->shot(i).uuid.isEmpty())
+      mi = i;  // legacy scene, just loaded: both lists without uuids
+    if (mi >= 0) m->shot(mi).uuid = bu;
   }
 }
 
