@@ -2842,7 +2842,7 @@ static QString makeSourcedUuid(const QString &sourceFile) {
   return QUuid::createUuidV5(ns, shotSeed.toString()).toString(QUuid::WithoutBraces);
 }
 
-void StoryboardPanel::ensureShotUuids() {
+void StoryboardPanel::ensureShotUuids(bool afterLoad) {
   ZtoryModel *m = ZtoryModel::instance();
 
   // Build a (uuid → source) map from the project DB to detect cross-storyboard
@@ -2894,8 +2894,10 @@ void StoryboardPanel::ensureShotUuids() {
     int mi = -1;
     if (!before.isEmpty())
       mi = modelByUuid.value(before, -1);
-    else if (sameLength && m->shot(i).uuid.isEmpty())
-      mi = i;  // legacy scene, just loaded: both lists without uuids
+    else if (afterLoad && sameLength && m->shot(i).uuid.isEmpty())
+      mi = i;  // legacy scene, just loaded: both lists without uuids.  Only
+               // right after the load: on a later save the model can be a
+               // shot behind the Board, and the position means nothing.
     if (mi >= 0) m->shot(mi).uuid = bu;
   }
 }
@@ -3916,7 +3918,7 @@ void StoryboardPanel::loadZtoryc() {
   // saveZtoryc below (so a re-save can't push stale/empty model data over the
   // freshly-loaded Board copy). Backfill uuids for pre-uuid (legacy) scenes.
   pullTrackingFromBoard();
-  ensureShotUuids();
+  ensureShotUuids(/*afterLoad=*/true);
   // Mark shot scenes BEFORE any saveZtoryc() below so the companion .ztoryc is
   // never rewritten with role="storyboard".
   m_currentSceneIsShot      = (sceneRole == "shot");

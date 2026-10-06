@@ -369,7 +369,10 @@ struct Shot {
   // model⇄Board at the load/save/export boundaries so panel edits round-trip.
   void    pushTrackingToBoard();    // model → Board (before save / export)
   void    pullTrackingFromBoard();  // Board → model (after load)
-  void    ensureShotUuids();        // assign a stable uuid to any shot missing one
+  // Assign a stable uuid to any shot missing one.  afterLoad: the Board and the
+  // model were just filled from the same file (legacy scenes without uuids
+  // match by position only then).
+  void    ensureShotUuids(bool afterLoad = false);
 public:
   explicit StoryboardPanel(QWidget *parent = nullptr);
   void    saveZtoryc();
