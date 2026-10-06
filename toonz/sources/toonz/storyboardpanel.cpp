@@ -2903,26 +2903,26 @@ void StoryboardPanel::ensureShotUuids() {
 bool StoryboardPanel::adoptCutShot(Shot &shot) {
   const ShotData *cut = ZtoryModel::instance()->cutShotFor(shot.childLevel);
   if (!cut) return false;
-  // What belongs to the shot comes back: panels and their texts, uuid,
-  // technique, tasks, notes, lights.  What belongs to its NEW place stays as
-  // the Board gave it: the column, the label and order (renumberAll and Keep
-  // mode decide them, as for any pasted shot) and the sequence (inherited from
-  // the neighbours).
-  ShotData data      = *cut;
-  data.xsheetColumn  = shot.data.xsheetColumn;
-  data.shotLabel     = shot.data.shotLabel;
-  data.shotNumber    = shot.data.shotNumber;
-  data.orderIndex    = shot.data.orderIndex;
-  data.sequenceId    = shot.data.sequenceId;
+  // Cut + Paste is a MOVE, and behaves like onMoveShot (Franco, 2026-10-06):
+  // the whole shot comes back — panels and texts, uuid, technique, tasks,
+  // lights, and also its label, order and sequence.  renumberAll then decides
+  // as after a reorder: in Auto it renumbers, in Keep the shots keep their
+  // numbers (and with them the Kitsu link, which is sequence + label).
+  ShotData data     = *cut;
+  data.xsheetColumn = shot.data.xsheetColumn;  // where it is now
   // The original may still be here: Cut, ⌘Z (the column is back, the cut stays
   // in the clip), ⌘V pastes a second column of the same sub-scene.  Two shots
-  // must never share a uuid: this one gets a new one (ensureShotUuids).
-  for (const Shot &other : m_shots)
-    if (&other != &shot && !data.uuid.isEmpty() &&
-        other.data.uuid == data.uuid) {
-      data.uuid.clear();
-      break;
+  // must never share a uuid, nor a label: this one gets new ones
+  // (ensureShotUuids; renumberAll gives a blank label a midpoint number).
+  for (const Shot &other : m_shots) {
+    if (&other == &shot) continue;
+    if (!data.uuid.isEmpty() && other.data.uuid == data.uuid) data.uuid.clear();
+    if (!data.shotLabel.isEmpty() && other.data.shotLabel == data.shotLabel) {
+      data.shotLabel.clear();
+      data.shotNumber.clear();
+      data.orderIndex = shot.data.orderIndex;
     }
+  }
   shot.data = std::move(data);
   return true;
 }
@@ -4966,6 +4966,7 @@ bool StoryboardPanel::reconcileShotsWithScene(
   std::vector<Shot> next;
   next.reserve(childLevels.size());
   std::vector<int> toDetect;
+  std::set<TXshChildLevel *> adopted;  // pasted Cuts: keep their label (Keep)
   std::vector<bool> kept(m_shots.size(), false);
   ZtoryModel *model = ZtoryModel::instance();
   for (int j = 0; j < (int)childLevels.size(); j++) {
@@ -4996,6 +4997,7 @@ bool StoryboardPanel::reconcileShotsWithScene(
       // Thumbnail room writes them in the model first) — take them only when
       // the model entry really is this column.
       if (adoptCutShot(s)) {
+        adopted.insert(s.childLevel);
         // A pasted Cut: its panels came back with it; re-detect only if the
         // column's length no longer matches them.
         int sum = 0;
@@ -5053,7 +5055,10 @@ bool StoryboardPanel::reconcileShotsWithScene(
       if (looksLikeLabel) {
         shot.data.shotLabel  = name;
         shot.data.shotNumber = name;
-      } else {
+      } else if (!adopted.count(shot.childLevel) ||
+                 shot.data.shotLabel.isEmpty()) {
+        // A pasted Cut keeps the label it came back with (a move); its new
+        // column simply has no name yet.
         shot.data.shotLabel.clear();
       }
     }
@@ -5427,9 +5432,13 @@ void StoryboardPanel::refreshFromScene() {
       if (looksLikeLabel) {
         m_shots[i].data.shotLabel  = name;
         m_shots[i].data.shotNumber = name;
-      } else {
+      } else if (!ZtoryModel::instance()->cutShotFor(m_shots[i].childLevel) ||
+                 m_shots[i].data.shotLabel.isEmpty()) {
         m_shots[i].data.shotLabel.clear();  // fresh column → renumberAll midpoints it
       }
+      // else: a pasted Cut, whose label came back with it in loadZtoryc
+      // (adoptCutShot) — a move keeps its number in Keep mode.
+
     }
   }
   // Freeze numbering BEFORE renumberAll: a Kitsu-linked project stores labels

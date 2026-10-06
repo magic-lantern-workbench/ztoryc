@@ -321,9 +321,11 @@ Catena:
 che costruisce la colonna incollata li riprende (`StoryboardPanel::adoptCutShot`) nei tre punti
 dove nasce uno shot (inserimento incrementale, riconciliazione, ricostruzione completa); il
 Paste del Board toglie il taglio dalla clip solo dopo il riallineamento; `pushTrackingToBoard`
-non ripiega più sulla posizione. Etichetta, ordine e sequenza restano quelli della nuova
-posizione; se l'originale è ancora nel Board (Cut, ⌘Z, ⌘V) lo shot incollato riceve un uuid
-nuovo. Anche la durata: il Cut del Board usava il primo pannello, quello dell'Animatic contava
+non ripiega più sulla posizione. Cut + Paste vale come uno spostamento (decisione di Franco,
+2026-10-06): lo shot torna con etichetta, ordine e sequenza, e poi `renumberAll` decide come
+dopo `onMoveShot` — in Auto rinumera per posizione, in Keep gli shot conservano il numero (e
+con lui l'aggancio a Kitsu). Se l'originale è ancora nel Board (Cut, ⌘Z, ⌘V), o il numero è
+stato preso nel frattempo, lo shot incollato riceve uuid ed etichetta nuovi. Anche la durata: il Cut del Board usava il primo pannello, quello dell'Animatic contava
 il fotogramma di chiusura; ora entrambi `shotTrueSpan`.
 
 ### 7.7 Testi slittati fra Board dopo un Paste — CONFERMATO, corretto per la 0.16.2
