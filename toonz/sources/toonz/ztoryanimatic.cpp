@@ -6507,8 +6507,19 @@ void ZtoryAnimaticPanel::onCutShots() {
   std::vector<ZtoryClipEntry> clip;
   for (int col : cols) {
     ZtoryClipEntry ce;
-    ce.srcCol = -1; ce.duration = ZtoryShotOps::colDuration(xsh, col);
+    ce.srcCol = -1;
+    // True length: colDuration counts the resequence's closing stop frame too,
+    // and the pasted shot came back one frame longer.
+    {
+      int start = 0, dur = 0;
+      ce.duration = ZtoryShotOps::shotTrueSpan(xsh, col, start, dur) && dur > 0
+                        ? dur
+                        : ZtoryShotOps::colDuration(xsh, col);
+    }
     ce.isCut = true; ce.isClone = false;
+    // The shot's data travels with it (texts, uuid, tracking), read from the
+    // Board — the model's list can be a shot behind the scene.
+    if (board) ce.hasShot = board->shotDataForColumn(col, &ce.shot);
     TXshColumn      *xshCol = xsh->getColumn(col);
     TXshLevelColumn *lc     = xshCol ? xshCol->getLevelColumn() : nullptr;
     if (lc) {

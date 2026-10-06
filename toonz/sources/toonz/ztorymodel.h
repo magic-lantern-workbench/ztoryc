@@ -38,18 +38,6 @@ struct NumberingConfig {
   QString shotName(int idx) const;
 };
 
-// ─── Shared clipboard ─────────────────────────────────────────────────────────
-// Used by both StoryboardPanel and ZtoryAnimaticPanel so that copy/cut in one
-// panel is immediately available for paste in the other.
-
-struct ZtoryClipEntry {
-  int        srcCol   = 0;    // xsheet column at copy/clone time; -1 for cut
-  int        duration = 24;   // cell count of original column
-  bool       isCut    = false;
-  bool       isClone  = false;
-  TXshLevelP cutLevel;        // keeps sub-scene alive after immediate cut
-};
-
 // ─── SequenceData ─────────────────────────────────────────────────────────────
 // One sequence (e.g. "SQ010"). Shots belong to a sequence via sequenceId==uuid.
 
@@ -164,6 +152,25 @@ struct ShotData {
     for (const auto &p : panels) tot += p.duration;
     return tot;
   }
+};
+
+// ─── Shared clipboard ─────────────────────────────────────────────────────────
+// Used by both StoryboardPanel and ZtoryAnimaticPanel so that copy/cut in one
+// panel is immediately available for paste in the other.
+
+struct ZtoryClipEntry {
+  int        srcCol   = 0;    // xsheet column at copy/clone time; -1 for cut
+  int        duration = 24;   // cell count of original column
+  bool       isCut    = false;
+  bool       isClone  = false;
+  TXshLevelP cutLevel;        // keeps sub-scene alive after immediate cut
+  // Cut only: the shot's whole data — panels and their texts, uuid, technique,
+  // tasks, lights.  The column goes away at once, and with it the shot's place
+  // in the Board and in the .ztoryc: without this a Cut + Paste (the way to
+  // move a shot) came back as a blank shot, every dialogue lost.  The Board
+  // that builds the pasted column takes it back (StoryboardPanel::adoptCutShot).
+  bool       hasShot  = false;
+  ShotData   shot;
 };
 
 // Una battuta estratta dal testo di un pannello: chi la dice e cosa dice.
@@ -1027,6 +1034,16 @@ public:
   // ── Shared clipboard (Board ↔ Animatic) ──────────────────────────────────
   const std::vector<ZtoryClipEntry>& sharedClip() const { return m_sharedClip; }
   void setSharedClip(std::vector<ZtoryClipEntry> v)     { m_sharedClip = std::move(v); }
+  // The data of a cut shot whose sub-scene is `cl`, while it waits in the clip
+  // to be pasted; nullptr if none.
+  const ShotData *cutShotFor(const TXshChildLevel *cl) const {
+    if (!cl) return nullptr;
+    for (const ZtoryClipEntry &e : m_sharedClip)
+      if (e.isCut && e.hasShot && e.cutLevel &&
+          e.cutLevel->getChildLevel() == cl)
+        return &e.shot;
+    return nullptr;
+  }
 
   // ── Shared selection (Board ↔ Animatic) — xsheet column indices ─────────
   // Written by whichever panel last had user interaction.

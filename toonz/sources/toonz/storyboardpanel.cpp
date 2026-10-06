@@ -2872,6 +2872,43 @@ void StoryboardPanel::ensureShotUuids() {
   }
 }
 
+bool StoryboardPanel::adoptCutShot(Shot &shot) {
+  const ShotData *cut = ZtoryModel::instance()->cutShotFor(shot.childLevel);
+  if (!cut) return false;
+  // What belongs to the shot comes back: panels and their texts, uuid,
+  // technique, tasks, notes, lights.  What belongs to its NEW place stays as
+  // the Board gave it: the column, the label and order (renumberAll and Keep
+  // mode decide them, as for any pasted shot) and the sequence (inherited from
+  // the neighbours).
+  ShotData data      = *cut;
+  data.xsheetColumn  = shot.data.xsheetColumn;
+  data.shotLabel     = shot.data.shotLabel;
+  data.shotNumber    = shot.data.shotNumber;
+  data.orderIndex    = shot.data.orderIndex;
+  data.sequenceId    = shot.data.sequenceId;
+  // The original may still be here: Cut, ⌘Z (the column is back, the cut stays
+  // in the clip), ⌘V pastes a second column of the same sub-scene.  Two shots
+  // must never share a uuid: this one gets a new one (ensureShotUuids).
+  for (const Shot &other : m_shots)
+    if (&other != &shot && !data.uuid.isEmpty() &&
+        other.data.uuid == data.uuid) {
+      data.uuid.clear();
+      break;
+    }
+  shot.data = std::move(data);
+  return true;
+}
+
+bool StoryboardPanel::shotDataForColumn(int col, ShotData *out) {
+  syncWidgetsToData();
+  for (const Shot &s : m_shots)
+    if (s.data.xsheetColumn == col) {
+      if (out) *out = s.data;
+      return true;
+    }
+  return false;
+}
+
 void StoryboardPanel::pushTrackingToBoard() {
   // By UUID, not by position. Nothing keeps the model's shot list in step
   // with the Board's between two saves (no ZtoryModel::addShot/removeShot on
@@ -2889,14 +2926,17 @@ void StoryboardPanel::pushTrackingToBoard() {
     else
       byUuid.insert(u, i);
   }
-  const bool sameLength = m->shotCount() == (int)m_shots.size();
+  // A shot without a uuid takes nothing from the model.  The positional
+  // fallback that used to be here (equal lengths -> same index) handed a shot
+  // just pasted after a Cut the uuid, technique and tasks of whichever shot the
+  // stale model list had at that position: one Cut + Paste left two shots with
+  // the same uuid (docs/SHOT_OPS_AUDIT.md §7.6).  Legacy scenes without uuids
+  // do not need it: loadZtoryc copies Board -> model first
+  // (pullTrackingFromBoard) and ensureShotUuids gives both the same uuid.
   for (int i = 0; i < (int)m_shots.size(); i++) {
     ShotData &bd = m_shots[i].data;
-    int mi       = -1;
-    if (!bd.uuid.isEmpty())
-      mi = byUuid.value(bd.uuid, -1);
-    else if (sameLength)
-      mi = i;
+    if (bd.uuid.isEmpty()) continue;
+    const int mi = byUuid.value(bd.uuid, -1);
     if (mi < 0) continue;
     const ShotData &md = m->shot(mi);
     if (!md.uuid.isEmpty()) bd.uuid = md.uuid;
@@ -3812,6 +3852,12 @@ void StoryboardPanel::loadZtoryc() {
     qDebug() << "loadZtoryc: repaired SFH-exploded shot" << i
              << "collapsed" << (int)(totalDur) << "1-frame panels → 1 panel, dur=" << repaired.duration;
   }
+
+  // A full rebuild right after a Paste: the pasted shot is not in the file
+  // (the Cut saved without it), so it would come back blank.  Take its data
+  // from the clip — only for a shot the file gave nothing (no uuid).
+  for (Shot &shot : m_shots)
+    if (shot.data.uuid.isEmpty()) adoptCutShot(shot);
 
   m_widgetsBuiltByLoad = true;  // refreshFromScene does not build them again
   for (int i = 0; i < (int)m_shots.size(); i++) {
@@ -4921,8 +4967,14 @@ bool StoryboardPanel::reconcileShotsWithScene(
       // A shot can arrive already knowing its panels (Send to Board from the
       // Thumbnail room writes them in the model first) — take them only when
       // the model entry really is this column.
-      if (j < model->shotCount() && model->shot(j).xsheetColumn == col &&
-          model->shot(j).panels.size() > 1)
+      if (adoptCutShot(s)) {
+        // A pasted Cut: its panels came back with it; re-detect only if the
+        // column's length no longer matches them.
+        int sum = 0;
+        for (const PanelData &p : s.data.panels) sum += p.duration;
+        if (sum != dur) toDetect.push_back(j);
+      } else if (j < model->shotCount() && model->shot(j).xsheetColumn == col &&
+                 model->shot(j).panels.size() > 1)
         s.data.panels = model->shot(j).panels;
       else
         toDetect.push_back(j);
@@ -5066,11 +5118,21 @@ void StoryboardPanel::onShotInserted(int col) {
     m_shots[col].data.orderIndex = model->shot(col).orderIndex;
     m_shots[col].data.shotNumber = m_shots[col].data.shotLabel;
   }
+  // A pasted Cut comes back with its data.  Its panels are re-detected only if
+  // they no longer cover the column (as reconcileShotsWithScene does).
+  bool redetect = false;
+  if (adoptCutShot(m_shots[col])) {
+    int start = 0, dur = 0;
+    if (ZtoryShotOps::shotTrueSpan(xsh, col, start, dur) &&
+        m_shots[col].data.totalDuration() != dur)
+      redetect = true;
+  }
   for (int pi = 0; pi < (int)m_shots[col].data.panels.size(); pi++)
     addPanelWidget(col, pi);
 
   renumberAll();
   rebuildGrid();
+  if (redetect) detectAndUpdatePanels(col);
   saveZtoryc();
 
   // Render the new panels' thumbnails. Deferred so the insertion returns at
@@ -5553,12 +5615,24 @@ void StoryboardPanel::onCutShot() {
   // srcCol = -1: original deleted immediately below; cutLevel keeps the sub-scene
   // alive so paste can re-insert it without losing drawings.
   std::vector<ZtoryClipEntry> shared;
+  syncWidgetsToData();  // text being typed must travel with the shot
   for (int idx : sorted) {
     if (idx < 0 || idx >= (int)m_shots.size()) continue;
     ZtoryClipEntry ze;
     ze.srcCol   = -1;
-    ze.duration = m_shots[idx].data.panels.empty()
-                  ? 24 : m_shots[idx].data.panels[0].duration;
+    ze.hasShot  = true;
+    ze.shot     = m_shots[idx].data;
+    // The shot's true length on the timeline, not its FIRST panel's: a shot
+    // with two panels came back from a Cut + Paste as long as the first one.
+    {
+      int start = 0, dur = 0;
+      ze.duration = (xsh && ZtoryShotOps::shotTrueSpan(
+                                xsh, m_shots[idx].data.xsheetColumn, start, dur) &&
+                     dur > 0)
+                        ? dur
+                        : m_shots[idx].data.totalDuration();
+      if (ze.duration <= 0) ze.duration = 24;
+    }
     ze.isCut    = true;
     ze.isClone  = false;
     if (xsh) {
@@ -5629,15 +5703,6 @@ void StoryboardPanel::onPasteShot() {
                   : xsh->getColumnCount();
   ZtoryShotOps::pasteSharedClip(shared, insertCol, xsh, scene);
   xsh->updateFrameCount();
-  // Drop one-shot entries (cut/clone) from the shared clip; keep plain copies so
-  // they can be pasted again.
-  {
-    auto newShared = shared;
-    newShared.erase(std::remove_if(newShared.begin(), newShared.end(),
-                    [](const ZtoryClipEntry &e){ return e.isCut || e.isClone; }),
-                    newShared.end());
-    ZtoryModel::instance()->setSharedClip(std::move(newShared));
-  }
   resequenceXsheet();  // onModelResequenced updates the Board (by identity)
   {
     // It used to rebuild the whole Board here as well, a second time. Only if
@@ -5645,6 +5710,17 @@ void StoryboardPanel::onPasteShot() {
     std::vector<TXshChildLevel *> levels;
     const std::vector<int> cols = ztoryShotColumns(xsh, &levels);
     if (!boardMatchesScene(cols, levels)) refreshFromScene();
+  }
+  // Drop one-shot entries (cut/clone) from the shared clip; keep plain copies so
+  // they can be pasted again.  Only now: while the Boards rebuild the pasted
+  // columns (just above) they take a cut shot's data back from the clip
+  // (adoptCutShot).  Dropped before the resequence, a Cut + Paste came back blank.
+  {
+    auto newShared = ZtoryModel::instance()->sharedClip();
+    newShared.erase(std::remove_if(newShared.begin(), newShared.end(),
+                    [](const ZtoryClipEntry &e){ return e.isCut || e.isClone; }),
+                    newShared.end());
+    ZtoryModel::instance()->setSharedClip(std::move(newShared));
   }
   m_pasteButton->setEnabled(!ZtoryModel::instance()->sharedClip().empty());
 

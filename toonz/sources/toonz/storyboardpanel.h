@@ -358,6 +358,9 @@ struct Shot {
   void assignKeepNumbers(int insertAt);
   QString ztoryPath() const;
   void    syncWidgetsToData();
+  // A shot just built for a pasted column takes back the data its sub-scene
+  // had when it was cut (ZtoryModel::cutShotFor). true = adopted.
+  bool    adoptCutShot(Shot &shot);
   void    updateColumnName(int si);
   void    loadZtoryc();
   // Production-tracking bridge: ZtoryModel is the authoritative store for the
@@ -376,6 +379,9 @@ public:
   void refreshFromScene();
   ZtoryBoardSnap captureSnapshot();
   void restoreFromSnapshot(const ZtoryBoardSnap &snap);
+  // The data of the shot in main-xsheet column `col` (texts synced from the
+  // widgets first). false if no shot there. Used by the Animatic's Cut.
+  bool shotDataForColumn(int col, ShotData *out);
 
   // Undo for an edit made from OUTSIDE the Board — today the Thumbnail room's
   // "export panels as a shot", which goes straight to ZtoryModel and so never
