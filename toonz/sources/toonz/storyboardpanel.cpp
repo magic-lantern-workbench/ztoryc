@@ -1833,7 +1833,35 @@ StoryboardPanel::StoryboardPanel(QWidget *parent)
           [this](int si) {
     if (m_updating) return;
     if (si < 0 || si >= (int)m_shots.size()) return;
-    const auto &mPanels = ZtoryModel::instance()->shot(si).panels;
+    // Mirror only onto the SAME shot, checked against the scene: the column
+    // the model entry points at must expose, now, the sub-scene this Board's
+    // shot si is.  During a paste one Board rebuilds in full and rewrites the
+    // model shot by shot (syncShotPanels -> shotDataChanged) while the others
+    // still hold the old list; index and column shift together, so only the
+    // sub-scene tells them apart.  Copying by index gave every shot after the
+    // insertion the texts of the one before it, and the Board that saved last
+    // wrote that into the .ztoryc.
+    ZtoryModel *model = ZtoryModel::instance();
+    if (si >= model->shotCount()) return;
+    if (TXshChildLevel *mine = m_shots[si].childLevel) {
+      ToonzScene *scn = TApp::instance()->getCurrentScene()->getScene();
+      TXsheet *top    = scn ? scn->getChildStack()->getTopXsheet() : nullptr;
+      TXshChildLevel *there = nullptr;
+      const int col = model->shot(si).xsheetColumn;
+      TXshColumn *column = top ? top->getColumn(col) : nullptr;
+      if (column) {
+        int r0 = 0, r1 = 0;
+        column->getRange(r0, r1);
+        for (int r = r0; r <= r1 && !there; r++) {
+          TXshCell cell = top->getCell(r, col);
+          if (!cell.isEmpty() && cell.m_level) there = cell.m_level->getChildLevel();
+        }
+      }
+      if (there != mine) return;
+    } else if (model->shot(si).xsheetColumn != m_shots[si].data.xsheetColumn) {
+      return;
+    }
+    const auto &mPanels = model->shot(si).panels;
     auto &shot = m_shots[si];
     for (int pi = 0; pi < (int)shot.panels.size() && pi < (int)mPanels.size() &&
                      pi < (int)shot.data.panels.size(); pi++) {

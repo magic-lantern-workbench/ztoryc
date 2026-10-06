@@ -279,6 +279,68 @@ Nota sulla prova: Ztoryc si è aperto col progetto **sandbox** anche con `Curren
 progetto di prova (titolo `navtest1 [sandbox]`), quindi `+extras` puntava a
 `Ztoryc.app/ztorycstuff/sandbox/extras/`, dove è finito `AB.0001.png`. Non cambia il risultato.
 
+### 7.5 Testo scritto nel Navigator — CONFERMATO, perde lavoro
+
+Prova del 2026-10-06, room Ztoryc T, pannello «Shot Board» (`ZtoryPanelNavigator`) su sh010.
+Scritta una battuta nel campo Dialog, uscito dal campo, ⌘S: il `.tnz` viene salvato e il titolo
+perde l'asterisco, ma il `.ztoryc` resta quello di prima. Chiudendo Ztoryc non compare nessun
+avviso; la battuta non è su disco, né nel `.ztoryc` né nel `.tnz`.
+
+Catena: il Navigator scrive nel modello (`ztoryanimatic.cpp:4436`) ed emette `shotDataChanged`;
+ogni Board copia il testo nel proprio `m_shots` **per indice** (`storyboardpanel.cpp:1832`) ma salva
+il `.ztoryc` solo se è cambiata la luce (lo dice il commento a 1858: «text fields are saved by
+their own Board flows; the navigator has no other path to the .ztoryc»). Il ⌘S della scena non
+scrive il `.ztoryc` (`iocommand.cpp` non lo chiama mai): lo scrivono solo gli eventi dei Board (39
+punti in `storyboardpanel.cpp`). La battuta sopravvive solo se un Board salva per un altro motivo
+prima della chiusura.
+
+Non provato: con il modello indietro di uno shot (§7.1) lo stesso gestore copierebbe il testo
+sullo shot sbagliato del Board.
+
+### 7.6 Cut → Paste dal Board perde i testi dello shot — CONFERMATO
+
+Prova del 2026-10-06: sh010 con una battuta nel primo pannello; Cut dal Board, Paste dopo sh020.
+Lo shot incollato ha i pannelli vuoti e il `.ztoryc` salvato subito dopo non contiene più la
+battuta. Lo shot incollato prende anche l'uuid di un altro shot: nel file tre shot finiscono
+con lo stesso uuid.
+
+Catena:
+- `onCutShot` dice «save metadata», ma la clip (`ZtoryClipEntry`, `ztorymodel.h:45`) porta solo
+  colonna, durata e sotto-scena: **nessun testo, uuid, tecnica, task, luce**. Poi `onDeleteShot`
+  toglie lo shot da `m_shots` e salva il `.ztoryc` senza di lui.
+- `onPasteShot` reinserisce la sotto-scena e lascia che il Board crei uno shot nuovo, vuoto.
+- L'uuid doppio viene dal ripiego per posizione di `pushTrackingToBoard`
+  (`else if (sameLength) mi = i;`): lo shot incollato non ha uuid, le due liste hanno la stessa
+  lunghezza, e riceve l'uuid (con tecnica e task) dello shot che il modello ha a quella
+  posizione. Ragionato su un caso pulito di tre shot: succede sia con il codice di prima sia
+  con la correzione `43e40b7c5`, che cambia solo quale shot viene doppiato.
+
+È del codice rilasciato (0.16.1), non delle correzioni di questa sessione.
+
+**Correzione (per la 0.16.2)**: la clip porta i dati dello shot (`ZtoryClipEntry::shot`); il Board
+che costruisce la colonna incollata li riprende (`StoryboardPanel::adoptCutShot`) nei tre punti
+dove nasce uno shot (inserimento incrementale, riconciliazione, ricostruzione completa); il
+Paste del Board toglie il taglio dalla clip solo dopo il riallineamento; `pushTrackingToBoard`
+non ripiega più sulla posizione. Etichetta, ordine e sequenza restano quelli della nuova
+posizione; se l'originale è ancora nel Board (Cut, ⌘Z, ⌘V) lo shot incollato riceve un uuid
+nuovo. Anche la durata: il Cut del Board usava il primo pannello, quello dell'Animatic contava
+il fotogramma di chiusura; ora entrambi `shotTrueSpan`.
+
+### 7.7 Testi slittati fra Board dopo un Paste — CONFERMATO, corretto per la 0.16.2
+
+Prova del 2026-10-06: Cut, ⌘Z, ⌘V (due colonne della stessa sotto-scena). Nel `.ztoryc` salvato
+gli shot dopo il punto d'inserimento avevano il dialogo di quello prima.
+
+Catena: un Board ricostruisce in blocco («scene has 5 shot columns, panel has 4 → full rebuild»)
+e riscrive il modello shot per shot (`syncShotPanels` → `shotDataChanged`). Gli altri due Board,
+ancora con la lista vecchia, ricevono l'avviso e copiano i testi **per indice** (gestore di
+`shotDataChanged`, `storyboardpanel.cpp`); poi inseriscono il loro shot e salvano per ultimi.
+Indice e colonna scivolano insieme, quindi un confronto su lunghezza e colonna non basta (provato).
+
+Correzione: il Board copia il testo dal modello solo se la colonna a cui punta la voce del modello
+espone **ora** la stessa sotto-scena del suo shot (`Shot::childLevel`). Provato: dopo Cut, ⌘Z, ⌘V
+tutti i testi sono al loro posto; la copia dal Navigator ai Board funziona ancora.
+
 ### 7.4 Riepilogo
 
 | sospetto | esito | effetto |
@@ -286,5 +348,8 @@ progetto di prova (titolo `navtest1 [sandbox]`), quindi `+extras` puntava a
 | uuid del modello per indice (`ensureShotUuids`) | confermato | tecnica e task sullo shot sbagliato dopo un Add dall'Animatic |
 | Delete del Board dentro una sotto-scena | confermato | colonna del disegno cancellata, undo che non lo restituisce |
 | Cut → Paste e cast | confermato | disegno fatto nello shot incollato non salvato fino alla riapertura |
+| testo scritto nel Navigator | confermato, corretto nel passo 0 di `feature/shot-document` | battuta persa: il ⌘S non scriveva il `.ztoryc` |
+| Cut → Paste (Board e Animatic) | confermato, corretto per la 0.16.2 | testi dello shot persi, uuid doppio, durata sbagliata |
+| testi slittati fra Board dopo un Paste | confermato, corretto per la 0.16.2 | dialoghi sullo shot sbagliato |
 
 Tutti e tre si possono correggere in modo locale, senza aspettare la fase 2.
