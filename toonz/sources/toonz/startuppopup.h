@@ -81,6 +81,16 @@ public:
   // collegamento fra shot e libreria.
   QComboBox *m_characterCB = nullptr;
   void refreshCharacterChoices();
+  // Workflow di disegno (Tradigital, Cutout, Stop-Motion): la scena nuova e'
+  // una scena semplice o la scena di uno shot del tracker — si sceglie qui,
+  // invece di passare dopo da Workflow > Scene Type… (Franco, 2026-10-11).
+  QWidget *m_sceneKindBox       = nullptr;
+  QComboBox *m_shotCB           = nullptr;
+  QLabel *m_shotInfo            = nullptr;
+  QPushButton *m_openShotScene  = nullptr;
+  QPushButton *m_createButton   = nullptr;
+  void refreshShotChoices();
+  void onShotChoiceChanged();
   //! Applica il workflow giusto per la scena appena aperta.
   //! UNA sola implementazione: prima ce n'erano due, e quella dei
   //! recenti ignorava la spunta «Automatic» e non conosceva Character.
