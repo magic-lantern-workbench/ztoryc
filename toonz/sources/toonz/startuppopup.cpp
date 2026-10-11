@@ -392,6 +392,31 @@ StartupPopup::StartupPopup(Mode mode)
       m_characterCB->hide();
       newSceneLay->addWidget(m_characterCB, 0, 1, 1, 5);
 
+      // ---- Ztoryc: scena semplice o shot del tracker (workflow di disegno) ----
+      m_sceneKindBox = new QWidget(this);
+      {
+        QGridLayout *kindLay = new QGridLayout(m_sceneKindBox);
+        kindLay->setContentsMargins(0, 4, 0, 0);
+        kindLay->setSpacing(4);
+        kindLay->addWidget(new QLabel(tr("Scene:")), 0, 0,
+                           Qt::AlignRight | Qt::AlignVCenter);
+        m_shotCB = new QComboBox(this);
+        m_shotCB->setToolTip(
+            tr("A plain scene, or the scene where one shot of the Production\n"
+               "Tracker is made. A shot that already has its scene cannot get\n"
+               "a second one: open that scene instead."));
+        kindLay->addWidget(m_shotCB, 0, 1, 1, 4);
+        m_shotInfo = new QLabel(this);
+        m_shotInfo->setWordWrap(true);
+        kindLay->addWidget(m_shotInfo, 1, 1, 1, 3);
+        m_openShotScene = new QPushButton(tr("Open its scene"), this);
+        kindLay->addWidget(m_openShotScene, 1, 4);
+        m_shotInfo->hide();
+        m_openShotScene->hide();
+      }
+      m_sceneKindBox->hide();
+      newSceneLay->addWidget(m_sceneKindBox, 8, 0, 1, 6);
+
       // ---- Ztoryc: Shot numbering (Storyboard Mode only) ----
       // All numbering controls live in m_numberingBox for easy show/hide.
       m_numberingBox = new QWidget(this);
@@ -526,12 +551,17 @@ StartupPopup::StartupPopup(Mode mode)
 
       // Create button always at the bottom (row 10).
       newSceneLay->addWidget(createButton, 10, 1, 1, 3, Qt::AlignLeft);
+      m_createButton = createButton;
       newSceneLay->setColumnStretch(4, 1);
 
       // Show numbering only for Storyboard Mode (index 0)
       connect(m_workflowCB, QOverload<int>::of(&QComboBox::currentIndexChanged),
               this, [this](int idx) {
                 m_numberingBox->setVisible(idx == 0);
+                const bool isDrawing = (idx >= 1 && idx <= 3);
+                m_sceneKindBox->setVisible(isDrawing);
+                if (isDrawing) refreshShotChoices();
+                else if (m_createButton) m_createButton->setEnabled(true);
                 const bool isCharacter = (idx == 4);
                 m_nameFld->setVisible(!isCharacter);
                 m_characterCB->setVisible(isCharacter);
@@ -539,6 +569,18 @@ StartupPopup::StartupPopup(Mode mode)
                                                       : tr("Scene Name:"));
                 if (isCharacter) refreshCharacterChoices();
               });
+
+      connect(m_shotCB, QOverload<int>::of(&QComboBox::currentIndexChanged),
+              this, [this](int) { onShotChoiceChanged(); });
+      connect(m_openShotScene, &QPushButton::clicked, this, [this] {
+        // Lo shot ha gia' la sua scena: si apre quella, come dalla lista.
+        const QString path = m_shotCB->currentData(Qt::UserRole + 1).toString();
+        if (path.isEmpty()) return;
+        TApp::instance()->getCurrentScene()->setDirtyFlag(false);
+        IoCmd::loadScene(TFilePath(path.toStdWString()), true, true);
+        applyWorkflowForScene(path);
+        hide();
+      });
 
       connect(m_characterCB, QOverload<int>::of(&QComboBox::currentIndexChanged),
               this, [this](int idx) {
@@ -1230,6 +1272,53 @@ static void importCharacterRigPsd(const Asset &a) {
       TApp::instance()->getCurrentXsheet()->getXsheet()->getColumnCount());
 }
 
+void StartupPopup::refreshShotChoices() {
+  if (!m_shotCB) return;
+  const QString keep = m_shotCB->currentData().toString();
+  // Come per i personaggi: il tracker del progetto scelto QUI.
+  ZtoryModel *m = ZtoryModel::instance();
+  m->loadProjectDb();
+  const QMap<QString, QString> linked =
+      ZtorySceneClass::linkedShotScenes(m->projectDbPath());
+  m_shotCB->blockSignals(true);
+  m_shotCB->clear();
+  m_shotCB->addItem(tr("Plain scene (not a shot of the tracker)"), QString());
+  for (const ProjectShot &ps : m->projectShots()) {
+    const QString sb    = QFileInfo(ps.source).completeBaseName();
+    const QString scene = linked.value(ps.uuid);
+    const QString label =
+        scene.isEmpty()
+            ? tr("Shot %1 — %2").arg(ps.label, sb)
+            : tr("Shot %1 — %2 — has its scene: %3")
+                  .arg(ps.label, sb, QFileInfo(scene).fileName());
+    m_shotCB->addItem(label, ps.uuid);
+    m_shotCB->setItemData(m_shotCB->count() - 1, scene, Qt::UserRole + 1);
+    m_shotCB->setItemData(m_shotCB->count() - 1, ps.label, Qt::UserRole + 2);
+  }
+  const int i = m_shotCB->findData(keep);
+  m_shotCB->setCurrentIndex(i >= 0 ? i : 0);
+  m_shotCB->blockSignals(false);
+  onShotChoiceChanged();
+}
+
+void StartupPopup::onShotChoiceChanged() {
+  if (!m_shotCB) return;
+  const QString scene = m_shotCB->currentData(Qt::UserRole + 1).toString();
+  const bool taken    = !scene.isEmpty();
+  // Uno shot, una scena: una seconda dividerebbe il suo lavoro e il tracker
+  // non saprebbe quale conta.  Si apre quella che c'e'.
+  m_shotInfo->setText(taken ? tr("This shot already has its scene: %1")
+                                  .arg(QFileInfo(scene).fileName())
+                            : QString());
+  m_shotInfo->setVisible(taken);
+  m_openShotScene->setVisible(taken);
+  if (m_createButton) m_createButton->setEnabled(!taken);
+  // Il nome della scena, se non c'e' ancora: quello dello shot.
+  const QString label = m_shotCB->currentData(Qt::UserRole + 2).toString();
+  if (!taken && !label.isEmpty() && m_nameFld->text().trimmed().isEmpty())
+    m_nameFld->setText(label);
+}
+
 void StartupPopup::onCreateButton() {
   // In modalita' Character il nome della scena E' il personaggio scelto: non si
   // digita, cosi' scena e asset non divergono per un refuso.
@@ -1382,9 +1471,19 @@ void StartupPopup::onCreateButton() {
   // never taken for shots.
   {
     const QString tnz = QString::fromStdWString(scenePath.getWideString());
+    const QString shotUuid =
+        (wfIdx >= 1 && wfIdx <= 3 && m_shotCB) ? m_shotCB->currentData().toString()
+                                               : QString();
     if (wfIdx == 0)
       ZtoryModel::instance()->noteSceneClassified(tnz);
-    else if (wfIdx >= 1 && wfIdx <= 3 &&
+    else if (!shotUuid.isEmpty()) {
+      // La scena di uno shot del tracker: lo stesso legame che scrive l'export.
+      QString why;
+      if (!ZtorySceneClass::declareShot(tnz, shotUuid,
+                                        ZtoryModel::instance()->projectDbPath(),
+                                        &why))
+        DVGui::warning(tr("Could not link this scene to its shot: %1").arg(why));
+    } else if (wfIdx >= 1 && wfIdx <= 3 &&
              !ZtorySceneClass::declarePlain(
                  tnz, wfIdx == 1 ? "Tradigital" : wfIdx == 2 ? "Cutout"
                                                              : "StopMotion"))
@@ -1529,6 +1628,10 @@ void StartupPopup::setupProjectChange() {
   // Cambiato progetto: i personaggi sono i SUOI.
   if (m_characterCB && m_workflowCB && m_workflowCB->currentIndex() == 4)
     refreshCharacterChoices();
+  // ...e gli shot sono i suoi.
+  if (m_shotCB && m_workflowCB && m_workflowCB->currentIndex() >= 1 &&
+      m_workflowCB->currentIndex() <= 3)
+    refreshShotChoices();
 }
 
 //-----------------------------------------------------------------------------
