@@ -2,6 +2,8 @@
 #include "ztorytaskflow.h"
 #include "ztorycharacter.h"
 #include "ztoryshotops.h"
+#include "ztorysceneclass.h"
+#include "toonz/preferences.h"
 #include "toonzqt/dvdialog.h"
 #include "toonzqt/menubarcommand.h"
 #include "menubarcommandids.h"  // MI_Workflow* ids for workflowCommand()
@@ -214,6 +216,8 @@ static void ztoryArmSceneTest() {
       fprintf(stderr, "[ZTORY] scenetest: role=%s shots=%d assets=%d\n",
               m->shotDocumentState().isShotScene ? "shot"
               : m->shotDocumentState().isCharacterScene ? "character"
+              : m->shotDocumentState().isPlainScene     ? "plain"
+              : m->shotDocumentState().unclassified     ? "unclassified"
                                                         : "storyboard",
               (int)m->projectShots().size(), (int)m->assets().size());
       m->saveProjectDb();
@@ -262,10 +266,16 @@ ZtoryModel::ZtoryModel() : m_fps(24) {
               // reads the file itself, after the scene switch has settled.
               QTimer::singleShot(0, this,
                                  &ZtoryModel::readShotDocumentWithoutBoard);
+              // A saved scene nobody classified: ask what it is, once the
+              // Boards have read it as plain (ztorysceneclass.h).
+              QTimer::singleShot(300, this,
+                                 [] { ZtorySceneClass::askIfUnclassified(); });
             });
   // ⌘S with no Board alive: the model writes the .ztoryc (step 3b).
   connect(this, &ZtoryModel::sceneSaved, this,
           &ZtoryModel::writeShotDocumentWithoutBoard);
+  connect(this, &ZtoryModel::sceneSaved, this,
+          &ZtoryModel::declareNewSceneByWorkflow);
   // More than one Ztoryc may be open on the same project: read back what the
   // others write (debounced: one save can come as several file events).
   m_dbReloadTimer = new QTimer(this);
@@ -3532,6 +3542,33 @@ void ZtoryModel::addShotDocumentWriter(QObject *writer) {
           [this, writer]() { m_shotDocumentWriters.remove(writer); });
 }
 
+// A scene saved for the first time with no Board alive (File > New in Cutout,
+// say) gets its role from the workflow it was made in, as the start-up popup
+// gives it: drawing workflows make plain scenes.  Not a scene the user was
+// asked about and declined: that one waits for an answer.
+void ZtoryModel::declareNewSceneByWorkflow() {
+  if (!m_shotDocumentWriters.isEmpty()) return;  // a Board writes a storyboard
+  if (m_docState.keepsOwnSidecar()) return;
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  if (!scene || scene->isUntitled()) return;
+  const QString tnz =
+      QString::fromStdWString(scene->getScenePath().getWideString());
+  if (QFile::exists(ZtorySceneClass::sidecarFor(tnz))) return;
+  const QString room = Preferences::instance()->getCurrentRoomChoice();
+  if (room != "Tradigital" && room != "Cutout" && room != "StopMotion") return;
+  if (ZtorySceneClass::declarePlain(tnz)) m_docState.isPlainScene = true;
+}
+
+bool ZtoryModel::currentSceneIsUnclassified() const {
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  if (!scene || scene->isUntitled()) return false;
+  const QString tnz =
+      QString::fromStdWString(scene->getScenePath().getWideString());
+  QString sidecar = tnz;
+  sidecar.replace(QRegularExpression("\\.tnz$"), ".ztoryc");
+  return !QFile::exists(sidecar) && !sceneClassifiedThisSession(tnz);
+}
+
 void ZtoryModel::readShotDocumentWithoutBoard() {
   if (!m_shotDocumentWriters.isEmpty()) return;  // the Boards read it
   ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
@@ -3540,7 +3577,13 @@ void ZtoryModel::readShotDocumentWithoutBoard() {
   path.replace(QRegularExpression("\\.tnz$"), ".ztoryc");
   if (shotDataLoadedFor(path)) return;  // read once per opening, as the Board
   QFile file(path);
-  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    // No sidecar: nothing from the previous scene may stay, and a saved scene
+    // nobody classified is not taken for a storyboard (ztorysceneclass.h).
+    m_docState              = ShotDocumentState();
+    m_docState.unclassified = currentSceneIsUnclassified();
+    return;
+  }
   const QByteArray bytes = file.readAll();
   // ONLY a storyboard's .ztoryc is a shot list.  A shot scene's sidecar holds
   // the back-link and a <project> block, a character's its mouth sets: reading
@@ -3563,6 +3606,7 @@ void ZtoryModel::readShotDocumentWithoutBoard() {
       m_docState                  = ShotDocumentState();
       m_docState.isShotScene      = (role == "shot");
       m_docState.isCharacterScene = (role == "character");
+      m_docState.isPlainScene     = (role == "plain");
       return;
     }
   }
@@ -3590,7 +3634,7 @@ void ZtoryModel::readShotDocumentWithoutBoard() {
 
 void ZtoryModel::writeShotDocumentWithoutBoard() {
   if (!m_shotDocumentWriters.isEmpty()) return;  // a Board writes it
-  if (m_docState.isShotScene || m_docState.isCharacterScene) return;
+  if (m_docState.keepsOwnSidecar()) return;
   ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
   if (!scene || scene->getScenePath().isEmpty()) return;
   // Only shots this session has read from the file: a scene never seen by a

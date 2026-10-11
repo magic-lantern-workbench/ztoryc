@@ -1077,8 +1077,31 @@ public:
     bool shotIdentityAsked = false;  // the duplicate-shot question was answered
     bool isShotScene       = false;  // role="shot": sidecar written once, at export
     bool isCharacterScene  = false;  // role="character": the sidecar holds mouth sets
+    bool isPlainScene      = false;  // role="plain": a scene of the project that
+                                     // is not a storyboard — no shots, no Tracker
+    bool unclassified      = false;  // a saved scene with no sidecar at all, not
+                                     // yet classified: treated as plain meanwhile
+    // Its sub-scenes are not shots and its sidecar is not the Board's to write.
+    bool keepsOwnSidecar() const {
+      return isShotScene || isCharacterScene || isPlainScene || unclassified;
+    }
   };
   ShotDocumentState &shotDocumentState() { return m_docState; }
+  // Scene classification (ztorysceneclass.h).  A scene created as a storyboard
+  // has no sidecar until its first ⌘S: noted here so opening it meanwhile does
+  // not ask what it is.  A declined question is not asked again this session.
+  void noteSceneClassified(const QString &tnzPath) { m_sceneClassifiedSession.insert(tnzPath); }
+  bool sceneClassifiedThisSession(const QString &tnzPath) const {
+    return m_sceneClassifiedSession.contains(tnzPath);
+  }
+  // A saved scene with no sidecar, not created as a storyboard this session.
+  bool currentSceneIsUnclassified() const;
+  // First save with no Board: the workflow gives the role (ztorysceneclass.h).
+  void declareNewSceneByWorkflow();
+  void noteSceneClassDeclined(const QString &tnzPath) { m_sceneClassDeclined.insert(tnzPath); }
+  bool sceneClassDeclined(const QString &tnzPath) const {
+    return m_sceneClassDeclined.contains(tnzPath);
+  }
   // The shot document changed: it reaches the disk with the next scene save
   // (step 3b), so the scene takes the asterisk.
   void markShotDocumentDirty();
@@ -1088,6 +1111,7 @@ public:
   void addShotDocumentWriter(QObject *writer);
 private:
   ShotDocumentState m_docState;
+  QSet<QString> m_sceneClassifiedSession, m_sceneClassDeclined;
 public:
   // What reading a .ztoryc returns besides what it puts in the model: the
   // parts only the Board uses.

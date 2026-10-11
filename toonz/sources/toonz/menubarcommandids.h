@@ -136,6 +136,7 @@
 #define MI_WorkflowCutout "MI_WorkflowCutout"
 #define MI_WorkflowStopMotion "MI_WorkflowStopMotion"
 #define MI_WorkflowCharacter "MI_WorkflowCharacter"
+#define MI_ZtorySceneType "MI_ZtorySceneType"
 #define MI_OpenSchematic "MI_OpenSchematic"
 
 #define MI_Export "MI_Export"

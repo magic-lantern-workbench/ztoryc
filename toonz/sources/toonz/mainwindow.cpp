@@ -3117,6 +3117,9 @@ void MainWindow::defineActions() {
     }
   }
   updateWorkflowMenuChecks();
+  // What the open scene is for Ztoryc (ztorysceneclass.h).
+  createMenuWindowsAction(MI_ZtorySceneType, QT_TR_NOOP("Scene &Type..."), "",
+                          "");
   createMenuWindowsAction(MI_OpenSchematic, QT_TR_NOOP("&Schematic"), "",
                           "schematic");
   createMenuWindowsAction(MI_InsertFx, QT_TR_NOOP("&FX Browser"), "Ctrl+F",

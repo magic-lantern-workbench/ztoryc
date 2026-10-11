@@ -684,6 +684,8 @@ void TopBar::loadMenubar() {
   addMenuItem(workflowMenu, MI_WorkflowCutout);
   addMenuItem(workflowMenu, MI_WorkflowStopMotion);
   addMenuItem(workflowMenu, MI_WorkflowCharacter);
+  workflowMenu->addSeparator();
+  addMenuItem(workflowMenu, MI_ZtorySceneType);
 
   // Menu' WINDOWS
   QMenu *windowsMenu = addMenu(ShortcutTree::tr("Panels"), m_menuBar);
