@@ -417,6 +417,13 @@ QVector<MouthApplyTarget> ZtoryMouthApply::findTargets(ToonzScene *scene) {
   for (MouthApplyTarget &t : out) {
     if (characterScene) break;
     if (!t.map.sets.isEmpty() || t.subScene.isEmpty()) continue;
+    // ⚠️ The chain already knows WHOSE sub-scene this is: then it gets that
+    // character's sets or none.  In sh270 PRINCENERENTOLA's «sub» — her
+    // library has no sets yet — got SOFIA's nine, the only «sub» with a map,
+    // so «not ambiguous» (Franco, 2026-10-11): the same mistake as BRONTOLO on
+    // 2026-09-25, by the back door of this fallback.
+    if (!ZtoryMouthLibrary::characterOfSubScene(scene, t.subScene).isEmpty())
+      continue;
     ZtoryModel *model = ZtoryModel::instance();
     // ⚠️ Si raccolgono TUTTI i candidati invece di fermarsi al primo.
     // L'aggancio e' il solo NOME della sotto-scena, e i nomi generici non sono

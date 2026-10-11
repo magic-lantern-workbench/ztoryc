@@ -3,6 +3,8 @@
 #include "ztorycharacter.h"
 #include "ztoryshotops.h"
 #include "ztorysceneclass.h"
+#include "ztorymouthapply.h"  // ZTORYC_SCENETEST
+#include "ztorymouthlibrary.h"
 #include "toonz/preferences.h"
 #include "toonzqt/dvdialog.h"
 #include "toonzqt/menubarcommand.h"
@@ -59,6 +61,7 @@
 #include "ztorylocks.h"
 #include <QSettings>
 #include <climits>
+#include <functional>
 
 // ─── ZtoryNumbering ───────────────────────────────────────────────────────────
 // Internal helpers for the SH/SQ/P labelling system.
@@ -220,6 +223,80 @@ static void ztoryArmSceneTest() {
               : m->shotDocumentState().unclassified     ? "unclassified"
                                                         : "storyboard",
               (int)m->projectShots().size(), (int)m->assets().size());
+      // ZTORYC_SCENETEST_SUBSCENE=<.tnz>: load it as a sub-scene first, as
+      // File > Load As Sub-Scene does (a character brought into a shot).
+      const QString sub = qEnvironmentVariable("ZTORYC_SCENETEST_SUBSCENE");
+      if (!sub.isEmpty()) {
+        const bool ok = IoCmd::loadSubScene(TFilePath(sub.toStdWString()));
+        fprintf(stderr, "[ZTORY] scenetest: loaded sub-scene %s: %s\n",
+                qPrintable(sub), ok ? "ok" : "FAILED");
+      }
+      {  // the sub-scenes in the cast, by name, and the current xsheet
+        ToonzScene *sc = TApp::instance()->getCurrentScene()->getScene();
+        QStringList subs;
+        TLevelSet *ls = sc->getLevelSet();
+        for (int i = 0; i < ls->getLevelCount(); i++)
+          if (ls->getLevel(i) && ls->getLevel(i)->getChildLevel())
+            subs << QString::fromStdWString(ls->getLevel(i)->getName());
+        TXsheet *cur = TApp::instance()->getCurrentXsheet()->getXsheet();
+        std::function<void(TXsheet *, int)> tree = [&](TXsheet *x, int d) {
+          if (!x || d > 6) return;
+          for (int c = 0; c < x->getColumnCount(); c++) {
+            int r0 = 0, r1 = -1;
+            x->getCellRange(c, r0, r1);
+            QSet<TXshLevel *> done;
+            for (int r = r0; r <= r1; r++) {
+              const TXshCell cell = x->getCell(r, c);
+              if (!cell.m_level || done.contains(cell.m_level.getPointer())) continue;
+              done.insert(cell.m_level.getPointer());
+              if (TXshChildLevel *cl = cell.m_level->getChildLevel()) {
+                fprintf(stderr, "[ZTORY] scenetest:   tree %s[col %d] %s\n",
+                        qPrintable(QString(d * 2, ' ')), c,
+                        qPrintable(QString::fromStdWString(cell.m_level->getName())));
+                tree(cl->getXsheet(), d + 1);
+              }
+            }
+          }
+        };
+        tree(cur, 0);
+        if (cur)
+          for (int c = 0; c < cur->getColumnCount(); c++) {
+            int r0 = 0, r1 = -1;
+            cur->getCellRange(c, r0, r1);
+            const TXshCell cell = cur->getCell(r0, c);
+            fprintf(stderr, "[ZTORY] scenetest:   column %d rows %d-%d: %s\n", c, r0, r1,
+                    cell.m_level ? qPrintable(QString::fromStdWString(cell.m_level->getName()))
+                                 : "(empty)");
+          }
+        for (const QString &n : subs) {
+          MouthMap lm;
+          QString who;
+          const bool ok = ZtoryMouthLibrary::libraryMapForSubScene(sc, n, &lm, &who);
+          fprintf(stderr, "[ZTORY] scenetest:   library of '%s': %s %s %d sets\n",
+                  qPrintable(n), ok ? "yes" : "no", qPrintable(who),
+                  (int)lm.sets.size());
+        }
+        fprintf(stderr, "[ZTORY] scenetest: sub-scenes in cast: %s | current xsheet is top: %s, %d columns\n",
+                qPrintable(subs.join(",")),
+                cur == sc->getChildStack()->getTopXsheet() ? "yes" : "no",
+                cur ? cur->getColumnCount() : -1);
+      }
+      // The mouth targets the lip sync popup would offer here.
+      for (const MouthApplyTarget &t : ZtoryMouthApply::findTargets(
+               TApp::instance()->getCurrentScene()->getScene())) {
+        QStringList names;
+        for (const MouthSet &ms : t.map.sets) names << ms.name;
+        fprintf(stderr, "[ZTORY] scenetest: mouths '%s' sub='%s' from='%s' %d sets: %s\n",
+                qPrintable(t.label), qPrintable(t.subScene),
+                qPrintable(t.fromCharacter), (int)t.map.sets.size(),
+                qPrintable(names.join(",")));
+      }
+      if (action == "probe") {  // look only: nothing is written
+        fprintf(stderr, "[ZTORY] scenetest: probe done\n");
+        fflush(stderr);
+        QTimer::singleShot(500, qApp, []() { _exit(0); });
+        return;
+      }
       m->saveProjectDb();
       TApp::instance()->getCurrentScene()->setDirtyFlag(true);
       bool ok = action.startsWith("saveas:")
