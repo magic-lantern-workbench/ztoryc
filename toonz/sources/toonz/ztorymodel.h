@@ -7,14 +7,18 @@
 #include <QStringList>
 #include <QMap>
 #include <QHash>
+#include <QSet>
 #include <vector>
 #include <set>
+#include <memory>
 #include "toonz/txshchildlevel.h"  // for TXshLevelP
 #include "traster.h"               // TRaster32P (export-to-board panels)
 
 class QFileSystemWatcher;
 class QLockFile;
 class QTimer;
+class TXshColumn;
+class TXsheet;
 
 // ─── NumberingConfig ─────────────────────────────────────────────────────────
 // Persistent numbering scheme used both at startup and during Board editing.
@@ -171,6 +175,61 @@ struct ZtoryClipEntry {
   // that builds the pasted column takes it back (StoryboardPanel::adoptCutShot).
   bool       hasShot  = false;
   ShotData   shot;
+};
+
+// The model's list of shots.  Each shot is ONE object, shared: whoever holds
+// it (the model, and from step 2b the Boards) reads and writes the same data,
+// so there is nothing to keep in step (docs/SHOT_DOCUMENT_PLAN.md, step 2).
+// Used like the std::vector<ShotData> it replaces; ptr()/push_back(Ptr) move
+// the objects themselves.
+class ZtoryShotList {
+public:
+  using Ptr = std::shared_ptr<ShotData>;
+  template <class It, class Ref>
+  struct DerefIter {
+    It it;
+    Ref operator*() const { return **it; }
+    DerefIter &operator++() { ++it; return *this; }
+    bool operator!=(const DerefIter &o) const { return it != o.it; }
+  };
+  using iterator = DerefIter<std::vector<Ptr>::iterator, ShotData &>;
+  using const_iterator =
+      DerefIter<std::vector<Ptr>::const_iterator, const ShotData &>;
+
+  size_t size() const { return m_v.size(); }
+  bool empty() const { return m_v.empty(); }
+  void clear() { m_v.clear(); }
+  void reserve(size_t n) { m_v.reserve(n); }
+  ShotData &operator[](size_t i) { return *m_v[i]; }
+  const ShotData &operator[](size_t i) const { return *m_v[i]; }
+  ShotData &back() { return *m_v.back(); }
+  Ptr ptr(size_t i) const { return m_v[i]; }
+  void setPtr(size_t i, Ptr p) { m_v[i] = std::move(p); }
+  void push_back(ShotData s) { m_v.push_back(std::make_shared<ShotData>(std::move(s))); }
+  void push_back(Ptr p) { m_v.push_back(std::move(p)); }
+  void pop_back() { m_v.pop_back(); }
+  void insertAt(int i, ShotData s) {
+    m_v.insert(m_v.begin() + i, std::make_shared<ShotData>(std::move(s)));
+  }
+  void eraseAt(int i) { m_v.erase(m_v.begin() + i); }
+  void resize(size_t n) {
+    while (m_v.size() > n) m_v.pop_back();
+    while (m_v.size() < n) m_v.push_back(std::make_shared<ShotData>());
+  }
+  iterator begin() { return {m_v.begin()}; }
+  iterator end() { return {m_v.end()}; }
+  const_iterator begin() const { return {m_v.begin()}; }
+  const_iterator end() const { return {m_v.end()}; }
+  // A plain copy of the data (for algorithms written on std::vector).
+  std::vector<ShotData> copy() const {
+    std::vector<ShotData> out;
+    out.reserve(m_v.size());
+    for (const Ptr &p : m_v) out.push_back(*p);
+    return out;
+  }
+
+private:
+  std::vector<Ptr> m_v;
 };
 
 // Una battuta estratta dal testo di un pannello: chi la dice e cosa dice.
@@ -363,7 +422,7 @@ signals:
 class ZtoryModel : public QObject {
   Q_OBJECT
 
-  std::vector<ShotData>             m_shots;
+  ZtoryShotList                     m_shots;
   ZtoryTaskEvents                  *m_taskEvents = new ZtoryTaskEvents(this);
   std::vector<Asset>                m_assets;       // project-level asset list
   // Ztoryc: the PSD load test (ztoryCheckPsd) by «path|size|time». A PSD is
@@ -373,8 +432,30 @@ class ZtoryModel : public QObject {
   QVector<QString>                  m_storyboardFiles; // registered storyboard basenames
   std::vector<SequenceData>         m_sequences;
   std::vector<std::vector<QPixmap>> m_previews; // [shotIdx][panelIdx]
+  // Which scene column each m_shots entry is, kept in parallel (runtime only,
+  // never saved): the shot's identity while the scene is open.  nullptr = not
+  // known yet (an entry appended before its column was matched).
+  struct ShotIdentity {
+    TXshColumn     *column = nullptr;
+    TXshChildLevel *level  = nullptr;
+    // Where that column stood when recorded.  Compared with where it stands
+    // now: different = the column moved (insert/delete before it); equal while
+    // the entry's xsheetColumn changed = the Board moved the CELLS (reorder).
+    int             col    = -1;
+  };
+  std::vector<ShotIdentity>         m_shotIds;
+  void recordShotIdentity(int si);  // from m_shots[si].xsheetColumn
+  // Shots the .ztoryc has not filled yet (created by reconcileWithXsheet for a
+  // column the model did not know).  The file is read ONCE per scene opening:
+  // after that the shared objects are the truth, and a Board that reads the
+  // file again (a full rebuild mid-session) may fill only these.
+  std::set<const ShotData *>        m_freshShots;
+  QString                           m_shotDataLoadedFor;  // scene path, or empty
+  const void                       *m_shotDataSceneObj = nullptr;  // its ToonzScene
+  QSet<QObject *>                   m_shotDocumentWriters;  // live Boards
+  void writeShotDocumentWithoutBoard();
+  void readShotDocumentWithoutBoard();
   int                               m_fps;
-  QString                           m_ztoryPath;
   // Imported screenplay, stored as a path relative to the project ("+extras/
   // script/<file>").  Persisted in the .ztoryc so the Script panel can reload
   // it when the scene is reopened.  Empty = no screenplay imported.
@@ -484,8 +565,32 @@ public:
 
   // Returns the shot index for a given xsheet column, or -1 if not found.
   int  shotIndexForCol(int col) const;
-  std::vector<ShotData>       &shots()       { return m_shots; }
-  const std::vector<ShotData> &shots() const { return m_shots; }
+  ZtoryShotList       &shots()       { return m_shots; }
+  const ZtoryShotList &shots() const { return m_shots; }
+  // The shared object of shot i (null if out of range).
+  ZtoryShotList::Ptr shotPtr(int i) const {
+    return (i >= 0 && i < (int)m_shots.size()) ? m_shots.ptr(i) : nullptr;
+  }
+  // The shared object of the shot in main-xsheet column `col`, checked against
+  // the scene (the entry must BE that column, not just carry its index); null
+  // if the model does not know it yet — call reconcileWithXsheet() and retry.
+  ZtoryShotList::Ptr shotPtrForColumn(int col) const;
+  // Index of a shared object in the model, or -1.
+  int indexOfShot(const ShotData *sd) const;
+  // A Board changed a shot's data (its own object, shared with the model):
+  // fit the preview slots and tell the listeners, by the shot's real index.
+  void notifyShotEdited(const ShotData *sd);
+  // Put `holder`'s object in place of the fresh entry for column `col`: a Board
+  // that already holds the shot's data keeps it, and the model takes it.
+  // false if the model's entry for `col` is not fresh (then the model wins).
+  bool takeShotObject(int col, ZtoryShotList::Ptr holder);
+  bool isFreshShot(const ShotData *sd) const { return m_freshShots.count(sd) > 0; }
+  void markShotLoaded(const ShotData *sd) { m_freshShots.erase(sd); }
+  // Has the open scene's .ztoryc already been read into the shared objects?
+  bool shotDataLoadedFor(const QString &ztoryPath) const {
+    return !ztoryPath.isEmpty() && m_shotDataLoadedFor == ztoryPath;
+  }
+  void setShotDataLoadedFor(const QString &ztoryPath);
   int  fps() const { return m_fps; }
   void setFps(int fps) { if (fps > 0) m_fps = fps; }
   QString production() const { return m_production; }
@@ -957,28 +1062,60 @@ public:
   void addShotFromRasters(const QString &name,
                           const std::vector<TRaster32P> &panels);
   // Clears model data only (no xsheet changes). Call before re-populating.
-  void clearShots() { m_shots.clear(); m_previews.clear(); }
-  // Replace the model's shot list with the given one (the current scene's shots,
-  // authored by the Board). Used right before publishing to the project DB so a
-  // previously-open larger scene's leftover shots never leak into this project.
-  void setShotsFrom(const std::vector<ShotData> &shots) {
-    m_shots = shots;
-    m_previews.resize(m_shots.size());
+  void clearShots() {
+    m_shots.clear();
+    m_previews.clear();
+    m_shotIds.clear();
+    m_freshShots.clear();
   }
-  void removeShot(int shotIdx);
-  void moveShot(int fromIdx, int toIdx);
-  void cloneShot(int shotIdx);
-  // Sync panel data (and optionally the shot label + xsheet column) from the
-  // Board into ZtoryModel.  Updates m_shots[si].panels and resizes
-  // m_previews[si].  Grows m_shots if needed.  When label is non-empty it is
-  // written to shotLabel/shotNumber.  xsheetCol = -1 means "don't update".
-  void syncShotPanels(int si, const std::vector<PanelData> &panels,
-                      const QString &label = {}, int xsheetCol = -1);
+  // ── The shot document (.ztoryc) ──────────────────────────────────────────
+  // What the file says about the scene besides its shots.  Set when the file
+  // is read (StoryboardPanel::loadZtoryc), written back into the root element.
+  struct ShotDocumentState {
+    bool trackerOff        = false;  // productionTracker="off": the user kept
+                                     // this storyboard out of the Tracker
+    bool shotIdentityAsked = false;  // the duplicate-shot question was answered
+    bool isShotScene       = false;  // role="shot": sidecar written once, at export
+    bool isCharacterScene  = false;  // role="character": the sidecar holds mouth sets
+  };
+  ShotDocumentState &shotDocumentState() { return m_docState; }
+  // The shot document changed: it reaches the disk with the next scene save
+  // (step 3b), so the scene takes the asterisk.
+  void markShotDocumentDirty();
+  // The Boards write the .ztoryc at ⌘S (with the Production Tracker
+  // publication).  Each one registers here; with none alive — a workflow
+  // whose rooms have no Board, e.g. Cutout — the model writes it itself.
+  void addShotDocumentWriter(QObject *writer);
+private:
+  ShotDocumentState m_docState;
+public:
+  // What reading a .ztoryc returns besides what it puts in the model: the
+  // parts only the Board uses.
+  struct ShotDocumentRead {
+    QString role = "storyboard";  // "shot" / "character": not a shot list
+    QString script;               // imported screenplay (project-relative)
+    QString backLinkUuid, backLinkProject, backLinkTaskStage, backLinkTechnique;
+  };
+  void readShotDocument(const QByteArray &bytes,
+                        const std::vector<ShotData *> &targets,
+                        ShotDocumentRead &out);
+  // Writes the storyboard .ztoryc of `shots` (xsheet order) to `path`.
+  // Serialization only — no guards, no questions, no publication.
+  bool writeShotDocument(const QString &path,
+                         const std::vector<const ShotData *> &shots);
+  // The sub-scene name in a main-xsheet column (empty if none): how the file
+  // ties an entry to its shot.
+  static QString shotLevelNameAt(TXsheet *xsh, int col);
+
+  // Bring m_shots in line with the scene's shot columns, by identity (see
+  // docs/SHOT_DOCUMENT_PLAN.md, step 1): each entry follows its column, a new
+  // column gets a new entry, a column that is gone takes its entry with it, and
+  // index i is always the i-th shot column of the scene.  Run at the end of
+  // every resequence, before modelReset.
+  void reconcileWithXsheet();
 
   // ── Numerazione / Labelling ───────────────────────────────────────────────
-  void    renumberAll();                    // full renumber using m_numberingConfig
   void    assignKeepNumbers(int insertAt);  // letter-suffix for Keep-# mode (legacy)
-  QString nextShotName() const;             // next auto name after existing shots
 
   void setNumberingConfig(const NumberingConfig &cfg);
   NumberingConfig       &numberingConfig()       { return m_numberingConfig; }
@@ -1018,11 +1155,6 @@ public:
   void detectAndUpdatePanels(int shotIdx);
   void refreshFromScene();
 
-  // ── Persistenza ───────────────────────────────────────────────────────────
-  void save();
-  void load();
-  void setZtoryPath(const QString &path) { m_ztoryPath = path; }
-
   // Imported screenplay path (project-relative, e.g. "+extras/script/x.fdx").
   QString scriptFile() const { return m_scriptFile; }
   void setScriptFile(const QString &path) {
@@ -1055,7 +1187,7 @@ public:
   }
 
   // ── Resequencing ──────────────────────────────────────────────────────────
-  void resequenceXsheet();
+  void resequenceXsheet();  // ends with reconcileWithXsheet()
 
   // Returns true if at main xsheet level; optionally shows a warning dialog.
   static bool assertMainXsheet(bool showWarning = true);
@@ -1185,8 +1317,6 @@ signals:
   void modelReset();                          // tutto cambiato
   void shotAdded(int shotIdx);
   void shotRemovedAt(int col);  // col = xsheet column deleted (symmetric with shotAdded)
-  void shotRemoved(int shotIdx);
-  void shotMoved(int fromIdx, int toIdx);
   void shotDataChanged(int shotIdx);
   void taskStatusChanged();  // a per-task status was edited (Production Tracker)
   void assetsChanged();      // asset list or an asset task changed (Production Tracker)
@@ -1218,6 +1348,10 @@ signals:
   // only a scene save makes that copy official — so "close without saving"
   // discards the thumbnails too (Franco, 2026-09-23).
   void sceneSaved();
+  // Undo/redo of a shot operation (step 6): the model restores the xsheet and
+  // the shots; the Boards stop following the xsheet meanwhile, then rebuild.
+  void shotsRestoreStarted();
+  void shotsRestored();
 
  public:
   // Public emitter for renderFinished() — Qt signals are protected, so

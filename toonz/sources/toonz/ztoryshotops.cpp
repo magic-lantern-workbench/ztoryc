@@ -1,4 +1,6 @@
 #include "ztoryshotops.h"
+#include "columncommand.h"
+#include "toonzqt/menubarcommand.h"
 
 #include "tapp.h"
 #include "toonz/toonzscene.h"
@@ -572,6 +574,126 @@ void applyCrossDissolves(TXsheet *mainXsh, const std::vector<ShotLayout> &shots)
     for (int j = 0; j < half; j++)
       mainXsh->setCell(X - half + j, B.col, TXshCell(clB, TFrameId(1 + j)));
   }
+}
+
+void closeSubScenes() {
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  if (!scene) return;
+  while (scene->getChildStack()->getAncestorCount() > 0)
+    CommandManager::instance()->execute("MI_CloseChild");
+}
+
+std::vector<TXshLevelP> deleteShotColumns(std::vector<int> xshCols) {
+  std::vector<TXshLevelP> removed;
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  TXsheet *top      = scene ? scene->getChildStack()->getTopXsheet() : nullptr;
+  if (!top) return removed;
+  // From the top down: the lower columns still to delete do not move.
+  std::sort(xshCols.rbegin(), xshCols.rend());
+  xshCols.erase(std::unique(xshCols.begin(), xshCols.end()), xshCols.end());
+  // The levels the shots expose, collected before their columns go.
+  std::set<TXshLevel *> shotLevels;
+  const int frameCount = top->getFrameCount();
+  for (int col : xshCols)
+    for (int r = 0; r <= frameCount; r++) {
+      TXshCell cell = top->getCell(r, col);
+      if (cell.isEmpty() || !cell.m_level) continue;
+      shotLevels.insert(cell.m_level.getPointer());
+      if (TXshChildLevel *cl = cell.m_level->getChildLevel())
+        cl->getXsheet()->getUsedLevels(shotLevels);
+      break;  // one cell is enough: the column exposes a single sub-scene
+    }
+  for (int col : xshCols) {
+    std::set<int> colSet;
+    colSet.insert(col);
+    ColumnCmd::deleteColumns(colSet, false, true);  // withoutUndo: the caller's
+  }
+  top->updateFrameCount();
+  // Drop the orphans; the returned handles keep them alive for the undo.
+  TLevelSet *ls = scene->getLevelSet();
+  for (TXshLevel *lvl : shotLevels) {
+    if (!lvl || top->isLevelUsed(lvl)) continue;
+    removed.push_back(TXshLevelP(lvl));
+    ls->removeLevel(lvl, false);
+  }
+  return removed;
+}
+
+int columnAfterLastShot(TXsheet *mainXsh) {
+  if (!mainXsh) return 0;
+  for (int c = mainXsh->getColumnCount() - 1; c >= 0; c--)
+    if (!ZtoryModel::shotLevelNameAt(mainXsh, c).isEmpty()) return c + 1;
+  return 0;
+}
+
+TXshChildLevel *insertNewShot(int insertCol, int duration) {
+  TApp *app         = TApp::instance();
+  ToonzScene *scene = app->getCurrentScene()->getScene();
+  TXsheet *xsh      = scene ? scene->getChildStack()->getTopXsheet() : nullptr;
+  if (!xsh) return nullptr;
+  ZtoryModel *model = ZtoryModel::instance();
+  if (model->hasKitsuShots()) model->setAutoRenumber(false);
+  TXshLevel *xl = scene->createNewLevel(CHILD_XSHLEVEL);
+  if (!xl || !xl->getChildLevel()) return nullptr;
+  TXshChildLevel *cl = xl->getChildLevel();
+  insertCol = std::max(0, std::min(insertCol, xsh->getColumnCount()));
+  xsh->insertColumn(insertCol);
+  for (int r = 0; r < duration; r++)
+    xsh->setCell(r, insertCol, TXshCell(cl, TFrameId(r + 1)));
+  xsh->updateFrameCount();
+  syncChildCameraToMain(xsh, cl);  // the sub-scene gets the main camera
+  app->getCurrentXsheet()->notifyXsheetChanged();
+  return cl;
+}
+
+std::vector<ZtoryClipEntry> makeShotClip(TXsheet *mainXsh, std::vector<int> cols,
+                                         ClipKind kind) {
+  std::vector<ZtoryClipEntry> clip;
+  if (!mainXsh) return clip;
+  std::sort(cols.begin(), cols.end());
+  for (int col : cols) {
+    ZtoryClipEntry ce;
+    ce.isCut   = kind == ClipKind::Cut;
+    ce.isClone = kind == ClipKind::Clone;
+    ce.srcCol  = ce.isCut ? -1 : col;  // a cut column is deleted right after
+    int start = 0, dur = 0;
+    ce.duration = shotTrueSpan(mainXsh, col, start, dur) && dur > 0
+                      ? dur
+                      : colDuration(mainXsh, col);
+    if (ce.isCut) {
+      if (ZtoryShotList::Ptr sd = ZtoryModel::instance()->shotPtrForColumn(col)) {
+        ce.hasShot = true;
+        ce.shot    = *sd;
+      }
+      TXshColumn *xshCol      = mainXsh->getColumn(col);
+      TXshLevelColumn *lc     = xshCol ? xshCol->getLevelColumn() : nullptr;
+      if (lc) {
+        int r0 = 0, r1 = 0;
+        lc->getRange(r0, r1);
+        TXshCell cell = lc->getCell(r0);
+        if (!cell.isEmpty()) ce.cutLevel = cell.m_level;
+      }
+    }
+    clip.push_back(ce);
+  }
+  return clip;
+}
+
+void dropOneShotClipEntries() {
+  auto clip = ZtoryModel::instance()->sharedClip();
+  clip.erase(std::remove_if(clip.begin(), clip.end(),
+                            [](const ZtoryClipEntry &e) {
+                              return e.isCut || e.isClone;
+                            }),
+             clip.end());
+  ZtoryModel::instance()->setSharedClip(std::move(clip));
+}
+
+int nextShotColumn(TXsheet *mainXsh, int col) {
+  if (!mainXsh) return -1;
+  for (int c = col + 1; c < mainXsh->getColumnCount(); c++)
+    if (!ZtoryModel::shotLevelNameAt(mainXsh, c).isEmpty()) return c;
+  return -1;
 }
 
 }  // namespace ZtoryShotOps

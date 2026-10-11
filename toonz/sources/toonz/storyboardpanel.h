@@ -216,7 +216,10 @@ QToolButton *m_numberingBtn;   // ⚙ Numbering config button
   QStackedWidget   *m_stack;
   SceneViewerPanel *m_comboViewer;
 struct Shot {
-    ShotData               data;
+    // The shot's data: the model's object, shared with every other Board and
+    // with the model itself (docs/SHOT_DOCUMENT_PLAN.md, step 2b) — one copy.
+    // Obtained with modelShotFor(column); never null once the shot is built.
+    ZtoryShotList::Ptr     data;
     std::vector<PanelWidget*> panels;
     bool selected = false;
     int  viewPanel = 0;  // panel shown in collapsed "Compact view" view
@@ -270,17 +273,8 @@ struct Shot {
   QString m_shotBackLinkUuid;       // projectShot uuid
   QString m_shotBackLinkTaskStage;  // task short code (e.g. "ANIM")
   QString m_shotBackLinkTechnique;  // shot technique authored at export time
-  bool    m_currentSceneIsShot = false;  // true when the open scene is role="shot"
-  // Idem per i personaggi (role="character"): il loro sidecar tiene i mouth
-  // set, e saveZtoryc() ci scriverebbe sopra role="storyboard" alla prima
-  // apertura. Stesso bug dei role="shot", terza casistica.
-  bool    m_currentSceneIsCharacter = false;
-  // B3: suppress publication for scenes the user chose to keep standalone.
-  bool    m_suppressProjectPublication = false;
-  // The shot-identity question has been answered for this scene, whatever the
-  // answer was.  Persisted in the .ztoryc: a session-only guard means the same
-  // question every time the scene is reopened.
-  bool    m_shotIdentityAsked = false;
+  // The document flags (role shot/character, Production Tracker off, shot
+  // identity asked) live in the model: ZtoryModel::shotDocumentState().
   // ensureShotIdentityUnique() can change the shots (it gives them a sequence)
   // but it runs from inside saveZtoryc(), AFTER the file has been written: what
   // it changed would live only in memory. This asks saveZtoryc() for one more
@@ -361,30 +355,42 @@ struct Shot {
   // A shot just built for a pasted column takes back the data its sub-scene
   // had when it was cut (ZtoryModel::cutShotFor). true = adopted.
   bool    adoptCutShot(Shot &shot);
+  // The model's shared object for the shot in main-xsheet column `col`; asks
+  // the model to reconcile if it does not know the column yet.  A private
+  // object only if the column is not a shot.
+  ZtoryShotList::Ptr modelShotFor(int col);
+  // Light last drawn per panel (key: the PanelData's address), to notice a
+  // light edited elsewhere now that the data has one copy.
+  QHash<QString, QString> m_lightSeen;
+  bool m_gridRebuildPending = false;  // a deferred rebuildGrid is queued
+  // After any rebuild of m_shots: make every shot's data THE model's object for
+  // its column (one copy).  A fresh model entry takes the Board's object;
+  // otherwise the Board takes the model's.
+  void bindShotsToModel();
+  // The shot's panel widgets match its panels (count), rebuilding them if not:
+  // the data is shared, so another Board may have changed the panels.  true if
+  // rebuilt (the caller then relays out the grid).
+  bool ensurePanelWidgets(int si);
+  // Set every shot's column from the scene, in absolute terms, after checking
+  // that shot i really is the i-th shot column's sub-scene.  false (nothing
+  // written) if the Board's list does not match the scene.
+  bool reanchorColumnsFromScene();
   void    updateColumnName(int si);
   void    loadZtoryc();
-  // Production-tracking bridge: ZtoryModel is the authoritative store for the
-  // tracking fields (uuid, technique, tasks) edited by the Production Tracker.
-  // The Board's m_shots copy is just the .ztoryc serialization buffer, synced
-  // model⇄Board at the load/save/export boundaries so panel edits round-trip.
-  void    pushTrackingToBoard();    // model → Board (before save / export)
-  void    pullTrackingFromBoard();  // Board → model (after load)
-  // Assign a stable uuid to any shot missing one.  afterLoad: the Board and the
-  // model were just filled from the same file (legacy scenes without uuids
-  // match by position only then).
-  void    ensureShotUuids(bool afterLoad = false);
+  // Assign a stable uuid to any shot missing one (or claimed by another
+  // storyboard).  The Board's shots are the model's objects, so the model
+  // gets the same uuid.
+  void    ensureShotUuids();
 public:
   explicit StoryboardPanel(QWidget *parent = nullptr);
   void    saveZtoryc();
+  void markShotDocumentChanged();  // an edit: the scene is modified (step 3b)
   // First panel's already-rendered thumbnail (for the Production Tracker).
   // Empty pixmap if the Board hasn't rendered it yet (rendering is lazy).
   QPixmap firstPanelThumbnail(int shotIdx) const;
   void refreshFromScene();
   ZtoryBoardSnap captureSnapshot();
   void restoreFromSnapshot(const ZtoryBoardSnap &snap);
-  // The data of the shot in main-xsheet column `col` (texts synced from the
-  // widgets first). false if no shot there. Used by the Animatic's Cut.
-  bool shotDataForColumn(int col, ShotData *out);
 
   // Undo for an edit made from OUTSIDE the Board — today the Thumbnail room's
   // "export panels as a shot", which goes straight to ZtoryModel and so never

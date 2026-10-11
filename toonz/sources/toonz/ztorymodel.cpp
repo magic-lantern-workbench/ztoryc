@@ -9,6 +9,9 @@
 #include "tapp.h"
 #include "toonz/toonzscene.h"
 #include "toonz/txsheet.h"
+#include "toonz/txshcolumn.h"
+#include <map>
+#include "toonz/txshchildlevel.h"
 #include "toonz/txshcell.h"
 #include "toonz/txshsimplelevel.h"
 #include "toonz/levelproperties.h"   // LevelProperties (export-to-board level)
@@ -46,6 +49,10 @@
 #include <QLockFile>
 #include <QSaveFile>
 #include <QTimer>
+#include <QLabel>
+#include <QPointer>
+#include <QElapsedTimer>
+#include "iocommand.h"  // ZTORYC_SCENETEST
 #include "ztrackmerge.h"
 #include "ztorylocks.h"
 #include <QSettings>
@@ -149,6 +156,81 @@ QColor ZtoryModel::taskStatusColor(TaskStatus s) {
   }
 }
 
+// Test mode (ZTORYC_ROUNDTRIP, see StoryboardPanel::refreshFromScene): armed as
+// soon as the application exists — not by a Board or the model, which a
+// workflow with no Board (Cutout, Character) creates late or never, after the
+// first modal box has already stopped the load.
+static void ztoryArmRoundtripWatchdog() {
+  // Copies of real storyboards miss their panel drawings, and Tahoma stops the load with a
+  // modal «file missing» box.  Nobody is there to press OK, so close it: only
+  // the .ztoryc matters to the round trip.
+  if (qEnvironmentVariableIsSet("ZTORYC_ROUNDTRIP")) {
+    QTimer *dismiss = new QTimer(qApp);
+    dismiss->setInterval(50);
+    // ZTORYC_DIALOG_HOLD_MS: leave each box up that long before closing it,
+    // as a person reading it would — the windows behind it repaint meanwhile
+    // (the palette crash of 2026-10-11 needed exactly that).
+    static const int holdMs = qEnvironmentVariableIntValue("ZTORYC_DIALOG_HOLD_MS");
+    QObject::connect(dismiss, &QTimer::timeout, qApp, []() {
+      static QPointer<QWidget> seen;
+      static QElapsedTimer since;
+      QWidget *active = QApplication::activeModalWidget();
+      if (active && active != seen) { seen = active; since.start(); }
+      if (active && holdMs > 0 && since.elapsed() < holdMs) return;
+      if (QWidget *w = active) {
+        QString text;
+        for (QLabel *l : w->findChildren<QLabel *>())
+          if (!l->text().isEmpty()) text += l->text().left(160) + " | ";
+        fprintf(stderr, "[ZTORY] roundtrip: closing dialog '%s': %s\n",
+                qPrintable(w->windowTitle()), qPrintable(text));
+        if (QDialog *d = qobject_cast<QDialog *>(w)) d->reject();
+        else w->close();
+      }
+    });
+    dismiss->start();
+  }
+}
+Q_COREAPP_STARTUP_FUNCTION(ztoryArmRoundtripWatchdog)
+
+// Test mode (ZTORYC_SCENETEST, docs/SHOT_DOCUMENT_PLAN.md): the shot and
+// character scenes the round trip never covers — the path that emptied a real
+// tracker on 2026-10-07 (a shot opened in Cutout, no Board). Once the scene
+// from the command line is loaded, in whatever workflow the preferences say:
+// write the project DB as an edit would, then ⌘S ("save") or Save As
+// ("saveas:<abs .tnz>"), and exit. Watching the tracker is the script's job.
+static void ztoryArmSceneTest() {
+  QString action = qEnvironmentVariable("ZTORYC_SCENETEST");
+  if (action.isEmpty()) return;
+  QTimer *poll = new QTimer(qApp);
+  poll->setInterval(500);
+  QObject::connect(poll, &QTimer::timeout, qApp, [poll, action]() {
+    TApp *app = TApp::instance();
+    if (!app || !app->getCurrentScene()) return;
+    ToonzScene *scene = app->getCurrentScene()->getScene();
+    if (!scene || scene->isUntitled()) return;
+    poll->stop();
+    QTimer::singleShot(6000, qApp, [action]() {
+      ZtoryModel *m = ZtoryModel::instance();
+      fprintf(stderr, "[ZTORY] scenetest: role=%s shots=%d assets=%d\n",
+              m->shotDocumentState().isShotScene ? "shot"
+              : m->shotDocumentState().isCharacterScene ? "character"
+                                                        : "storyboard",
+              (int)m->projectShots().size(), (int)m->assets().size());
+      m->saveProjectDb();
+      TApp::instance()->getCurrentScene()->setDirtyFlag(true);
+      bool ok = action.startsWith("saveas:")
+                    ? IoCmd::saveScene(TFilePath(action.mid(7).toStdWString()), 0)
+                    : IoCmd::saveAll();
+      fprintf(stderr, "[ZTORY] scenetest: %s %s\n", qPrintable(action),
+              ok ? "saved" : "FAILED");
+      fflush(stderr);
+      QTimer::singleShot(3000, qApp, []() { _exit(0); });
+    });
+  });
+  poll->start();
+}
+Q_COREAPP_STARTUP_FUNCTION(ztoryArmSceneTest)
+
 ZtoryModel::ZtoryModel() : m_fps(24) {
   m_follow = QSettings().value("Ztoryc/followBoardTimeline", false).toBool();
   m_animaticSidePanels = QStringList{ "Storyboard" };
@@ -163,6 +245,27 @@ ZtoryModel::ZtoryModel() : m_fps(24) {
   if (TApp::instance() && TApp::instance()->getCurrentScene())
     connect(TApp::instance()->getCurrentScene(), &TSceneHandle::sceneSwitched,
             this, &ZtoryModel::onSceneSwitchedAdvanceShot);
+  // A new scene (or Revert Scene): its .ztoryc must be read again.  Connected
+  // here, in the model's constructor, so it runs before the Boards reload.
+  if (TApp::instance() && TApp::instance()->getCurrentScene())
+    connect(TApp::instance()->getCurrentScene(), &TSceneHandle::sceneSwitched,
+            this, [this]() {
+              // Entering or leaving a shot also emits sceneSwitched: that is
+              // the same scene object, and re-reading its file would put it
+              // back over edits not saved yet (e.g. from the Shot Board
+              // navigator).  Opening a scene or Revert Scene make a NEW
+              // ToonzScene (IoCmd::loadScene) before dropping the old one.
+              if (TApp::instance()->getCurrentScene()->getScene() !=
+                  m_shotDataSceneObj)
+                m_shotDataLoadedFor.clear();
+              // No Board in this workflow's rooms (e.g. Cutout): the model
+              // reads the file itself, after the scene switch has settled.
+              QTimer::singleShot(0, this,
+                                 &ZtoryModel::readShotDocumentWithoutBoard);
+            });
+  // ⌘S with no Board alive: the model writes the .ztoryc (step 3b).
+  connect(this, &ZtoryModel::sceneSaved, this,
+          &ZtoryModel::writeShotDocumentWithoutBoard);
   // More than one Ztoryc may be open on the same project: read back what the
   // others write (debounced: one save can come as several file events).
   m_dbReloadTimer = new QTimer(this);
@@ -1388,6 +1491,26 @@ void ZtoryModel::saveProjectDb() {
           disk.contains(QRegularExpression("title=\"[^\"]+\"")) ||
           disk.contains("<person ") || disk.contains("<asset ");
       if (diskHasMeta) return;  // would wipe real metadata → block
+    }
+  }
+  // Second firewall, on the CONTENTS: no shots, no assets and no storyboards in
+  // memory over a file that has them is never a real edit — it is a model whose
+  // project data was reset and not reloaded.  On 2026-10-07 a shot scene read
+  // with no Board alive did exactly that (its sidecar refilled production/title,
+  // so the metadata check above let it through) and Messina's tracker was
+  // written empty: 70 shots, 42 assets, 11 storyboards gone.
+  if (m_projectShots.empty() && m_assets.empty() &&
+      m_storyboardFiles.isEmpty() && QFile::exists(path)) {
+    QFile rf(path);
+    if (rf.open(QIODevice::ReadOnly | QIODevice::Text)) {
+      const QByteArray disk = rf.readAll();
+      rf.close();
+      if (disk.contains("<shot ") || disk.contains("<asset ") ||
+          disk.contains("<storyboard ")) {
+        qWarning("[ZTORY] saveProjectDb BLOCKED: empty project data over a "
+                 "non-empty %s", path.toUtf8().constData());
+        return;
+      }
     }
   }
 
@@ -2652,7 +2775,12 @@ void ZtoryModel::assignShotLabel(std::vector<ShotData> &shots, int si,
 }
 
 void ZtoryModel::generateShotLabel(int si) {
-  assignShotLabel(m_shots, si, m_numberingConfig);
+  if (si < 0 || si >= (int)m_shots.size()) return;
+  std::vector<ShotData> plain = m_shots.copy();
+  assignShotLabel(plain, si, m_numberingConfig);
+  m_shots[si].shotLabel  = plain[si].shotLabel;
+  m_shots[si].shotNumber = plain[si].shotNumber;
+  m_shots[si].orderIndex = plain[si].orderIndex;
 }
 
 void ZtoryModel::cleanRenumber() {
@@ -2758,35 +2886,6 @@ bool ZtoryModel::assertMainXsheet(bool showWarning) {
   return false;
 }
 
-void ZtoryModel::syncShotPanels(int si, const std::vector<PanelData> &panels,
-                                const QString &label, int xsheetCol) {
-  if (si < 0) return;
-  // Grow m_shots so it mirrors the Board's shot count. The Board calls this
-  // for every shot it knows about after refreshFromScene, so once all calls
-  // complete ZtoryModel::m_shots has one entry per child-level column.
-  while ((int)m_shots.size() <= si) {
-    ShotData s;
-    PanelData pd;
-    s.panels.push_back(pd);
-    m_shots.push_back(s);
-    m_previews.push_back({QPixmap()});
-  }
-  m_shots[si].panels = panels;
-  // The Board is authoritative for shot labels. Sync it whenever provided so
-  // the Shot Board header always reflects the current label, even for scenes
-  // that were created before the .ztoryc labelling system was introduced.
-  if (!label.isEmpty()) {
-    m_shots[si].shotLabel  = label;
-    m_shots[si].shotNumber = label;  // keep legacy field in sync
-  }
-  // xsheetColumn is critical: refreshPreview() uses it to render the correct
-  // sub-scene thumbnail. Without it, all shots would render column 0 (SH010).
-  if (xsheetCol >= 0)
-    m_shots[si].xsheetColumn = xsheetCol;
-  m_previews[si].resize(panels.size(), QPixmap());
-  emit shotDataChanged(si);
-}
-
 void ZtoryModel::addShot(int insertAt) {
   if (!assertMainXsheet(true)) return;
   ShotData s;
@@ -2798,12 +2897,11 @@ void ZtoryModel::addShot(int insertAt) {
     generateShotLabel((int)m_shots.size() - 1);
     emit shotAdded((int)m_shots.size() - 1);
   } else {
-    m_shots.insert(m_shots.begin() + insertAt, s);
+    m_shots.insertAt(insertAt, s);
     m_previews.insert(m_previews.begin() + insertAt, {QPixmap()});
     generateShotLabel(insertAt);
     emit shotAdded(insertAt);
   }
-  save();
 }
 
 void ZtoryModel::addShotNamed(const QString &name) {
@@ -2844,6 +2942,7 @@ void ZtoryModel::addShotNamed(const QString &name) {
   s.panels.push_back(pd);
   m_shots.push_back(s);
   m_previews.push_back({QPixmap()});
+  recordShotIdentity((int)m_shots.size() - 1);
 
   app->getCurrentXsheet()->notifyXsheetChanged();
   resequenceXsheet();
@@ -2992,6 +3091,7 @@ void ZtoryModel::addShotFromRasters(const QString &name,
   // 4) Finalise the model entry now that the column exists.  xsheetColumn is
   //    critical: refreshPreview() uses it to render the sub-scene thumbnail.
   m_shots[si].xsheetColumn = col;
+  recordShotIdentity(si);
   // Name the column after the shot, like every other shot-creating path: the
   // Board's reorder detection compares this name against the shot label, and an
   // unnamed column carries no ordering information.
@@ -3002,97 +3102,11 @@ void ZtoryModel::addShotFromRasters(const QString &name,
   emit modelReset();
 }
 
-void ZtoryModel::removeShot(int si) {
-  if (!assertMainXsheet(true)) return;
-  if (si < 0 || si >= (int)m_shots.size()) return;
-  m_shots.erase(m_shots.begin() + si);
-  if (si < (int)m_previews.size())
-    m_previews.erase(m_previews.begin() + si);
-  emit shotRemoved(si);
-  save();
-}
-
-void ZtoryModel::moveShot(int from, int to) {
-  if (!assertMainXsheet(false)) return;
-  if (from == to) return;
-  if (from < 0 || from >= (int)m_shots.size()) return;
-  if (to   < 0 || to   >= (int)m_shots.size()) return;
-  ShotData s = m_shots[from];
-  std::vector<QPixmap> px = (from < (int)m_previews.size()) ? m_previews[from] : std::vector<QPixmap>();
-  m_shots.erase(m_shots.begin() + from);
-  m_shots.insert(m_shots.begin() + to, s);
-  if (!m_previews.empty()) {
-    m_previews.erase(m_previews.begin() + from);
-    m_previews.insert(m_previews.begin() + to, px);
-  }
-  emit shotMoved(from, to);
-  save();
-}
-
-void ZtoryModel::cloneShot(int si) {
-  if (!assertMainXsheet(true)) return;
-  if (si < 0 || si >= (int)m_shots.size()) return;
-  ShotData s = m_shots[si];
-  s.shotNumber = "";   // reset — will be assigned by generateShotLabel
-  s.shotLabel  = "";
-  s.orderIndex = 0;
-  m_shots.insert(m_shots.begin() + si + 1, s);
-  std::vector<QPixmap> px = (si < (int)m_previews.size()) ? m_previews[si] : std::vector<QPixmap>();
-  m_previews.insert(m_previews.begin() + si + 1, px);
-  generateShotLabel(si + 1);
-  emit shotAdded(si + 1);
-  save();
-}
-
 // ─── Numerazione ─────────────────────────────────────────────────────────────
 
 void ZtoryModel::setNumberingConfig(const NumberingConfig &cfg) {
   m_numberingConfig = cfg;
   // Don't call save() here — caller decides when to persist
-}
-
-QString ZtoryModel::nextShotName() const {
-  const NumberingConfig &cfg = m_numberingConfig;
-  // Parse existing shot numbers to find the highest matching number
-  QRegularExpression re;
-  if (cfg.style == NumberingConfig::Sequence) {
-    re.setPattern(
-        QString("^%1\\d+_%2(\\d+)$")
-            .arg(QRegularExpression::escape(cfg.seqPrefix),
-                 QRegularExpression::escape(cfg.shotPrefix)));
-  } else {
-    re.setPattern(
-        QString("^%1(\\d+)$")
-            .arg(QRegularExpression::escape(cfg.shotPrefix)));
-  }
-  int maxNum = cfg.startNumber - cfg.step;
-  for (const auto &s : m_shots) {
-    auto m = re.match(s.label());
-    if (m.hasMatch()) {
-      int n = m.captured(1).toInt();
-      if (n > maxNum) maxNum = n;
-    }
-  }
-  int next = qMax(cfg.startNumber, maxNum + cfg.step);
-  if (cfg.style == NumberingConfig::Sequence) {
-    return QString("%1%2_%3%4")
-        .arg(cfg.seqPrefix)
-        .arg(cfg.seqNumber, cfg.seqPadding, 10, QChar('0'))
-        .arg(cfg.shotPrefix)
-        .arg(next, cfg.padding, 10, QChar('0'));
-  }
-  return QString("%1%2").arg(cfg.shotPrefix).arg(next, cfg.padding, 10, QChar('0'));
-}
-
-void ZtoryModel::renumberAll() {
-  const int scale = 100;
-  for (int i = 0; i < (int)m_shots.size(); i++) {
-    m_shots[i].shotNumber = m_numberingConfig.shotName(i);
-    m_shots[i].shotLabel  = m_shots[i].shotNumber;  // keep shotLabel in sync
-    m_shots[i].orderIndex =
-        (m_numberingConfig.startNumber + i * m_numberingConfig.step) * scale;
-    updateColumnName(i);
-  }
 }
 
 void ZtoryModel::assignKeepNumbers(int insertAt) {
@@ -3177,7 +3191,6 @@ void ZtoryModel::detectAndUpdatePanels(int si) {
   if (newPanels.empty()) { PanelData pd; pd.duration = qMax(1, frameCount); newPanels.push_back(pd); }
   s.panels = newPanels;
   emit shotDataChanged(si);
-  save();
 }
 
 void ZtoryModel::refreshFromScene() {
@@ -3196,60 +3209,549 @@ void ZtoryModel::refreshFromScene() {
   emit modelReset();
 }
 
-// ─── Persistenza ─────────────────────────────────────────────────────────────
+// ─── Il documento degli shot (.ztoryc) ───────────────────────────────────────
 
-void ZtoryModel::save() {
-  if (m_ztoryPath.isEmpty()) return;
-  QFile file(m_ztoryPath);
-  if (!file.open(QIODevice::WriteOnly)) return;
+// The sub-scene level name exposed in a main-xsheet column: the identity a
+// shot keeps through inserts, deletes and reorders (the Animatic caches its
+// thumbnails by it too). Empty for a column with no sub-scene.
+QString ZtoryModel::shotLevelNameAt(TXsheet *xsh, int col) {
+  if (!xsh || col < 0 || col >= xsh->getColumnCount()) return QString();
+  TXshColumn *column = xsh->getColumn(col);
+  if (!column || column->isEmpty()) return QString();
+  int r0 = 0, r1 = 0;
+  column->getRange(r0, r1);
+  for (int r = r0; r <= r1; r++) {
+    TXshCell cell = xsh->getCell(r, col);
+    if (!cell.isEmpty() && cell.m_level && cell.m_level->getChildLevel())
+      return QString::fromStdWString(cell.m_level->getName());
+  }
+  return QString();
+}
+
+// Reads a .ztoryc (step 3d: the reader lives with the writer).  What it says
+// about the scene goes into the model — document flags, project metadata and
+// the blocks kept for migration (techniques, team, assets), numbering,
+// sequences; each <shot> fills the target with the same sub-scene (Copies in
+// order; files without level names by position).  A target the file does not
+// mention is left alone.  The caller resets what must not leak from the
+// previous scene before calling, and owns what only a Board needs (role,
+// screenplay, back-link: returned in `out`).
+void ZtoryModel::readShotDocument(const QByteArray &bytes,
+                                  const std::vector<ShotData *> &targets,
+                                  ShotDocumentRead &out) {
+  // Which target each <shot> of the file belongs to.
+  //
+  // This used to be the file's position, and the Board reads it after every
+  // resequence, reading a .ztoryc saved BEFORE the operation: after a shot was
+  // pasted or inserted in the middle, every shot from there on received the
+  // dialogue, action and notes of the one that used to sit in its place (Franco,
+  // 2026-09-24, with Clone + Paste — the whole storyboard shifted by one).
+  // Now matched on the sub-scene level name, which the shot keeps. Shots that
+  // share a sub-scene (Copy = shared instance) have the same name and are
+  // matched in order. Files written before the name was saved, or with an
+  // entry lacking it, keep the old positional behaviour. A file entry whose
+  // sub-scene no longer exists (a deleted shot) maps nowhere and is dropped; a
+  // new shot maps from nothing and keeps its blank fields.
+  QHash<int, int> shotRemap;
+  bool useShotRemap = false;
+  {
+    QVector<QPair<int, QString>> entries;  // (file index, level)
+    bool allNamed = true;
+    QXmlStreamReader pre(bytes);
+    while (!pre.atEnd()) {
+      if (pre.readNext() == QXmlStreamReader::StartElement &&
+          pre.name() == QLatin1String("shot")) {
+        const QString lvl = pre.attributes().value("level").toString();
+        if (lvl.isEmpty()) allNamed = false;
+        entries.push_back({pre.attributes().value("index").toInt(), lvl});
+      }
+    }
+    if (allNamed && !entries.isEmpty()) {
+      ToonzScene *scn = TApp::instance()->getCurrentScene()->getScene();
+      TXsheet *top    = scn ? scn->getChildStack()->getTopXsheet() : nullptr;
+      QHash<QString, QVector<int>> targetsByLevel;  // level -> target indices
+      for (int t = 0; t < (int)targets.size(); t++)
+        targetsByLevel[shotLevelNameAt(top, targets[t]->xsheetColumn)]
+            .push_back(t);
+      QHash<QString, int> used;
+      for (const auto &e : entries) {
+        QVector<int> &cands = targetsByLevel[e.second];
+        int &n              = used[e.second];
+        shotRemap.insert(e.first, n < cands.size() ? cands[n] : -1);
+        n++;
+      }
+      useShotRemap = true;
+    }
+  }
+  QXmlStreamReader xml(bytes);
+  int si = -1, pi = -1, ai = -1;
+  std::vector<Technique> loadedTechs;  // technique presets from file (if any)
+  QStringList loadedTeam;              // team roster from file (replaces model's)
+  bool        hasTeamBlock = false;    // true once a <team> element is seen
+  std::vector<Asset> loadedAssets;     // assets from file (replaces model's)
+  bool        hasAssetsBlock = false;
+  while (!xml.atEnd()) {
+    xml.readNext();
+    if (xml.isStartElement()) {
+      if (xml.name() == QLatin1String("ztoryc")) {
+        // Root element: read role + back-link attributes.
+        auto a = xml.attributes();
+        QString r = a.value("role").toString();
+        if (!r.isEmpty()) out.role = r;
+        // A scene the user kept out of the project stays out, session after
+        // session.  Absent attribute = never asked, or answered yes.
+        shotDocumentState().trackerOff =
+            (a.value("productionTracker").toString() == QLatin1String("off") ||
+             a.value("projectPublication").toString() == QLatin1String("local"));
+        shotDocumentState().shotIdentityAsked = (a.value("shotIdentityAsked").toString() ==
+                               QLatin1String("1"));
+        out.backLinkUuid      = a.value("projectShot").toString();
+        out.backLinkProject   = a.value("project").toString();
+        out.backLinkTaskStage = QString();  // read from <project> below
+        out.backLinkTechnique = QString();  // read from <project> below
+      } else if (xml.name() == QLatin1String("project")) {
+        auto a = xml.attributes();
+        setProduction(a.value("production").toString());
+        setTitle(a.value("title").toString());
+        setEpisode(a.value("episode").toString());
+        setPdfLogoPath(a.value("pdfLogo").toString());
+        setPdfNoLogo(a.value("pdfNoLogo").toInt() != 0);
+        if (a.hasAttribute("defaultTechnique"))
+          setDefaultTechnique(
+              a.value("defaultTechnique").toString());
+        // B3c: read task stage from shot scene's <project> element.
+        if (a.hasAttribute("taskStage"))
+          out.backLinkTaskStage = a.value("taskStage").toString();
+        // Shot technique authored at export — drives the workflow to open in.
+        if (a.hasAttribute("technique"))
+          out.backLinkTechnique = a.value("technique").toString();
+      }
+      else if (xml.name() == QLatin1String("technique")) {
+        Technique t;
+        t.name      = xml.attributes().value("name").toString();
+        t.taskTypes = xml.attributes().value("tasks").toString()
+                          .split('|', Qt::SkipEmptyParts);
+        if (!t.name.isEmpty()) loadedTechs.push_back(t);
+      }
+      else if (xml.name() == QLatin1String("team")) {
+        hasTeamBlock = true;  // a <team> exists → replace model roster (even if empty)
+      }
+      else if (xml.name() == QLatin1String("person")) {
+        QString nm = xml.attributes().value("name").toString().trimmed();
+        if (!nm.isEmpty()) loadedTeam << nm;
+      }
+      else if (xml.name() == QLatin1String("assets")) {
+        hasAssetsBlock = true;  // an <assets> exists → replace model assets
+      }
+      else if (xml.name() == QLatin1String("asset")) {
+        Asset as;
+        as.uuid = xml.attributes().value("uuid").toString();
+        if (as.uuid.isEmpty())
+          as.uuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        as.type = xml.attributes().value("type").toString();
+        as.name = xml.attributes().value("name").toString();
+        QString tg = xml.attributes().value("tags").toString();
+        if (!tg.isEmpty()) as.tags = tg.split('|', Qt::SkipEmptyParts);
+        loadedAssets.push_back(as);
+        ai = (int)loadedAssets.size() - 1;
+      }
+      else if (xml.name() == QLatin1String("atask")) {
+        if (ai >= 0 && ai < (int)loadedAssets.size()) {
+          auto a       = xml.attributes();
+          QString type = a.value("type").toString();
+          if (!type.isEmpty()) {
+            TaskState ts;
+            ts.status = ZtoryModel::taskStatusFromLabel(a.value("status").toString());
+            for (const QString &p :
+                 a.value("assignee").toString().split(',', Qt::SkipEmptyParts)) {
+              QString t = p.trimmed();
+              if (!t.isEmpty()) ts.assignees << t;
+            }
+            loadedAssets[ai].tasks.insert(type, ts);
+          }
+        }
+      }
+      else if (xml.name() == QLatin1String("scriptFile")) {
+        out.script = xml.readElementText();
+      }
+      else if (xml.name() == QLatin1String("numbering")) {
+        ZtoryModel *model   = this;
+        NumberingConfig cfg = model->numberingConfig();
+        auto a = xml.attributes();
+        cfg.style = (NumberingConfig::Style)a.value("style").toInt();
+        if (a.hasAttribute("shotPrefix"))  cfg.shotPrefix  = a.value("shotPrefix").toString();
+        if (a.hasAttribute("seqPrefix"))   cfg.seqPrefix   = a.value("seqPrefix").toString();
+        if (a.hasAttribute("panelPrefix")) cfg.panelPrefix = a.value("panelPrefix").toString();
+        if (a.hasAttribute("step"))        cfg.step        = a.value("step").toInt();
+        if (a.hasAttribute("padding"))     cfg.padding     = a.value("padding").toInt();
+        if (a.hasAttribute("seqPadding"))  cfg.seqPadding  = a.value("seqPadding").toInt();
+        if (a.hasAttribute("startNumber")) cfg.startNumber = a.value("startNumber").toInt();
+        if (a.hasAttribute("seqNumber"))   cfg.seqNumber   = a.value("seqNumber").toInt();
+        if (a.hasAttribute("resetOnSeqChange"))
+          cfg.resetOnSeqChange = a.value("resetOnSeqChange").toInt() != 0;
+        model->setNumberingConfig(cfg);
+      }
+      else if (xml.name() == QLatin1String("sequence")) {
+        SequenceData seq;
+        seq.uuid       = xml.attributes().value("uuid").toString();
+        seq.label      = xml.attributes().value("label").toString();
+        seq.orderIndex = xml.attributes().value("order").toInt();
+        if (!seq.uuid.isEmpty())
+          sequences().push_back(seq);
+      }
+      else if (xml.name() == QLatin1String("shot")) {
+        si = xml.attributes().value("index").toInt();
+        if (useShotRemap) si = shotRemap.value(si, -1);
+        if (si >= 0 && si < (int)targets.size()) {
+          targets[si]->uuid             = xml.attributes().value("uuid").toString();
+          targets[si]->shotNumber       = xml.attributes().value("number").toString();
+          targets[si]->shotLabel        = xml.attributes().value("label").toString();
+          targets[si]->orderIndex       = xml.attributes().value("order").toInt();
+          targets[si]->sequenceId       = xml.attributes().value("sequenceId").toString();
+          targets[si]->transitionFrames = xml.attributes().value("transition").toInt();
+          targets[si]->technique        = xml.attributes().value("technique").toString();
+          targets[si]->tasks.clear();   // refilled by <task> children below
+          // (The model's copy of sequenceId used to be set here by index: the
+          // object IS the model's now, step 2b — and on a re-read it is a
+          // private copy that must not reach the model.)
+          // Backward compat (v1-v2 files written by StoryboardPanel):
+          // if shotLabel absent, use shotNumber
+          if (targets[si]->shotLabel.isEmpty())
+            targets[si]->shotLabel = targets[si]->shotNumber;
+        }
+      }
+      else if (xml.name() == QLatin1String("panel")) {
+        pi = xml.attributes().value("index").toInt();
+        if (si >= 0 && si < (int)targets.size() && pi >= 0) {
+          // Aggiungi panel mancanti se necessario
+          while (pi >= (int)targets[si]->panels.size()) {
+            PanelData pd;
+            targets[si]->panels.push_back(pd);
+          }
+          PanelData &pd = targets[si]->panels[pi];
+          pd.startFrame = xml.attributes().value("startFrame").toInt();
+          pd.duration   = xml.attributes().value("duration").toInt();
+          // Camera move overlay
+          if (xml.attributes().hasAttribute("camMove")) {
+            pd.cameraMoveType  = (PanelData::CameraMove)
+                xml.attributes().value("camMove").toInt();
+            pd.cameraMoveLabel = xml.attributes().value("camLabel").toString();
+            pd.camRenderFrame  = xml.attributes().value("camRenderFrame").toInt();
+            pd.camW = xml.attributes().value("camW").toDouble();
+            pd.camH = xml.attributes().value("camH").toDouble();
+            auto strToAff = [](const QString &s, double a[6]) {
+              QStringList t = s.split(' ', Qt::SkipEmptyParts);
+              for (int k = 0; k < 6 && k < t.size(); k++) a[k] = t[k].toDouble();
+            };
+            strToAff(xml.attributes().value("camA0").toString(), pd.camA0);
+            strToAff(xml.attributes().value("camA1").toString(), pd.camA1);
+            // (The type/label/render frame are re-derived from the affines by
+            // the Board after the read: StoryboardPanel's classifyCameraMove.)
+          }
+          // Light-direction gizmo
+          if (xml.attributes().hasAttribute("lightTail")) {
+            auto strToPt = [](const QString &s, double &x, double &y) {
+              QStringList t = s.split(' ', Qt::SkipEmptyParts);
+              if (t.size() >= 2) { x = t[0].toDouble(); y = t[1].toDouble(); }
+            };
+            strToPt(xml.attributes().value("lightTail").toString(),
+                    pd.lightTailX, pd.lightTailY);
+            strToPt(xml.attributes().value("lightTip").toString(),
+                    pd.lightTipX, pd.lightTipY);
+            pd.lightDepth = xml.attributes().value("lightDepth").toDouble();
+            if (xml.attributes().hasAttribute("lightSpread"))
+              pd.lightSpread = xml.attributes().value("lightSpread").toDouble();
+            QString lc = xml.attributes().value("lightColor").toString();
+            if (!lc.isEmpty()) pd.lightColor = lc;
+            pd.hasLight = true;
+          }
+        }
+      }
+      else if (xml.name() == QLatin1String("task")) {
+        if (si >= 0 && si < (int)targets.size()) {
+          auto a = xml.attributes();
+          QString type = a.value("type").toString();
+          if (!type.isEmpty()) {
+            TaskState ts;
+            ts.status   = ZtoryModel::taskStatusFromLabel(a.value("status").toString());
+            const QStringList parts =
+                a.value("assignee").toString().split(',', Qt::SkipEmptyParts);
+            for (const QString &p : parts) {
+              QString t = p.trimmed();
+              if (!t.isEmpty()) ts.assignees << t;
+            }
+            targets[si]->tasks.insert(type, ts);
+          }
+        }
+      }
+      else if (xml.name() == QLatin1String("shotNotes")) {
+        QString t = xml.readElementText();
+        if (si >= 0 && si < (int)targets.size()) targets[si]->notes = t;
+      }
+      else if (xml.name() == QLatin1String("shotVfxNotes")) {
+        QString t = xml.readElementText();
+        if (si >= 0 && si < (int)targets.size()) targets[si]->vfxNotes = t;
+      }
+      else if (xml.name() == QLatin1String("dialog")) {
+        QString t = xml.readElementText();
+        if (si >= 0 && si < (int)targets.size() &&
+            pi >= 0 && pi < (int)targets[si]->panels.size())
+          targets[si]->panels[pi].dialog = t;
+      }
+      else if (xml.name() == QLatin1String("action")) {
+        QString t = xml.readElementText();
+        if (si >= 0 && si < (int)targets.size() &&
+            pi >= 0 && pi < (int)targets[si]->panels.size())
+          targets[si]->panels[pi].action = t;
+      }
+      else if (xml.name() == QLatin1String("notes")) {
+        QString t = xml.readElementText();
+        if (si >= 0 && si < (int)targets.size() &&
+            pi >= 0 && pi < (int)targets[si]->panels.size())
+          targets[si]->panels[pi].notes = t;
+      }
+    }
+  }
+
+  // Replace the seeded technique presets with the ones saved in this scene
+  // (only when present, so old files keep the built-in defaults).
+  if (!loadedTechs.empty())
+    techniques() = loadedTechs;
+  if (hasTeamBlock) setTeam(loadedTeam);
+  if (hasAssetsBlock) assets() = loadedAssets;
+}
+
+void ZtoryModel::markShotDocumentDirty() {
+  TApp *app = TApp::instance();
+  if (app && app->getCurrentScene()) app->getCurrentScene()->setDirtyFlag(true);
+}
+
+void ZtoryModel::addShotDocumentWriter(QObject *writer) {
+  m_shotDocumentWriters.insert(writer);
+  connect(writer, &QObject::destroyed, this,
+          [this, writer]() { m_shotDocumentWriters.remove(writer); });
+}
+
+void ZtoryModel::readShotDocumentWithoutBoard() {
+  if (!m_shotDocumentWriters.isEmpty()) return;  // the Boards read it
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  if (!scene || scene->getScenePath().isEmpty()) return;
+  QString path = QString::fromStdWString(scene->getScenePath().getWideString());
+  path.replace(QRegularExpression("\\.tnz$"), ".ztoryc");
+  if (shotDataLoadedFor(path)) return;  // read once per opening, as the Board
+  QFile file(path);
+  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+  const QByteArray bytes = file.readAll();
+  // ONLY a storyboard's .ztoryc is a shot list.  A shot scene's sidecar holds
+  // the back-link and a <project> block, a character's its mouth sets: reading
+  // them here reset the project data (assets, team, tracker shots) and — no
+  // DB reload for a shot scene — left it empty until something saved it: on
+  // 2026-10-07 that emptied Messina's production.ztrack.  For those scenes
+  // only the role is taken (the save guards need it); nothing else is touched.
+  {
+    QString role = QStringLiteral("storyboard");
+    QXmlStreamReader peek(bytes);
+    while (!peek.atEnd())
+      if (peek.readNext() == QXmlStreamReader::StartElement) {
+        if (peek.name() == QLatin1String("ztoryc")) {
+          const QString r = peek.attributes().value("role").toString();
+          if (!r.isEmpty()) role = r;
+        }
+        break;  // the root element is enough
+      }
+    if (role != QLatin1String("storyboard")) {
+      m_docState                  = ShotDocumentState();
+      m_docState.isShotScene      = (role == "shot");
+      m_docState.isCharacterScene = (role == "character");
+      return;
+    }
+  }
+  // The same order as StoryboardPanel::loadZtoryc: nothing from the previous
+  // scene may leak, the file repopulates, the project DB has the last word.
+  reconcileWithXsheet();
+  setPdfLogoPath("");
+  setPdfNoLogo(false);
+  m_sequences.clear();
+  m_docState = ShotDocumentState();
+  resetProjectLevelDefaults();
+  std::vector<ShotData *> targets;
+  for (int i = 0; i < shotCount(); i++) targets.push_back(&shot(i));
+  ShotDocumentRead read;
+  readShotDocument(bytes, targets, read);
+  for (ShotData *sd : targets) markShotLoaded(sd);
+  setShotDataLoadedFor(path);
+  setScriptFile(read.script);
+  loadProjectDb();
+  emit productionReloaded();
+  for (ShotData *sd : targets) notifyShotEdited(sd);
+  qWarning("[ZTORY] .ztoryc read by the model (no Board alive): %s",
+           path.toUtf8().constData());
+}
+
+void ZtoryModel::writeShotDocumentWithoutBoard() {
+  if (!m_shotDocumentWriters.isEmpty()) return;  // a Board writes it
+  if (m_docState.isShotScene || m_docState.isCharacterScene) return;
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  if (!scene || scene->getScenePath().isEmpty()) return;
+  // Only shots this session has read from the file: a scene never seen by a
+  // Board has no texts in memory, and writing would blank the real file.  The
+  // same scene object also covers a Save As (the path moved, the data is
+  // the same).
+  if (m_shotDataLoadedFor.isEmpty() || m_shotDataSceneObj != scene) return;
+  QString path = QString::fromStdWString(scene->getScenePath().getWideString());
+  path.replace(QRegularExpression("\\.tnz$"), ".ztoryc");
+  reconcileWithXsheet();  // the list follows the scene being written
+  std::vector<const ShotData *> shots;
+  for (int i = 0; i < shotCount(); i++) shots.push_back(&shot(i));
+  if (!writeShotDocument(path, shots)) return;
+  setShotDataLoadedFor(path);
+  qWarning("[ZTORY] .ztoryc written by the model (no Board alive): %s",
+           path.toUtf8().constData());
+}
+
+// Serialization only: the callers decide whether this scene's file may be
+// written at all (shot and character scenes keep their own sidecar) and
+// publish to the project afterwards.  The format is the one the Board has
+// always written ("version 2", role="storyboard").
+bool ZtoryModel::writeShotDocument(const QString &path,
+                                   const std::vector<const ShotData *> &shots) {
+  QFile file(path);
+  if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
   QXmlStreamWriter xml(&file);
   xml.setAutoFormatting(true);
   xml.writeStartDocument();
   xml.writeStartElement("ztoryc");
-  xml.writeAttribute("version", "4");
-  // ── Numbering config ──
-  xml.writeStartElement("numberingConfig");
-  xml.writeAttribute("style",       QString::number((int)m_numberingConfig.style));
-  xml.writeAttribute("shotPrefix",  m_numberingConfig.shotPrefix);
-  xml.writeAttribute("seqPrefix",   m_numberingConfig.seqPrefix);
-  xml.writeAttribute("panelPrefix", m_numberingConfig.panelPrefix);
-  xml.writeAttribute("step",        QString::number(m_numberingConfig.step));
-  xml.writeAttribute("padding",     QString::number(m_numberingConfig.padding));
-  xml.writeAttribute("seqPadding",  QString::number(m_numberingConfig.seqPadding));
-  xml.writeAttribute("startNumber", QString::number(m_numberingConfig.startNumber));
-  xml.writeAttribute("seqNumber",   QString::number(m_numberingConfig.seqNumber));
-  xml.writeEndElement();
-  // ── Sequences ──
-  if (!m_sequences.empty()) {
-    xml.writeStartElement("sequences");
-    for (const auto &seq : m_sequences) {
+  xml.writeAttribute("version", "2");
+  xml.writeAttribute("role", "storyboard");
+  // "No — local only" has to SURVIVE.  It used to live only in
+  // m_suppressProjectPublication, a plain member reset with every new panel and
+  // gone at every restart: the next session published the scene into the
+  // project anyway, against an answer the user had explicitly given — and the
+  // duplicate shots that followed brought up the "Two shots with the same name"
+  // question, which is how this surfaced.  One attribute, and the answer sticks.
+  // "productionTracker" says what the choice really is; "projectPublication"
+  // is the name it was first written with and is still read below, so a scene
+  // saved in between keeps its answer.
+  if (m_docState.trackerOff) {
+    xml.writeAttribute("productionTracker", "off");
+    xml.writeAttribute("projectPublication", "local");
+  }
+  if (m_docState.shotIdentityAsked) xml.writeAttribute("shotIdentityAsked", "1");
+  // Project metadata (production + title entered by user at scene creation).
+  {
+    ZtoryModel *model = this;
+    // production/title/episode/season/defaultTechnique/techniques now live in
+    // the project DB (production.ztrack). The .ztoryc keeps only the per-scene
+    // PDF logo settings here, and still READS the old attrs for migration.
+    if (!model->pdfLogoPath().isEmpty() || model->pdfNoLogo()) {
+      xml.writeStartElement("project");
+      if (!model->pdfLogoPath().isEmpty())
+        xml.writeAttribute("pdfLogo", model->pdfLogoPath());
+      if (model->pdfNoLogo())
+        xml.writeAttribute("pdfNoLogo", "1");
+      xml.writeEndElement();
+    }
+    // NOTE: the team roster now lives in the project-level DB
+    // (production.ztrack), not in the per-scene .ztoryc. The <team> block is
+    // still READ on load (loadZtoryc) for one-time migration of legacy scenes.
+    // Assets now live in the project DB (production.ztrack), not the .ztoryc.
+    // The <assets> block is still READ on load for one-time migration.
+  }
+  // Imported screenplay (Script panel) — project-relative path.
+  {
+    QString sf = scriptFile();
+    if (!sf.isEmpty()) xml.writeTextElement("scriptFile", sf);
+  }
+  // Numbering scheme + sequence list — so the SQ/SH structure survives reload
+  // (previously only per-shot number/label were saved, so sequences were lost).
+  {
+    ZtoryModel *model = this;
+    const NumberingConfig &cfg = model->numberingConfig();
+    xml.writeStartElement("numbering");
+    xml.writeAttribute("style",       QString::number((int)cfg.style));
+    xml.writeAttribute("shotPrefix",  cfg.shotPrefix);
+    xml.writeAttribute("seqPrefix",   cfg.seqPrefix);
+    xml.writeAttribute("panelPrefix", cfg.panelPrefix);
+    xml.writeAttribute("step",        QString::number(cfg.step));
+    xml.writeAttribute("padding",     QString::number(cfg.padding));
+    xml.writeAttribute("seqPadding",  QString::number(cfg.seqPadding));
+    xml.writeAttribute("startNumber", QString::number(cfg.startNumber));
+    xml.writeAttribute("seqNumber",   QString::number(cfg.seqNumber));
+    xml.writeAttribute("resetOnSeqChange", cfg.resetOnSeqChange ? "1" : "0");
+    xml.writeEndElement();
+    for (const SequenceData &seq : model->sequences()) {
       xml.writeStartElement("sequence");
       xml.writeAttribute("uuid",  seq.uuid);
       xml.writeAttribute("label", seq.label);
       xml.writeAttribute("order", QString::number(seq.orderIndex));
       xml.writeEndElement();
     }
-    xml.writeEndElement();
   }
-  // ── Shots ──
-  for (int si = 0; si < (int)m_shots.size(); si++) {
-    const ShotData &s = m_shots[si];
+  ToonzScene *scn = TApp::instance()->getCurrentScene()->getScene();
+  TXsheet *top    = scn ? scn->getChildStack()->getTopXsheet() : nullptr;
+  for (int si = 0; si < (int)shots.size(); si++) {
+    const ShotData &sd = *shots[si];
     xml.writeStartElement("shot");
-    xml.writeAttribute("index",  QString::number(si));
-    xml.writeAttribute("number", s.shotNumber);       // legacy
-    xml.writeAttribute("label",  s.shotLabel);        // v4
-    xml.writeAttribute("order",  QString::number(s.orderIndex)); // v4
-    xml.writeAttribute("seqId",  s.sequenceId);       // v4
-    xml.writeAttribute("column", QString::number(s.xsheetColumn));
-    for (int pi = 0; pi < (int)s.panels.size(); pi++) {
-      const PanelData &pd = s.panels[pi];
+    xml.writeAttribute("index",      QString::number(si));
+    if (!sd.uuid.isEmpty())
+      xml.writeAttribute("uuid",     sd.uuid);
+    // Which sub-scene this entry belongs to: loadZtoryc() matches on it, so
+    // the text of a shot stays with the shot when one is inserted before it.
+    {
+      const QString lvl = shotLevelNameAt(top, sd.xsheetColumn);
+      if (!lvl.isEmpty()) xml.writeAttribute("level", lvl);
+    }
+    xml.writeAttribute("number",     sd.shotNumber);
+    xml.writeAttribute("label",      sd.shotLabel);
+    xml.writeAttribute("order",      QString::number(sd.orderIndex));
+    xml.writeAttribute("sequenceId", sd.sequenceId);
+    if (sd.transitionFrames > 0)
+      xml.writeAttribute("transition", QString::number(sd.transitionFrames));
+    // Production tracking (spreadsheet / Kitsu).
+    if (!sd.technique.isEmpty())
+      xml.writeAttribute("technique", sd.technique);
+    if (!sd.notes.isEmpty())
+      xml.writeTextElement("shotNotes", sd.notes);
+    if (!sd.vfxNotes.isEmpty())
+      xml.writeTextElement("shotVfxNotes", sd.vfxNotes);
+    for (auto it = sd.tasks.constBegin(); it != sd.tasks.constEnd(); ++it) {
+      xml.writeStartElement("task");
+      xml.writeAttribute("type",   it.key());
+      xml.writeAttribute("status", ZtoryModel::taskStatusLabel(it.value().status));
+      if (!it.value().assignees.isEmpty())
+        xml.writeAttribute("assignee", it.value().assignees.join(", "));
+      xml.writeEndElement();
+    }
+    for (int pi = 0; pi < (int)sd.panels.size(); pi++) {
+      const PanelData &pd = sd.panels[pi];
       xml.writeStartElement("panel");
       xml.writeAttribute("index",      QString::number(pi));
       xml.writeAttribute("startFrame", QString::number(pd.startFrame));
       xml.writeAttribute("duration",   QString::number(pd.duration));
-      if (!pd.panelLabel.isEmpty())
-        xml.writeAttribute("panelLabel", pd.panelLabel);
-      xml.writeAttribute("panelOrder",  QString::number(pd.orderIndex));
+      if (pd.cameraMoveType != PanelData::CamNone) {
+        xml.writeAttribute("camMove",  QString::number((int)pd.cameraMoveType));
+        xml.writeAttribute("camLabel", pd.cameraMoveLabel);
+        xml.writeAttribute("camRenderFrame", QString::number(pd.camRenderFrame));
+        xml.writeAttribute("camW", QString::number(pd.camW));
+        xml.writeAttribute("camH", QString::number(pd.camH));
+        // Store affines as space-separated doubles
+        auto affToStr = [](const double a[6]) {
+          return QString("%1 %2 %3 %4 %5 %6")
+              .arg(a[0],0,'g',10).arg(a[1],0,'g',10).arg(a[2],0,'g',10)
+              .arg(a[3],0,'g',10).arg(a[4],0,'g',10).arg(a[5],0,'g',10);
+        };
+        xml.writeAttribute("camA0", affToStr(pd.camA0));
+        xml.writeAttribute("camA1", affToStr(pd.camA1));
+      }
+      if (pd.hasLight) {
+        xml.writeAttribute("lightTail", QString("%1 %2")
+            .arg(pd.lightTailX, 0, 'g', 6).arg(pd.lightTailY, 0, 'g', 6));
+        xml.writeAttribute("lightTip", QString("%1 %2")
+            .arg(pd.lightTipX, 0, 'g', 6).arg(pd.lightTipY, 0, 'g', 6));
+        xml.writeAttribute("lightDepth", QString::number(pd.lightDepth, 'g', 4));
+        xml.writeAttribute("lightSpread", QString::number(pd.lightSpread, 'g', 4));
+        xml.writeAttribute("lightColor", pd.lightColor);
+      }
       xml.writeTextElement("dialog", pd.dialog);
       xml.writeTextElement("action", pd.action);
       xml.writeTextElement("notes",  pd.notes);
@@ -3259,89 +3761,16 @@ void ZtoryModel::save() {
   }
   xml.writeEndElement();
   xml.writeEndDocument();
-}
-
-void ZtoryModel::load() {
-  if (m_ztoryPath.isEmpty()) return;
-  QFile file(m_ztoryPath);
-  if (!file.open(QIODevice::ReadOnly)) return;
-  m_shots.clear();
-  m_previews.clear();
-  m_sequences.clear();
-
-  QXmlStreamReader xml(&file);
-  int si = -1, pi = -1;
-
-  while (!xml.atEnd()) {
-    xml.readNext();
-    if (!xml.isStartElement()) continue;
-    const auto name = xml.name();
-
-    if (name == QLatin1String("numberingConfig")) {
-      m_numberingConfig.style =
-          (NumberingConfig::Style)xml.attributes().value("style").toInt();
-      m_numberingConfig.shotPrefix  = xml.attributes().value("shotPrefix").toString();
-      m_numberingConfig.seqPrefix   = xml.attributes().value("seqPrefix").toString();
-      QString ppfx = xml.attributes().value("panelPrefix").toString();
-      if (!ppfx.isEmpty()) m_numberingConfig.panelPrefix = ppfx;
-      m_numberingConfig.step        = xml.attributes().value("step").toInt();
-      m_numberingConfig.padding     = xml.attributes().value("padding").toInt();
-      m_numberingConfig.seqPadding  = xml.attributes().value("seqPadding").toInt();
-      m_numberingConfig.startNumber = xml.attributes().value("startNumber").toInt();
-      m_numberingConfig.seqNumber   = xml.attributes().value("seqNumber").toInt();
-      // Safety defaults for old files
-      if (m_numberingConfig.step <= 0)    m_numberingConfig.step = 10;
-      if (m_numberingConfig.padding <= 0) m_numberingConfig.padding = 3;
-      if (m_numberingConfig.shotPrefix.isEmpty())  m_numberingConfig.shotPrefix  = "SH";
-      if (m_numberingConfig.panelPrefix.isEmpty()) m_numberingConfig.panelPrefix = "P";
-
-    } else if (name == QLatin1String("sequence")) {
-      SequenceData seq;
-      seq.uuid       = xml.attributes().value("uuid").toString();
-      seq.label      = xml.attributes().value("label").toString();
-      seq.orderIndex = xml.attributes().value("order").toInt();
-      if (!seq.uuid.isEmpty()) m_sequences.push_back(seq);
-
-    } else if (name == QLatin1String("shot")) {
-      si = xml.attributes().value("index").toInt();
-      while ((int)m_shots.size() <= si) m_shots.push_back(ShotData());
-      m_shots[si].shotNumber   = xml.attributes().value("number").toString();
-      m_shots[si].shotLabel    = xml.attributes().value("label").toString();
-      m_shots[si].orderIndex   = xml.attributes().value("order").toInt();
-      m_shots[si].sequenceId   = xml.attributes().value("seqId").toString();
-      m_shots[si].xsheetColumn = xml.attributes().value("column").toInt();
-      // Backward compat (v1–v3): if shotLabel absent, copy from shotNumber
-      if (m_shots[si].shotLabel.isEmpty())
-        m_shots[si].shotLabel = m_shots[si].shotNumber;
-      m_previews.resize(m_shots.size());
-
-    } else if (name == QLatin1String("panel") && si >= 0) {
-      pi = xml.attributes().value("index").toInt();
-      PanelData pd;
-      pd.startFrame = xml.attributes().value("startFrame").toInt();
-      pd.duration   = xml.attributes().value("duration").toInt();
-      pd.panelLabel = xml.attributes().value("panelLabel").toString();
-      pd.orderIndex = xml.attributes().value("panelOrder").toInt();
-      while ((int)m_shots[si].panels.size() <= pi) m_shots[si].panels.push_back(PanelData());
-      m_shots[si].panels[pi] = pd;
-      m_previews[si].resize(m_shots[si].panels.size());
-
-    } else if (name == QLatin1String("dialog") && si >= 0 && pi >= 0)
-      m_shots[si].panels[pi].dialog = xml.readElementText();
-    else if (name == QLatin1String("action") && si >= 0 && pi >= 0)
-      m_shots[si].panels[pi].action = xml.readElementText();
-    else if (name == QLatin1String("notes") && si >= 0 && pi >= 0)
-      m_shots[si].panels[pi].notes  = xml.readElementText();
-  }
-  emit modelReset();
+  file.close();
+  return true;
 }
 
 int ZtoryModel::shotIndexForCol(int col) const {
   // Scan the actual main xsheet for child-level columns in order and return
   // the ordinal of the column that matches `col`. Same algorithm the Board
   // uses in refreshFromScene(), so the two stay consistent without relying
-  // on m_shots[i].xsheetColumn (which can be stale after Animatic-side ops
-  // that don't go through ZtoryModel::addShot/removeShot).
+  // on m_shots[i].xsheetColumn (which can be stale until the next
+  // reconcileWithXsheet).
   TApp *app = TApp::instance();
   if (!app) return -1;
   ToonzScene *scene = app->getCurrentScene() ? app->getCurrentScene()->getScene() : nullptr;
@@ -3488,7 +3917,195 @@ void ZtoryModel::resequenceXsheet() {
   }
 
   app->getCurrentXsheet()->notifyXsheetChanged();
+  reconcileWithXsheet();
   emit modelReset();
+}
+
+// The sub-scene a main-xsheet column exposes, or nullptr if it is not a shot.
+static TXshChildLevel *shotColumnLevel(TXsheet *xsh, int col) {
+  TXshColumn *column = xsh ? xsh->getColumn(col) : nullptr;
+  if (!column || column->isEmpty()) return nullptr;
+  int r0 = 0, r1 = 0;
+  column->getRange(r0, r1);
+  for (int r = r0; r <= r1; r++) {
+    TXshCell cell = xsh->getCell(r, col);
+    if (!cell.isEmpty() && cell.m_level && cell.m_level->getChildLevel())
+      return cell.m_level->getChildLevel();
+  }
+  return nullptr;
+}
+
+void ZtoryModel::recordShotIdentity(int si) {
+  if (si < 0 || si >= (int)m_shots.size()) return;
+  if ((int)m_shotIds.size() < (int)m_shots.size())
+    m_shotIds.resize(m_shots.size());
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  TXsheet *top      = scene ? scene->getChildStack()->getTopXsheet() : nullptr;
+  const int col     = m_shots[si].xsheetColumn;
+  TXshChildLevel *cl = shotColumnLevel(top, col);
+  m_shotIds[si].column = cl ? top->getColumn(col) : nullptr;
+  m_shotIds[si].level  = cl;
+  m_shotIds[si].col    = cl ? col : -1;
+}
+
+ZtoryShotList::Ptr ZtoryModel::shotPtrForColumn(int col) const {
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  TXsheet *top      = scene ? scene->getChildStack()->getTopXsheet() : nullptr;
+  TXshColumn *column = top ? top->getColumn(col) : nullptr;
+  if (!column) return nullptr;
+  for (int i = 0; i < (int)m_shots.size(); i++)
+    if (m_shots[i].xsheetColumn == col && i < (int)m_shotIds.size() &&
+        m_shotIds[i].column == column)
+      return m_shots.ptr(i);
+  return nullptr;
+}
+
+bool ZtoryModel::takeShotObject(int col, ZtoryShotList::Ptr holder) {
+  ZtoryShotList::Ptr current = shotPtrForColumn(col);
+  if (!current || !holder || current == holder) return current == holder;
+  if (!isFreshShot(current.get())) return false;
+  const int i = indexOfShot(current.get());
+  if (i < 0) return false;
+  // Never the same object in two places: if the model already has it
+  // elsewhere, two shots would share one.
+  const int already = indexOfShot(holder.get());
+  if (already >= 0 && already != i) return false;
+  m_freshShots.erase(current.get());
+  holder->xsheetColumn = col;
+  m_shots.setPtr(i, std::move(holder));
+  return true;
+}
+
+void ZtoryModel::notifyShotEdited(const ShotData *sd) {
+  const int i = indexOfShot(sd);
+  if (i < 0) return;
+  if (m_previews.size() < m_shots.size()) m_previews.resize(m_shots.size());
+  m_previews[i].resize(m_shots[i].panels.size(), QPixmap());
+  recordShotIdentity(i);
+  emit shotDataChanged(i);
+}
+
+void ZtoryModel::setShotDataLoadedFor(const QString &ztoryPath) {
+  m_shotDataLoadedFor = ztoryPath;
+  m_shotDataSceneObj  = TApp::instance()->getCurrentScene()->getScene();
+}
+
+int ZtoryModel::indexOfShot(const ShotData *sd) const {
+  for (int i = 0; i < (int)m_shots.size(); i++)
+    if (&m_shots[i] == sd) return i;
+  return -1;
+}
+
+void ZtoryModel::reconcileWithXsheet() {
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  TXsheet *top      = scene ? scene->getChildStack()->getTopXsheet() : nullptr;
+  if (!top) return;
+  m_shotIds.resize(m_shots.size());
+  m_previews.resize(m_shots.size());
+
+  // The scene's shot columns, in order.
+  std::vector<int> cols;
+  std::vector<TXshColumn *> colObjs;
+  std::vector<TXshChildLevel *> levels;
+  for (int c = 0; c < top->getColumnCount(); c++)
+    if (TXshChildLevel *cl = shotColumnLevel(top, c)) {
+      cols.push_back(c);
+      colObjs.push_back(top->getColumn(c));
+      levels.push_back(cl);
+    }
+
+  const int n = (int)m_shots.size();
+  std::vector<bool> taken(n, false);
+  ZtoryShotList next;
+  std::vector<std::vector<QPixmap>> nextPreviews;
+  std::vector<ShotIdentity> nextIds;
+  // Where each entry is expected now.  If its column object moved in the scene
+  // (a shot inserted or deleted before it), the column says where the shot
+  // went and the entry's xsheetColumn is the stale one.  If the column stayed
+  // where it was and the entry says another column, the Board placed it there
+  // on purpose: its reorder moves the CELLS between columns that stay put.
+  std::map<TXshColumn *, int> colIndex;
+  for (int c = 0; c < top->getColumnCount(); c++)
+    if (TXshColumn *column = top->getColumn(c)) colIndex[column] = c;
+  std::vector<int> expected(n, -1);
+  for (int k = 0; k < n; k++) {
+    auto it = m_shotIds[k].column ? colIndex.find(m_shotIds[k].column)
+                                  : colIndex.end();
+    const int now = it != colIndex.end() ? it->second : -1;
+    // A column that is no longer in the scene expects nothing: its entry
+    // (a deleted shot) must not win pass 1 over a living Copy of the same
+    // sub-scene.  Pass 2 can still re-attach it by sub-scene (the undo
+    // re-creates columns).
+    if (m_shotIds[k].column && now < 0)
+      expected[k] = -1;
+    else
+      expected[k] = (now >= 0 && now != m_shotIds[k].col) ? now
+                                                          : m_shots[k].xsheetColumn;
+  }
+  // Pass by pass over ALL the columns, the strictest first — one pass per
+  // column at a time let a looser test take an entry another column matched
+  // exactly (two Copies of the same sub-scene swapped their data).
+  const int J = (int)cols.size();
+  std::vector<int> match(J, -1);
+  int matchedSame = 0, matchedLevel = 0, matchedIndex = 0, fresh = 0;
+  auto pass = [&](int &counter, auto pred) {
+    for (int j = 0; j < J; j++) {
+      if (match[j] >= 0) continue;
+      for (int k = 0; k < n; k++)
+        if (!taken[k] && pred(k, j)) {
+          match[j] = k;
+          taken[k] = true;
+          counter++;
+          break;
+        }
+    }
+  };
+  // 1. its sub-scene, where it is expected: the shot itself
+  pass(matchedSame, [&](int k, int j) {
+    return m_shotIds[k].level == levels[j] && expected[k] == cols[j];
+  });
+  // 2. its sub-scene, elsewhere (the undo re-creates columns)
+  pass(matchedLevel, [&](int k, int j) { return m_shotIds[k].level == levels[j]; });
+  // 3. an entry not matched to any column yet, appended for this one
+  pass(matchedIndex, [&](int k, int j) {
+    return !m_shotIds[k].column && m_shots[k].xsheetColumn == cols[j];
+  });
+  for (int j = 0; j < J; j++) {
+    const int i = match[j];
+    if (i >= 0) {
+      next.push_back(m_shots.ptr(i));  // the object itself, not a copy
+      nextPreviews.push_back(std::move(m_previews[i]));
+    } else {
+      fresh++;
+      ShotData s;
+      PanelData pd;
+      int r0 = 0, r1 = 0;
+      top->getColumn(cols[j])->getRange(r0, r1, /*ignoreLastStop=*/true);
+      pd.duration = r1 >= r0 ? r1 - r0 + 1 : 24;
+      s.panels.push_back(pd);
+      next.push_back(std::move(s));
+      m_freshShots.insert(&next.back());
+      nextPreviews.push_back({QPixmap()});
+    }
+    next.back().xsheetColumn = cols[j];
+    nextIds.push_back({colObjs[j], levels[j], cols[j]});
+  }
+  const int dropped = n - (matchedSame + matchedLevel + matchedIndex);
+  if (fresh || dropped || matchedLevel || matchedIndex)
+    qWarning("[ZTORY] model reconcile: %d -> %d shots (%d same column, %d by "
+             "sub-scene, %d by position, %d new, %d gone)",
+             n, (int)next.size(), matchedSame, matchedLevel, matchedIndex,
+             fresh, dropped);
+  // Forget the fresh marks of objects that left the list.
+  for (auto it = m_freshShots.begin(); it != m_freshShots.end();) {
+    bool kept = false;
+    for (const ShotData &sd : next)
+      if (&sd == *it) { kept = true; break; }
+    it = kept ? std::next(it) : m_freshShots.erase(it);
+  }
+  m_shots    = std::move(next);
+  m_previews = std::move(nextPreviews);
+  m_shotIds  = std::move(nextIds);
 }
 
 void ZtoryModel::updateColumnName(int si) {
@@ -3518,7 +4135,7 @@ void ZtoryModel::updateColumnName(int si) {
 // Thumbnail refresh happens via frameSwitched signal with a debounce timer
 // (see StoryboardPanel). See AGENTS.md: "Thumbnail refresh = on frameSwitched".
 void ZtoryModel::onXsheetChanged() { /* thumbnails updated via frameSwitched debounce */ }
-void ZtoryModel::onSceneChanged()  { refreshFromScene(); load(); }
+void ZtoryModel::onSceneChanged()  { refreshFromScene(); }
 
 void ZtoryModel::activateShotForViewing(int col) {
   // NOTE: do NOT call TImageCache::instance()->clear() here.  It wipes the

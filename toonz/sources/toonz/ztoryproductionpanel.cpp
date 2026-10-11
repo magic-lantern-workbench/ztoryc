@@ -90,9 +90,9 @@ bool isLightStatus(TaskStatus s) {
 
 const QVector<TaskStatus> &kAllStatuses = ZtoryModel::allTaskStatuses();
 
-// Persist the .ztoryc through the Board (the in-app source of truth lives in
-// the model; the Board owns the save path). No-op if the Board is closed —
-// the model still holds the change, it just isn't written until next save.
+// The Board alive, if any: a tracker edit marks the scene modified through it
+// (step 3b — the .ztoryc is written with the scene's ⌘S, by the Board or by
+// the model when no Board is alive).
 StoryboardPanel *findBoard() {
   for (QWidget *w : QApplication::allWidgets())
     if (auto *b = qobject_cast<StoryboardPanel *>(w)) return b;
@@ -113,7 +113,8 @@ void clearUntitledSceneDirty() {
 }
 
 void persistViaBoard() {
-  if (auto *b = findBoard()) b->saveZtoryc();
+  // Step 3b: the scene is modified; ⌘S writes the .ztoryc.
+  if (auto *b = findBoard()) b->markShotDocumentChanged();
   clearUntitledSceneDirty();
 }
 
@@ -417,9 +418,7 @@ ZtoryProductionPanel::ZtoryProductionPanel(QWidget *parent) : TPanel(parent) {
   ZtoryModel *m = ZtoryModel::instance();
   connect(m, &ZtoryModel::modelReset,        this, &ZtoryProductionPanel::onModelChanged);
   connect(m, &ZtoryModel::shotAdded,         this, [this](int) { scheduleRebuild(); });
-  connect(m, &ZtoryModel::shotRemoved,       this, [this](int) { scheduleRebuild(); });
   connect(m, &ZtoryModel::shotRemovedAt,     this, [this](int) { scheduleRebuild(); });
-  connect(m, &ZtoryModel::shotMoved,         this, [this](int, int) { scheduleRebuild(); });
   connect(m, &ZtoryModel::shotDataChanged,   this, [this](int) { scheduleRebuild(); });
   connect(m, &ZtoryModel::taskStatusChanged, this, [this] { rebuild(); reloadProjectTab(); });
   connect(m, &ZtoryModel::assetsChanged,     this, [this] { rebuildAssets(); });

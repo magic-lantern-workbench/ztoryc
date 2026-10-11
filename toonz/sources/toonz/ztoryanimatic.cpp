@@ -4438,6 +4438,10 @@ ZtoryPanelNavigator::ZtoryPanelNavigator(QWidget *parent)
     refreshSpeakersLabel();
     pd.action = m_actionField->toPlainText();
     pd.notes  = m_notesField->toPlainText();
+    // The scene now has unsaved work: ⌘S writes the .ztoryc (a Board, or the
+    // model when none is alive), and closing asks first instead of dropping
+    // it in silence.
+    TApp::instance()->getCurrentScene()->setDirtyFlag(true);
     emit ZtoryModel::instance()->shotDataChanged(m_shotIdx);
   };
   connect(m_dialogField, &QTextEdit::textChanged, this, onTextChanged);
@@ -4597,7 +4601,8 @@ void ZtoryPanelNavigator::drawLightRubberBand() {
 }
 
 // Writes the placed/removed gizmo into ZtoryModel and notifies — the Board
-// mirrors the change (thumbnail re-bake + .ztoryc save) via shotDataChanged.
+// re-bakes the thumbnail via shotDataChanged; the scene is modified and ⌘S
+// writes the .ztoryc (step 3b).
 void ZtoryPanelNavigator::commitLightEdit(bool remove) {
   if (!hasValidShot()) return;
   auto &panels = ZtoryModel::instance()->shot(m_shotIdx).panels;
@@ -4616,6 +4621,7 @@ void ZtoryPanelNavigator::commitLightEdit(bool remove) {
     pd.lightSpread = m_lightDragSpread;
     pd.lightColor  = QSettings().value("Ztoryc/LightColor", "#FFC34D").toString();
   }
+  ZtoryModel::instance()->markShotDocumentDirty();
   emit ZtoryModel::instance()->shotDataChanged(m_shotIdx);
   refreshPreview();
 }
@@ -6459,90 +6465,48 @@ void ZtoryAnimaticPanel::showAnimaticTimeline() {
 
 
 void ZtoryAnimaticPanel::onCopyShots() {
-  // Copy is non-destructive: read shot durations from the MAIN xsheet even when
-  // the artist is inside a sub-scene, without yanking them out of edit mode.
+  // Non-destructive: read from the MAIN xsheet even inside a sub-scene,
+  // without yanking the artist out of edit mode.
   ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
   if (!scene) return;
   const std::set<int> *selPtr = &m_track->selectedCols();
   const std::set<int> &shared = ZtoryModel::instance()->sharedSelection();
   if (selPtr->empty() && !shared.empty()) selPtr = &shared;
-  const std::set<int> &sel = *selPtr;
-  if (sel.empty()) return;
-  TXsheet *xsh = scene->getChildStack()->getTopXsheet();
-  if (!xsh) return;
-  std::vector<ZtoryClipEntry> clip;
-  for (int col : sel) {
-    ZtoryClipEntry ce;
-    ce.srcCol = col; ce.duration = ZtoryShotOps::colDuration(xsh, col);
-    ce.isCut = false; ce.isClone = false;
-    clip.push_back(ce);
-  }
-  std::sort(clip.begin(), clip.end(),
-            [](const ZtoryClipEntry &a, const ZtoryClipEntry &b){ return a.srcCol < b.srcCol; });
-  ZtoryModel::instance()->setSharedClip(std::move(clip));
+  if (selPtr->empty()) return;
+  // The same entries as the Board's (step 5).
+  ZtoryModel::instance()->setSharedClip(ZtoryShotOps::makeShotClip(
+      scene->getChildStack()->getTopXsheet(),
+      std::vector<int>(selPtr->begin(), selPtr->end()),
+      ZtoryShotOps::ClipKind::Copy));
 }
 
 // Cut = immediate: shot disappears right away; TXshLevel kept alive in cutLevel
 // so paste can restore sub-scene content without loss.
 void ZtoryAnimaticPanel::onCutShots() {
-  // Structural op: works from inside a sub-scene by closing it first (below),
-  // then operating on the main xsheet — same flow as the Board's onCutShot.
+  // Structural op: works from inside a sub-scene by closing it first — the
+  // same Cut as the Board's (step 5): the clip carries the shot's data (from
+  // the model, so no Board is needed) and the Delete drops the orphan levels.
   const std::set<int> *selPtr = &m_track->selectedCols();
   const std::set<int> &shared = ZtoryModel::instance()->sharedSelection();
   if (selPtr->empty() && !shared.empty()) selPtr = &shared;
-  const std::set<int> &sel = *selPtr;
-  if (sel.empty()) return;
-
+  if (selPtr->empty()) return;
+  const std::vector<int> cols(selPtr->begin(), selPtr->end());
   StoryboardPanel *board = findBoardPanel();
   ZtoryBoardSnap before;
-  if (board) before = board->captureSnapshot();
-
-  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
-  if (scene)
-    while (scene->getChildStack()->getAncestorCount() > 0)
-      CommandManager::instance()->execute("MI_CloseChild");
+  before = ztoryCaptureShotSnapshot();  // from the model (step 6)
+  ZtoryShotOps::closeSubScenes();
   TXsheet *xsh = TApp::instance()->getCurrentXsheet()->getXsheet();
-  std::vector<int> cols(sel.begin(), sel.end());
-  std::sort(cols.begin(), cols.end());
-  std::vector<ZtoryClipEntry> clip;
-  for (int col : cols) {
-    ZtoryClipEntry ce;
-    ce.srcCol = -1;
-    // True length: colDuration counts the resequence's closing stop frame too,
-    // and the pasted shot came back one frame longer.
-    {
-      int start = 0, dur = 0;
-      ce.duration = ZtoryShotOps::shotTrueSpan(xsh, col, start, dur) && dur > 0
-                        ? dur
-                        : ZtoryShotOps::colDuration(xsh, col);
-    }
-    ce.isCut = true; ce.isClone = false;
-    // The shot's data travels with it (texts, uuid, tracking), read from the
-    // Board — the model's list can be a shot behind the scene.
-    if (board) ce.hasShot = board->shotDataForColumn(col, &ce.shot);
-    TXshColumn      *xshCol = xsh->getColumn(col);
-    TXshLevelColumn *lc     = xshCol ? xshCol->getLevelColumn() : nullptr;
-    if (lc) {
-      int r0=0, r1=0; lc->getRange(r0, r1);
-      TXshCell cell = lc->getCell(r0);
-      if (!cell.isEmpty()) ce.cutLevel = cell.m_level;
-    }
-    clip.push_back(ce);
-  }
-  ZtoryModel::instance()->setSharedClip(std::move(clip));
-  for (int i = (int)cols.size()-1; i >= 0; i--) {
-    std::set<int> cs; cs.insert(cols[i]);
-    ColumnCmd::deleteColumns(cs, false, true);  // withoutUndo=true
-  }
-  xsh->updateFrameCount();
+  ZtoryModel::instance()->setSharedClip(
+      ZtoryShotOps::makeShotClip(xsh, cols, ZtoryShotOps::ClipKind::Cut));
+  std::vector<TXshLevelP> removedLevels = ZtoryShotOps::deleteShotColumns(cols);
   ZtoryModel::instance()->resequenceXsheet();
   refreshFromScene();
   m_track->setFocus(Qt::OtherFocusReason);
-
-  if (board) {
-    auto after = board->captureSnapshot();
+  {
+    auto after = ztoryCaptureShotSnapshot();
     TUndoManager::manager()->add(
-        new UndoBoardState(board, tr("Cut Shot"), std::move(before), std::move(after)));
+        new UndoBoardState(board, tr("Cut Shot"), std::move(before),
+                           std::move(after), std::move(removedLevels)));
   }
 }
 
@@ -6555,28 +6519,25 @@ void ZtoryAnimaticPanel::onPasteShots() {
 
   StoryboardPanel *board = findBoardPanel();
   ZtoryBoardSnap before;
-  if (board) before = board->captureSnapshot();
+  before = ztoryCaptureShotSnapshot();  // from the model (step 6)
 
+  // The selection first: closing a sub-scene refreshes the track.
+  const std::set<int> sel = m_track->selectedCols();
+  ZtoryShotOps::closeSubScenes();
   ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
-  if (scene)
-    while (scene->getChildStack()->getAncestorCount() > 0)
-      CommandManager::instance()->execute("MI_CloseChild");
   TXsheet *xsh = TApp::instance()->getCurrentXsheet()->getXsheet();
-  const std::set<int> &sel = m_track->selectedCols();
-  int insertCol = sel.empty() ? xsh->getColumnCount() : *sel.rbegin() + 1;
+  // After the selected shot, or after the last shot (as the Board, as Add).
+  int insertCol = sel.empty() ? ZtoryShotOps::columnAfterLastShot(xsh)
+                              : *sel.rbegin() + 1;
   ZtoryShotOps::pasteSharedClip(clip, insertCol, xsh, scene);
   xsh->updateFrameCount();
   ZtoryModel::instance()->resequenceXsheet();
   refreshFromScene();
-  auto newClip = clip;
-  newClip.erase(std::remove_if(newClip.begin(), newClip.end(),
-                [](const ZtoryClipEntry &e){ return e.isCut || e.isClone; }),
-                newClip.end());
-  ZtoryModel::instance()->setSharedClip(std::move(newClip));
+  ZtoryShotOps::dropOneShotClipEntries();
   m_track->setFocus(Qt::OtherFocusReason);
 
-  if (board) {
-    auto after = board->captureSnapshot();
+  {
+    auto after = ztoryCaptureShotSnapshot();
     TUndoManager::manager()->add(
         new UndoBoardState(board, tr("Paste Shot"), std::move(before), std::move(after)));
   }
@@ -6591,30 +6552,23 @@ void ZtoryAnimaticPanel::onDeleteShots() {
 
   StoryboardPanel *board = findBoardPanel();
   ZtoryBoardSnap before;
-  if (board) before = board->captureSnapshot();
+  before = ztoryCaptureShotSnapshot();  // from the model (step 6)
 
-  // Structural op: close any open sub-scene first so deleteColumns acts on the
-  // main xsheet — lets Delete Shot work from inside a sub-scene.
-  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
-  if (scene)
-    while (scene->getChildStack()->getAncestorCount() > 0)
-      CommandManager::instance()->execute("MI_CloseChild");
-  TXsheet *xsh = TApp::instance()->getCurrentXsheet()->getXsheet();
-  std::vector<int> cols(sel.begin(), sel.end());
-  std::sort(cols.rbegin(), cols.rend());
-  for (int col : cols) {
-    std::set<int> cs; cs.insert(col);
-    ColumnCmd::deleteColumns(cs, false, true);  // withoutUndo=true
-  }
-  xsh->updateFrameCount();
+  // The same Delete as the Board's (step 5): it also drops the levels left
+  // with no user, which this version used to leave orphaned in the cast.
+  // The selection is copied first: closing a sub-scene refreshes the track.
+  const std::vector<int> cols(sel.begin(), sel.end());
+  ZtoryShotOps::closeSubScenes();
+  std::vector<TXshLevelP> removedLevels = ZtoryShotOps::deleteShotColumns(cols);
   ZtoryModel::instance()->resequenceXsheet();
   refreshFromScene();
   m_track->setFocus(Qt::OtherFocusReason);
 
-  if (board) {
-    auto after = board->captureSnapshot();
+  {
+    auto after = ztoryCaptureShotSnapshot();
     TUndoManager::manager()->add(
-        new UndoBoardState(board, tr("Delete Shot"), std::move(before), std::move(after)));
+        new UndoBoardState(board, tr("Delete Shot"), std::move(before),
+                           std::move(after), std::move(removedLevels)));
   }
 }
 
@@ -6626,20 +6580,11 @@ void ZtoryAnimaticPanel::onCloneShots() {
   const std::set<int> *selPtr = &m_track->selectedCols();
   const std::set<int> &shared = ZtoryModel::instance()->sharedSelection();
   if (selPtr->empty() && !shared.empty()) selPtr = &shared;
-  const std::set<int> &sel = *selPtr;
-  if (sel.empty()) return;
-  TXsheet *xsh = scene->getChildStack()->getTopXsheet();
-  if (!xsh) return;
-  std::vector<ZtoryClipEntry> clip;
-  for (int col : sel) {
-    ZtoryClipEntry ce;
-    ce.srcCol = col; ce.duration = ZtoryShotOps::colDuration(xsh, col);
-    ce.isCut = false; ce.isClone = true;
-    clip.push_back(ce);
-  }
-  std::sort(clip.begin(), clip.end(),
-            [](const ZtoryClipEntry &a, const ZtoryClipEntry &b){ return a.srcCol < b.srcCol; });
-  ZtoryModel::instance()->setSharedClip(std::move(clip));
+  if (selPtr->empty()) return;
+  ZtoryModel::instance()->setSharedClip(ZtoryShotOps::makeShotClip(
+      scene->getChildStack()->getTopXsheet(),
+      std::vector<int>(selPtr->begin(), selPtr->end()),
+      ZtoryShotOps::ClipKind::Clone));
 }
 
 bool ZtoryAnimaticPanel::eventFilter(QObject *obj, QEvent *e) {
@@ -7173,112 +7118,94 @@ void mergeChildXsheetContent(TXshChildLevel *dstCl,
   dstXsh->updateFrameCount();
 }
 
-void ZtoryAnimaticPanel::onMergeShots() {
-  StoryboardPanel *board = findBoardPanel();
-  ZtoryBoardSnap before;
-  if (board) before = board->captureSnapshot();
-
-  // Use own selection if >= 2; otherwise fall back to shared selection
-  // (set by Board when the user selected shots there).
-  const std::set<int> *selPtr = &m_track->selectedCols();
-  const std::set<int> &shared = ZtoryModel::instance()->sharedSelection();
-  if (selPtr->size() < 2 && shared.size() >= 2) selPtr = &shared;
-  const std::set<int> &sel = *selPtr;
-  if (sel.size() < 2) return;
-
-  TApp *app = TApp::instance();
-  ToonzScene *scene = app->getCurrentScene()->getScene();
-  if (!scene) return;
-  // Structural op: close any open sub-scene so the merge operates cleanly on the
-  // main xsheet — lets Merge Shots work from inside a sub-scene.
-  while (scene->getChildStack()->getAncestorCount() > 0)
-    CommandManager::instance()->execute("MI_CloseChild");
-  TXsheet *xsh = scene->getChildStack()->getTopXsheet();
-  if (!xsh) return;
-
-  // Sort selected cols by their start frame in main xsheet
-  std::vector<int> sortedCols(sel.begin(), sel.end());
-  std::sort(sortedCols.begin(), sortedCols.end(), [&](int a, int b){
+namespace ZtoryShotOps {
+std::vector<TXshLevelP> mergeShotColumns(std::vector<int> cols,
+                                         ZtoryBoardSnap *before) {
+  std::vector<TXshLevelP> removed;
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  TXsheet *xsh      = scene ? scene->getChildStack()->getTopXsheet() : nullptr;
+  if (!xsh || cols.size() < 2) return removed;
+  auto childOf = [xsh](int col, int r0, int r1) -> TXshChildLevel * {
+    for (int r = r0; r <= r1; r++) {
+      TXshCell cell = xsh->getCell(r, col);
+      if (!cell.isEmpty() && cell.m_level && cell.m_level->getChildLevel())
+        return cell.m_level->getChildLevel();
+    }
+    return nullptr;
+  };
+  // In timeline order.
+  std::sort(cols.begin(), cols.end(), [xsh](int a, int b) {
     int r0a = 0, r1a = 0, r0b = 0, r1b = 0;
     if (xsh->getColumn(a)) xsh->getColumn(a)->getRange(r0a, r1a);
     if (xsh->getColumn(b)) xsh->getColumn(b)->getRange(r0b, r1b);
     return r0a < r0b;
   });
-
-  int dstCol = sortedCols[0];
+  const int dstCol      = cols[0];
   TXshColumn *dstColumn = xsh->getColumn(dstCol);
-  if (!dstColumn) return;
+  if (!dstColumn) return removed;
+  // ignoreLastStop: the trailing stop frame is not a frame of the shot;
+  // appendAt lands on it and the new cells overwrite it.
   int dstR0 = 0, dstR1 = 0;
-  // ignoreLastStop=true: skip trailing SFH so dstDuration and appendAt are exact.
-  // appendAt = dstR1+1 = SFH position → new cells overwrite it cleanly.
   dstColumn->getRange(dstR0, dstR1, /*ignoreLastStop=*/true);
-
-  // Find child level of destination
-  TXshChildLevel *dstCl = nullptr;
-  for (int r = dstR0; r <= dstR1; r++) {
-    TXshCell cell = xsh->getCell(r, dstCol);
-    if (!cell.isEmpty() && cell.m_level && cell.m_level->getChildLevel()) {
-      dstCl = cell.m_level->getChildLevel();
-      break;
-    }
-  }
-  if (!dstCl) return;
-
-  int appendAt    = dstR1 + 1;
-  int dstDuration = dstR1 - dstR0 + 1;
-  int lastFrameNum = dstDuration; // 1-based frame index for continuation
-
-  backupChildForUndo(dstCol, before);
-  // Materialize held cells in the first shot before merging, then trim to the
-  // timeline duration. Without the trim, any frames in the sub-scene beyond
-  // dstDuration (hidden from the main xsheet) would overlap with the incoming
-  // src content that is inserted starting at row dstDuration.
+  TXshChildLevel *dstCl = childOf(dstCol, dstR0, dstR1);
+  if (!dstCl) return removed;
+  int appendAt     = dstR1 + 1;
+  int dstDuration  = dstR1 - dstR0 + 1;
+  int lastFrameNum = dstDuration;  // 1-based frame index for continuation
+  if (before) backupChildForUndo(dstCol, *before);
+  // Materialize held cells, then trim to the timeline duration: frames of the
+  // sub-scene beyond it (hidden from the main xsheet) would overlap the
+  // incoming content, inserted from row dstDuration.
   materializeCells(dstCl, dstDuration);
   trimChildXsheetTo(dstCl, dstDuration);
-
-  for (int i = 1; i < (int)sortedCols.size(); i++) {
-    int srcCol = sortedCols[i];
+  std::vector<int> srcCols;
+  for (int i = 1; i < (int)cols.size(); i++) {
+    const int srcCol      = cols[i];
     TXshColumn *srcColumn = xsh->getColumn(srcCol);
     if (!srcColumn) continue;
     int r0 = 0, r1 = 0;
-    // ignoreLastStop=true: exclude the trailing SFH from the merged shot's
-    // duration so the merge keeps the source's real frame count.
     srcColumn->getRange(r0, r1, /*ignoreLastStop=*/true);
-    int duration = r1 - r0 + 1;
-
-    // Find src child level
-    TXshChildLevel *srcCl = nullptr;
-    for (int r = r0; r <= r1; r++) {
-      TXshCell cell = xsh->getCell(r, srcCol);
-      if (!cell.isEmpty() && cell.m_level && cell.m_level->getChildLevel()) {
-        srcCl = cell.m_level->getChildLevel();
-        break;
-      }
-    }
-    // Merge srcCl into dstCl: new columns per shot, shared camera,
-    // boundary keyframes at junction and end of segment.
+    const int duration    = r1 - r0 + 1;
+    TXshChildLevel *srcCl = childOf(srcCol, r0, r1);
+    // New columns per shot, shared camera, boundary keys at the junction.
     mergeChildXsheetContent(dstCl, srcCl, lastFrameNum, duration);
-
-    // Extend main xsheet column to cover the merged duration.
     for (int r = 0; r < duration; r++)
       xsh->setCell(appendAt + r, dstCol, TXshCell(dstCl, TFrameId(++lastFrameNum)));
     appendAt += duration;
+    srcCols.push_back(srcCol);
   }
+  // The sources go like a Delete: their sub-scenes, now empty, leave the cast
+  // (their drawings live on inside the destination and stay).
+  removed = deleteShotColumns(srcCols);
+  TApp::instance()->getCurrentXsheet()->notifyXsheetChanged();
+  return removed;
+}
+}  // namespace ZtoryShotOps
 
-  for (int i = (int)sortedCols.size() - 1; i >= 1; i--) {
-    std::set<int> cs; cs.insert(sortedCols[i]);
-    ColumnCmd::deleteColumns(cs, false, true);  // withoutUndo=true
-  }
+void ZtoryAnimaticPanel::onMergeShots() {
+  StoryboardPanel *board = findBoardPanel();
+  ZtoryBoardSnap before;
+  before = ztoryCaptureShotSnapshot();  // from the model (step 6)
 
-  xsh->updateFrameCount();
-  app->getCurrentXsheet()->notifyXsheetChanged();
+  // Own selection if >= 2; otherwise the shared one (set by the Board).
+  const std::set<int> *selPtr = &m_track->selectedCols();
+  const std::set<int> &shared = ZtoryModel::instance()->sharedSelection();
+  if (selPtr->size() < 2 && shared.size() >= 2) selPtr = &shared;
+  if (selPtr->size() < 2) return;
+  const std::vector<int> cols(selPtr->begin(), selPtr->end());
+
+  // The same Merge as the Board's (step 5), from inside a sub-scene too.
+  ZtoryShotOps::closeSubScenes();
+  std::vector<TXshLevelP> removedLevels =
+      ZtoryShotOps::mergeShotColumns(cols, &before);
   ZtoryModel::instance()->resequenceXsheet();
   m_track->refreshFromScene();
 
-  if (board) {
-    auto after = board->captureSnapshot();
+  {
+    auto after = ztoryCaptureShotSnapshot();
     TUndoManager::manager()->add(
-        new UndoBoardState(board, tr("Merge Shots"), std::move(before), std::move(after)));
+        new UndoBoardState(board, tr("Merge Shots"), std::move(before),
+                           std::move(after), std::move(removedLevels)));
   }
 }
 
@@ -7311,39 +7238,26 @@ void ZtoryAnimaticPanel::onAddShot() {
 
   StoryboardPanel *board = findBoardPanel();
   ZtoryBoardSnap before;
-  if (board) before = board->captureSnapshot();
+  before = ztoryCaptureShotSnapshot();  // from the model (step 6)
 
-  // Insert after the rightmost selected shot, or append at the end
-  int insertAt = xsh->getColumnCount();
+  // After the rightmost selected shot, or after the last shot (not after the
+  // sound columns, where the end of the xsheet used to put it).
+  int insertAt = ZtoryShotOps::columnAfterLastShot(xsh);
   const std::set<int> *selPtr = &m_track->selectedCols();
   const std::set<int> &shared = ZtoryModel::instance()->sharedSelection();
   if (selPtr->empty() && !shared.empty()) selPtr = &shared;
   if (!selPtr->empty())
     insertAt = *std::max_element(selPtr->begin(), selPtr->end()) + 1;
 
-  static const int kDefaultDuration = 24;
-
-  // Create a new sub-scene (child level)
-  TXshLevel *xl = scene->createNewLevel(CHILD_XSHLEVEL);
-  if (!xl || !xl->getChildLevel()) return;
-  TXshChildLevel *cl = xl->getChildLevel();
-
-  xsh->insertColumn(insertAt);
-  for (int r = 0; r < kDefaultDuration; r++)
-    xsh->setCell(r, insertAt, TXshCell(cl, TFrameId(r + 1)));
-  xsh->updateFrameCount();
-
-  // Copy camera resolution/size from parent to sub-scene
-  ZtoryShotOps::syncChildCameraToMain(xsh, cl);
-
-  app->getCurrentXsheet()->notifyXsheetChanged();
+  // The same Add as the Board's (step 5).
+  if (!ZtoryShotOps::insertNewShot(insertAt)) return;
   ZtoryModel::instance()->resequenceXsheet();
   m_track->refreshFromScene();
   // Board syncs via resequenceXsheet() → modelReset() → onModelResequenced()
   // (xsheet count check). No shotAdded() needed — it would cause double-insert.
 
-  if (board) {
-    auto after = board->captureSnapshot();
+  {
+    auto after = ztoryCaptureShotSnapshot();
     TUndoManager::manager()->add(
         new UndoBoardState(board, tr("Add Shot"), std::move(before), std::move(after)));
   }
@@ -7354,97 +7268,23 @@ void ZtoryAnimaticPanel::onMergeWithNext(int col) {
 
   StoryboardPanel *board = findBoardPanel();
   ZtoryBoardSnap before;
-  if (board) before = board->captureSnapshot();
+  before = ztoryCaptureShotSnapshot();  // from the model (step 6)
 
-  TApp *app = TApp::instance();
-  ToonzScene *scene = app->getCurrentScene()->getScene();
-  if (!scene) return;
-  TXsheet *xsh = scene->getChildStack()->getTopXsheet();
-  if (!xsh) return;
-
-  // Find the next non-empty column after 'col'
-  TXshColumn *dstColumn = xsh->getColumn(col);
-  if (!dstColumn) return;
-  int dstR0 = 0, dstR1 = 0;
-  // ignoreLastStop=true: skip trailing SFH so dstDuration and appendAt are exact.
-  dstColumn->getRange(dstR0, dstR1, /*ignoreLastStop=*/true);
-
-  // Find next shot column
-  int nextCol = -1;
-  for (int c = col + 1; c < xsh->getColumnCount(); c++) {
-    TXshColumn *nc = xsh->getColumn(c);
-    if (!nc || nc->isEmpty()) continue;
-    // Check it's a child level (shot), not audio
-    int nr0 = 0, nr1 = 0;
-    nc->getRange(nr0, nr1);
-    for (int r = nr0; r <= nr1; r++) {
-      TXshCell cell = xsh->getCell(r, c);
-      if (!cell.isEmpty() && cell.m_level && cell.m_level->getChildLevel()) {
-        nextCol = c;
-        break;
-      }
-    }
-    if (nextCol >= 0) break;
-  }
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  TXsheet *xsh      = scene ? scene->getChildStack()->getTopXsheet() : nullptr;
+  const int nextCol = ZtoryShotOps::nextShotColumn(xsh, col);
   if (nextCol < 0) return;
-
-  // Find child level of destination
-  TXshChildLevel *dstCl = nullptr;
-  for (int r = dstR0; r <= dstR1; r++) {
-    TXshCell cell = xsh->getCell(r, col);
-    if (!cell.isEmpty() && cell.m_level && cell.m_level->getChildLevel()) {
-      dstCl = cell.m_level->getChildLevel();
-      break;
-    }
-  }
-  if (!dstCl) return;
-
-  // Find child level of source (next) shot
-  TXshChildLevel *srcCl = nullptr;
-  TXshColumn *srcColumn = xsh->getColumn(nextCol);
-  int srcR0 = 0, srcR1 = 0;
-  // ignoreLastStop=true: skip trailing SFH so srcDuration is the real frame count.
-  srcColumn->getRange(srcR0, srcR1, /*ignoreLastStop=*/true);
-  for (int r = srcR0; r <= srcR1; r++) {
-    TXshCell cell = xsh->getCell(r, nextCol);
-    if (!cell.isEmpty() && cell.m_level && cell.m_level->getChildLevel()) {
-      srcCl = cell.m_level->getChildLevel();
-      break;
-    }
-  }
-
-  int dstDuration = dstR1 - dstR0 + 1;
-  int srcDuration = srcR1 - srcR0 + 1;
-
-  backupChildForUndo(col, before);
-  // Materialize held cells then trim to timeline duration — same reasoning as
-  // onMergeShots: hidden frames beyond dstDuration must be removed before
-  // appending src content, or they overlap with the incoming material.
-  materializeCells(dstCl, dstDuration);
-  trimChildXsheetTo(dstCl, dstDuration);
-
-  // Merge srcCl into dstCl: new columns per shot, shared camera,
-  // boundary keyframes at junction and end of segment.
-  mergeChildXsheetContent(dstCl, srcCl, dstDuration, srcDuration);
-
-  // Extend dst column in main xsheet to cover the merged duration.
-  int appendAt     = dstR1 + 1;
-  int lastFrameNum = dstDuration;
-  int duration     = srcDuration;
-  for (int r = 0; r < duration; r++)
-    xsh->setCell(appendAt + r, col, TXshCell(dstCl, TFrameId(++lastFrameNum)));
-
-  { std::set<int> cs; cs.insert(nextCol); ColumnCmd::deleteColumns(cs, false, true); }
-
-  xsh->updateFrameCount();
-  app->getCurrentXsheet()->notifyXsheetChanged();
+  // The same Merge as the others (step 5), on two shots.
+  std::vector<TXshLevelP> removedLevels = ZtoryShotOps::mergeShotColumns(
+      {col, nextCol}, &before);
   ZtoryModel::instance()->resequenceXsheet();
   m_track->refreshFromScene();
 
-  if (board) {
-    auto after = board->captureSnapshot();
+  {
+    auto after = ztoryCaptureShotSnapshot();
     TUndoManager::manager()->add(
-        new UndoBoardState(board, tr("Merge with Next"), std::move(before), std::move(after)));
+        new UndoBoardState(board, tr("Merge with Next"), std::move(before),
+                           std::move(after), std::move(removedLevels)));
   }
 }
 
@@ -7462,7 +7302,7 @@ void ZtoryAnimaticPanel::onRazorRequested(int col, int splitFrame) {
 
   StoryboardPanel *board = findBoardPanel();
   ZtoryBoardSnap before;
-  if (board) before = board->captureSnapshot();
+  before = ztoryCaptureShotSnapshot();  // from the model (step 6)
 
   TApp *app = TApp::instance();
   ToonzScene *scene = app->getCurrentScene()->getScene();
@@ -7612,8 +7452,8 @@ void ZtoryAnimaticPanel::onRazorRequested(int col, int splitFrame) {
   // Group board state + audio edits into a single undoable step.
   {
     TUndoScopedBlock undoBlock;
-    if (board) {
-      auto after = board->captureSnapshot();
+    {
+      auto after = ztoryCaptureShotSnapshot();
       TUndoManager::manager()->add(
           new UndoBoardState(board, tr("Razor"), std::move(before), std::move(after)));
     }
@@ -7753,7 +7593,7 @@ void ZtoryAnimaticPanel::onSegmentDroppedOutside(int srcCol, int origR0,
 void ZtoryAnimaticPanel::onRollEdit(int colA, int newDurA, int colB, int newDurB) {
   StoryboardPanel *board = findBoardPanel();
   ZtoryBoardSnap before;
-  if (board) before = board->captureSnapshot();
+  before = ztoryCaptureShotSnapshot();  // from the model (step 6)
 
   TApp *app = TApp::instance();
   ToonzScene *scene = app->getCurrentScene()->getScene();
@@ -7840,8 +7680,8 @@ void ZtoryAnimaticPanel::onRollEdit(int colA, int newDurA, int colB, int newDurB
 
   m_track->refreshFromScene();
 
-  if (board) {
-    auto after = board->captureSnapshot();
+  {
+    auto after = ztoryCaptureShotSnapshot();
     TUndoManager::manager()->add(
         new UndoBoardState(board, tr("Roll Edit"),
                            std::move(before), std::move(after)));
@@ -8027,7 +7867,7 @@ void ZtoryAnimaticPanel::onTransitionChanged(int colA, int colB, int frames) {
 
   if (delta == 0) {
     StoryboardPanel *board = findBoardPanel();
-    if (board) board->saveZtoryc();
+    if (board) board->markShotDocumentChanged();
     m_track->refreshFromScene();
     return;
   }
@@ -8167,7 +8007,7 @@ void ZtoryAnimaticPanel::onTransitionChanged(int colA, int colB, int frames) {
   ZtoryModel::instance()->resequenceXsheet();
 
   StoryboardPanel *board = findBoardPanel();
-  if (board) board->saveZtoryc();
+  if (board) board->markShotDocumentChanged();
   m_track->refreshFromScene();
   app->getCurrentScene()->notifySceneChanged();
   app->getCurrentXsheet()->notifyXsheetChanged();
@@ -8199,7 +8039,7 @@ void ZtoryAnimaticPanel::onShotDurationChanged(int col, int newF1) {
 
   StoryboardPanel *board = findBoardPanel();
   ZtoryBoardSnap before;
-  if (board) before = board->captureSnapshot();
+  before = ztoryCaptureShotSnapshot();  // from the model (step 6)
 
   int newDuration = newF1 + 1;
   TApp *app = TApp::instance();
@@ -8323,8 +8163,8 @@ void ZtoryAnimaticPanel::onShotDurationChanged(int col, int newF1) {
   if (xdOldStart != xdNewStart)
     TUndoManager::manager()->add(new UndoXDOutNotes(
         col, xdOldStart, xdOutTail, xdNewStart, xdOutTail));
-  if (board) {
-    auto after = board->captureSnapshot();
+  {
+    auto after = ztoryCaptureShotSnapshot();
     TUndoManager::manager()->add(
         new UndoBoardState(board, tr("Resize Shot Duration"),
                            std::move(before), std::move(after)));
