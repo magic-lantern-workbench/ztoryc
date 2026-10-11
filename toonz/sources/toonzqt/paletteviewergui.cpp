@@ -1,6 +1,12 @@
 
 
 #include "toonzqt/paletteviewergui.h"
+#include <QSet>
+#include <QDateTime>
+#include <QTextStream>
+#include <QFile>
+#include <QDir>
+#include <QStandardPaths>
 
 // TnzQt includes
 #include "toonzqt/styleselection.h"
@@ -248,7 +254,8 @@ bool PageViewer::getShowStyleIndex() { return ShowStyleIndex == 1; }
  */
 void PageViewer::setPage(TPalette::Page *page) {
   if (m_page == page) return;
-  m_page = page;
+  m_page      = page;
+  m_pageOwner = page ? page->getPalette() : nullptr;
   computeSize();
   update();
 }
@@ -609,7 +616,33 @@ static void drawChipName(QPainter &p, const QRect &chipRect,
 //-----------------------------------------------------------------------------
 /*! Paint current page styles using current view mode.
  */
+// Ztoryc: this viewer is the only holder of the palette it shows — without
+// m_pageOwner it would have been freed and the paint below would read freed
+// memory.  Written once per palette to the crash folder, with what is known.
+void PageViewer::notePaletteKeptAlive() const {
+  static QSet<const void *> noted;
+  const TPalette *pal = m_pageOwner.getPointer();
+  if (!pal || noted.contains(pal)) return;
+  noted.insert(pal);
+  const QString dir =
+      QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+      "/crash";
+  QDir().mkpath(dir);
+  QFile f(dir + "/palette_watch.log");
+  if (!f.open(QIODevice::Append | QIODevice::Text)) return;
+  const char *kinds[] = {"level", "cleanup", "studio", "custom"};
+  const int vt        = int(m_viewType);
+  QTextStream(&f) << QDateTime::currentDateTime().toString(Qt::ISODate)
+                  << "  palette kept alive by a viewer: name='"
+                  << QString::fromStdWString(pal->getPaletteName())
+                  << "' global='" << QString::fromStdWString(pal->getGlobalName())
+                  << "' path='" << pal->getRefImgPath().getQString()
+                  << "' styles=" << pal->getStyleCount() << " viewer="
+                  << (vt >= 0 && vt < 4 ? kinds[vt] : "?") << "\n";
+}
+
 void PageViewer::paintEvent(QPaintEvent *e) {
+  if (m_pageOwner && m_pageOwner->getRefCount() == 1) notePaletteKeptAlive();
   QPainter p(this);
   QColor textColor = p.pen().color();
   if (m_chipPerRow == 0) {
