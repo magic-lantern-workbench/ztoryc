@@ -240,8 +240,16 @@ spento (`productionTracker="off"`), mai i file veri:
   (palette mostrata == palette liberata, sempre). **Probabilmente sono i crash del 7/10** (anche loro in
   Cutout, build appena compilata, firma ad-hoc → macOS richiede di nuovo i permessi): non dimostrabile, i
   registri di quel giorno non ci sono più.
-- **Restano prima del merge:** Production Tracker (tecnica/task + salva + riapri) e Send to Board, che
-  vogliono clic nell'app (2026-10-11: lo schermo si è bloccato prima di cominciare).
+- **Production Tracker e Send to Board (2026-10-11, navtrk, a mano): passati.** Tracker: sh040 → Cut-out,
+  Storyboard di sh020 → DONE (Layout passa da solo a READY, 1/9); il DB si scrive subito, il diff contiene
+  solo queste due modifiche; ⌘S scrive `.tnz` e `.ztoryc` insieme; chiusa e riaperta, il Tracker mostra
+  tutto. Send to Board: un pannello disegnato nella stanza Thumbs → shot nuovo sh060 nell'Animatic e nel
+  `.ztoryc` (6 shot, tecniche conservate). Con il tracker attivo sulla scena sh060 entra nel tracker con lo
+  stesso uuid del `.ztoryc`, i dati che c'erano restano. Nota: navtrk aveva `productionTracker="off"` da
+  prima di oggi (allora sh060 resta giustamente fuori dal tracker). Nota a parte, non di questo ramo: le
+  copie `navcrash_test` e `messina_copy` vengono aperte nel progetto **sandbox** (titolo «[sandbox]»), a
+  differenza di `arquata_copy`; unica differenza vista, il `tahomaproject.xml` accanto a
+  `ztorycproject.xml`. Da capire separatamente.
 - **Passo 4 — già fatto dal 2c (2026-10-07).** Non restano copie fra Board e modello: gli ascoltatori
   di `shotDataChanged` (Navigator, titolo del viewer, Tracker) aggiornano solo ciò che mostrano; i
   `notifyShotEdited` sono avvisi. Resta solo un doppio ciclo innocuo in «assegna sequenza».
