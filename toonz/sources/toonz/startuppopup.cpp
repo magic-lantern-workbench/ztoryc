@@ -1156,8 +1156,13 @@ void StartupPopup::applyWorkflowForScene(const QString &scenePath) {
           QRegularExpression("technique=\"([^\"]*)\"").match(head);
       if (mt.hasMatch()) technique = mt.captured(1);
     }
-    if (role == QLatin1String("plain")) return;  // resta dov'e'
-    cmd = ZtoryModel::workflowCommand(role, technique);
+    if (role == QLatin1String("plain")) {
+      // La scena semplice ricorda il suo workflow; se non ne ha, resta dov'e'.
+      cmd = ZtorySceneClass::workflowCommandForRoom(
+          ZtorySceneClass::plainWorkflowOf(scenePath));
+      if (cmd.isEmpty()) return;
+    } else
+      cmd = ZtoryModel::workflowCommand(role, technique);
   } else {
     static const char *kCmds[] = {
       MI_WorkflowStoryboard, MI_Workflow2D,
@@ -1379,7 +1384,10 @@ void StartupPopup::onCreateButton() {
     const QString tnz = QString::fromStdWString(scenePath.getWideString());
     if (wfIdx == 0)
       ZtoryModel::instance()->noteSceneClassified(tnz);
-    else if (wfIdx >= 1 && wfIdx <= 3 && !ZtorySceneClass::declarePlain(tnz))
+    else if (wfIdx >= 1 && wfIdx <= 3 &&
+             !ZtorySceneClass::declarePlain(
+                 tnz, wfIdx == 1 ? "Tradigital" : wfIdx == 2 ? "Cutout"
+                                                             : "StopMotion"))
       DVGui::warning(tr("Could not mark this scene as a plain scene."));
   }
 

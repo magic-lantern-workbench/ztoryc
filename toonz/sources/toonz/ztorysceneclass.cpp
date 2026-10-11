@@ -77,6 +77,7 @@ public:
   bool trackerOn() const { return m_tracker->isChecked(); }
   QString shotUuid() const;
   QString characterUuid() const { return m_character->currentData().toString(); }
+  QString plainWorkflow() const { return m_plainWorkflow->currentData().toString(); }
   QString characterName() const {
     return characterUuid().isEmpty() ? QString() : m_character->currentText();
   }
@@ -90,12 +91,14 @@ private:
   QCheckBox *m_tracker;
   QTreeWidget *m_shots;
   QComboBox *m_character;
+  QComboBox *m_plainWorkflow;
   QPushButton *m_ok;
+  QString m_scenePath;
 };
 
 SceneClassDialog::SceneClassDialog(const QString &tnzPath, Role current,
                                    QWidget *parent, bool becauseEdited)
-    : QDialog(parent) {
+    : QDialog(parent), m_scenePath(tnzPath) {
   setWindowTitle(QObject::tr("Scene Type"));
   setMinimumWidth(560);
   auto *lay = new QVBoxLayout(this);
@@ -164,7 +167,19 @@ SceneClassDialog::SceneClassDialog(const QString &tnzPath, Role current,
 
   addChoice(Role::Plain, QObject::tr("Plain scene"),
             QObject::tr("A scene of the project that is none of the above: "
-                        "its sub-scenes stay sub-scenes."));
+                        "its sub-scenes stay sub-scenes. It opens in:"));
+  m_plainWorkflow = new QComboBox(this);
+  m_plainWorkflow->addItem(QObject::tr("2D Tradigital Mode"), "Tradigital");
+  m_plainWorkflow->addItem(QObject::tr("Cutout Digital Mode"), "Cutout");
+  m_plainWorkflow->addItem(QObject::tr("Stop-Motion Mode"), "StopMotion");
+  {
+    // Its own workflow if it has one, else the drawing workflow in use.
+    QString keep = ZtorySceneClass::plainWorkflowOf(tnzPath);
+    if (keep.isEmpty()) keep = Preferences::instance()->getCurrentRoomChoice();
+    const int i = m_plainWorkflow->findData(keep);
+    if (i >= 0) m_plainWorkflow->setCurrentIndex(i);
+  }
+  lay->addWidget(m_plainWorkflow);
 
   auto *buttons = new QDialogButtonBox(this);
   m_ok = buttons->addButton(QObject::tr("Apply"), QDialogButtonBox::AcceptRole);
@@ -195,6 +210,10 @@ SceneClassDialog::SceneClassDialog(const QString &tnzPath, Role current,
     m_group->button(int(Role::Shot))->setChecked(true);
     updateState();
   });
+  connect(m_plainWorkflow, QOverload<int>::of(&QComboBox::activated), this, [this] {
+    m_group->button(int(Role::Plain))->setChecked(true);
+    updateState();
+  });
   connect(m_character, QOverload<int>::of(&QComboBox::activated), this, [this] {
     m_group->button(int(Role::Character))->setChecked(true);
     updateState();
@@ -204,6 +223,9 @@ SceneClassDialog::SceneClassDialog(const QString &tnzPath, Role current,
 
 void SceneClassDialog::fillShots(const QString &tnzPath) {
   ZtoryModel *m = ZtoryModel::instance();
+  // The Tracker's thumbnails, read from the project if nothing loaded them
+  // yet (a scene opened with no Board): what tells two shots apart at a glance.
+  if (m->thumbCache().isEmpty()) m->loadThumbsFromDisk();
   const QMap<QString, QString> linked = ZtorySceneClass::linkedShotScenes(m->projectDbPath());
   // This scene's own shots, published while it was a storyboard: it cannot
   // be the scene of one of its own shots.
@@ -230,9 +252,18 @@ void SceneClassDialog::fillShots(const QString &tnzPath) {
 
 void SceneClassDialog::fillCharacters() {
   m_character->addItem(QObject::tr("(no character of the project)"), QString());
-  for (const Asset &a : ZtoryModel::instance()->assets())
-    if (ZtoryModel::isCharacterType(a.type))
-      m_character->addItem(a.name, a.uuid);
+  for (const Asset &a : ZtoryModel::instance()->assets()) {
+    if (!ZtoryModel::isCharacterType(a.type)) continue;
+    // A character that has its scene elsewhere is not offered: a second scene
+    // would take the link from the first (as in the start-up popup).  The real
+    // file counts: if that scene was deleted the character is free again.
+    if (!a.filePath.isEmpty() && QFile::exists(a.filePath) &&
+        QFileInfo(a.filePath) != QFileInfo(m_scenePath))
+      continue;
+    m_character->addItem(a.name, a.uuid);
+    if (QFileInfo(a.filePath) == QFileInfo(m_scenePath))
+      m_character->setCurrentIndex(m_character->count() - 1);
+  }
 }
 
 Role SceneClassDialog::role() const { return Role(m_group->checkedId()); }
@@ -348,7 +379,7 @@ bool apply(const SceneClassDialog &dlg, const QString &tnz, Role current) {
     }
     break;
   case Role::Plain:
-    ok = ZtorySceneClass::declarePlain(tnz, &why);
+    ok = ZtorySceneClass::declarePlain(tnz, dlg.plainWorkflow(), &why);
     break;
   case Role::None:
     return false;
@@ -370,19 +401,25 @@ bool apply(const SceneClassDialog &dlg, const QString &tnz, Role current) {
                          [] { ZtoryModel::instance()->markShotDocumentDirty(); });
     // In Auto, the rooms follow the new type as when a scene is opened (a
     // Board does it for storyboards and shots, but there may be none, and
-    // nothing did it for a character).  A plain scene stays where it is.
-    if (ZtoryModel::autoWorkflowDetection() && next != Role::Plain) {
-      QString role = next == Role::Storyboard ? "storyboard"
-                   : next == Role::Shot       ? "shot"
-                                              : "character";
-      QString tech;
-      for (const ProjectShot &ps : ZtoryModel::instance()->projectShots())
-        if (ps.uuid == dlg.shotUuid()) { tech = ps.technique; break; }
-      if (tech.isEmpty()) tech = ZtoryModel::instance()->defaultTechnique();
-      const QString cmd = ZtoryModel::workflowCommand(role, tech);
-      QTimer::singleShot(0, qApp, [cmd] {
-        CommandManager::instance()->execute(cmd.toStdString().c_str());
-      });
+    // nothing did it for a character or a plain scene).
+    if (ZtoryModel::autoWorkflowDetection()) {
+      QString cmd;
+      if (next == Role::Plain) {
+        cmd = ZtorySceneClass::workflowCommandForRoom(dlg.plainWorkflow());
+      } else {
+        QString role = next == Role::Storyboard ? "storyboard"
+                     : next == Role::Shot       ? "shot"
+                                                : "character";
+        QString tech;
+        for (const ProjectShot &ps : ZtoryModel::instance()->projectShots())
+          if (ps.uuid == dlg.shotUuid()) { tech = ps.technique; break; }
+        if (tech.isEmpty()) tech = ZtoryModel::instance()->defaultTechnique();
+        cmd = ZtoryModel::workflowCommand(role, tech);
+      }
+      if (!cmd.isEmpty())
+        QTimer::singleShot(0, qApp, [cmd] {
+          CommandManager::instance()->execute(cmd.toStdString().c_str());
+        });
     }
   }
   return true;
@@ -405,7 +442,8 @@ QString ZtorySceneClass::sidecarFor(const QString &tnzPath) {
 }
 
 static bool writeRoleOnly(const QString &sidecar, const QString &role,
-                          QString *error, bool trackerOff = false) {
+                          QString *error, bool trackerOff = false,
+                          const QString &workflow = QString()) {
   QFile f(sidecar);
   if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
     if (error) *error = QObject::tr("cannot write %1").arg(QFileInfo(sidecar).fileName());
@@ -421,13 +459,51 @@ static bool writeRoleOnly(const QString &sidecar, const QString &role,
     xml.writeAttribute("productionTracker", "off");
     xml.writeAttribute("projectPublication", "local");
   }
+  if (!workflow.isEmpty()) xml.writeAttribute("workflow", workflow);
   xml.writeEndElement();
   xml.writeEndDocument();
   return true;
 }
 
-bool ZtorySceneClass::declarePlain(const QString &tnzPath, QString *error) {
-  return writeRoleOnly(sidecarFor(tnzPath), "plain", error);
+bool ZtorySceneClass::declarePlain(const QString &tnzPath,
+                                   const QString &workflow, QString *error) {
+  return writeRoleOnly(sidecarFor(tnzPath), "plain", error, false, workflow);
+}
+
+QString ZtorySceneClass::plainWorkflowOf(const QString &tnzPath) {
+  QFile f(sidecarFor(tnzPath));
+  if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return QString();
+  QXmlStreamReader xml(&f);
+  while (!xml.atEnd())
+    if (xml.readNext() == QXmlStreamReader::StartElement) {
+      const auto a = xml.attributes();
+      return a.value("role") == QLatin1String("plain")
+                 ? a.value("workflow").toString()
+                 : QString();
+    }
+  return QString();
+}
+
+QString ZtorySceneClass::workflowCommandForRoom(const QString &room) {
+  if (room == "Tradigital") return MI_Workflow2D;
+  if (room == "Cutout") return MI_WorkflowCutout;
+  if (room == "StopMotion") return MI_WorkflowStopMotion;
+  return QString();
+}
+
+void ZtorySceneClass::followPlainWorkflow() {
+  if (!ZtoryModel::autoWorkflowDetection()) return;
+  const QString tnz = currentScenePath();
+  if (tnz.isEmpty()) return;
+  // Once per opening: a later manual room switch is the user's.
+  static QString lastFollowed;
+  if (tnz == lastFollowed) return;
+  lastFollowed = tnz;
+  const QString room = plainWorkflowOf(tnz);
+  const QString cmd  = workflowCommandForRoom(room);
+  if (cmd.isEmpty() || room == Preferences::instance()->getCurrentRoomChoice())
+    return;
+  CommandManager::instance()->execute(cmd.toStdString().c_str());
 }
 
 bool ZtorySceneClass::declareStoryboard(const QString &tnzPath, bool trackerOff,

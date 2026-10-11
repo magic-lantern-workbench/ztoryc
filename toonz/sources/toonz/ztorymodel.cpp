@@ -268,8 +268,10 @@ ZtoryModel::ZtoryModel() : m_fps(24) {
                                  &ZtoryModel::readShotDocumentWithoutBoard);
               // A saved scene nobody classified: ask what it is, once the
               // Boards have read it as plain (ztorysceneclass.h).
-              QTimer::singleShot(300, this,
-                                 [] { ZtorySceneClass::askIfUnclassified(); });
+              QTimer::singleShot(300, this, [] {
+                ZtorySceneClass::askIfUnclassified();
+                ZtorySceneClass::followPlainWorkflow();
+              });
             });
   // ⌘S with no Board alive: the model writes the .ztoryc (step 3b).
   connect(this, &ZtoryModel::sceneSaved, this,
@@ -3556,7 +3558,21 @@ void ZtoryModel::declareNewSceneByWorkflow() {
   if (QFile::exists(ZtorySceneClass::sidecarFor(tnz))) return;
   const QString room = Preferences::instance()->getCurrentRoomChoice();
   if (room != "Tradigital" && room != "Cutout" && room != "StopMotion") return;
-  if (ZtorySceneClass::declarePlain(tnz)) m_docState.isPlainScene = true;
+  if (ZtorySceneClass::declarePlain(tnz, room)) m_docState.isPlainScene = true;
+}
+
+// The project data of the scene just opened with no Board alive: reset, then
+// the tracker of its project (or the one a shot's back-link names, if it is
+// there).  Never reset without reloading: that is what emptied Messina's
+// tracker on 2026-10-07.
+void ZtoryModel::reloadProjectDataForScene(const QString &shotBackLink) {
+  reconcileWithXsheet();
+  resetProjectLevelDefaults();
+  if (!shotBackLink.isEmpty() && QFile::exists(shotBackLink))
+    loadProjectDbFromPath(shotBackLink);
+  else
+    loadProjectDb();
+  emit productionReloaded();
 }
 
 bool ZtoryModel::currentSceneIsUnclassified() const {
@@ -3582,6 +3598,13 @@ void ZtoryModel::readShotDocumentWithoutBoard() {
     // nobody classified is not taken for a storyboard (ztorysceneclass.h).
     m_docState              = ShotDocumentState();
     m_docState.unclassified = currentSceneIsUnclassified();
+    // A saved scene: this project's data, not the previous scene's (which may
+    // be another project's) — the classification popup lists the project's
+    // shots.  Not the empty scene of a start-up: on 2026-10-11 loading the
+    // current project there (Arquata) left Arquata's assets in memory over
+    // the next scene, a Messina character, and they were saved into
+    // Messina's tracker (a copy, in a test).
+    if (!scene->isUntitled()) reloadProjectDataForScene(QString());
     return;
   }
   const QByteArray bytes = file.readAll();
@@ -3607,6 +3630,21 @@ void ZtoryModel::readShotDocumentWithoutBoard() {
       m_docState.isShotScene      = (role == "shot");
       m_docState.isCharacterScene = (role == "character");
       m_docState.isPlainScene     = (role == "plain");
+      // Nothing is read FROM the sidecar (the 2026-10-07 lesson), but the
+      // project data must be this scene's: kept from the previous scene it
+      // could be another project's, and the next save of the tracker writes
+      // it here.  A shot's tracker is the one its back-link names — the
+      // Board does the same (StoryboardPanel::loadZtoryc).
+      QString backLink;
+      if (m_docState.isShotScene) {
+        QXmlStreamReader again(bytes);
+        while (!again.atEnd())
+          if (again.readNext() == QXmlStreamReader::StartElement) {
+            backLink = again.attributes().value("project").toString();
+            break;
+          }
+      }
+      reloadProjectDataForScene(backLink);
       return;
     }
   }

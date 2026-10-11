@@ -24,8 +24,18 @@ namespace ZtorySceneClass {
 // The sidecar next to a scene (.tnz → .ztoryc).
 QString sidecarFor(const QString &tnzPath);
 
-// role="plain": a scene of the project that is not a storyboard.
-bool declarePlain(const QString &tnzPath, QString *error = nullptr);
+// role="plain": a scene of the project that is not a storyboard.  \p workflow
+// is the room set it opens in ("Tradigital", "Cutout", "StopMotion"; the
+// names Preferences::getCurrentRoomChoice() uses), empty for none.
+bool declarePlain(const QString &tnzPath, const QString &workflow,
+                  QString *error = nullptr);
+// The workflow a plain scene keeps in its sidecar; empty if none.
+QString plainWorkflowOf(const QString &tnzPath);
+// The workflow command for a room-set name (MI_Workflow2D…); empty if unknown.
+QString workflowCommandForRoom(const QString &room);
+// In Auto, after a scene is opened: a plain scene goes to its workflow (a
+// Board does it for storyboards and shots, the start-up popup for the rest).
+void followPlainWorkflow();
 // role="storyboard" and the Production Tracker answer; the shots come with ⌘S.
 bool declareStoryboard(const QString &tnzPath, bool trackerOff,
                        QString *error = nullptr);

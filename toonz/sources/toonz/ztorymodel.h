@@ -1098,6 +1098,8 @@ public:
   bool currentSceneIsUnclassified() const;
   // First save with no Board: the workflow gives the role (ztorysceneclass.h).
   void declareNewSceneByWorkflow();
+  // No Board: the opened scene's project data (a shot: its back-link's).
+  void reloadProjectDataForScene(const QString &shotBackLink);
   void noteSceneClassDeclined(const QString &tnzPath) { m_sceneClassDeclined.insert(tnzPath); }
   bool sceneClassDeclined(const QString &tnzPath) const {
     return m_sceneClassDeclined.contains(tnzPath);
