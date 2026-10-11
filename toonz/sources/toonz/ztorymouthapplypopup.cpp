@@ -44,6 +44,13 @@ ZtoryMouthApplyPopup::ZtoryMouthApplyPopup()
         tr("The column holding the phoneme names. One per character:\n"
            "pick the one belonging to the character you are animating."));
     row->addWidget(m_columnCombo, 1);
+    m_characterLabel = new QLabel(tr("Character:"), top);
+    row->addWidget(m_characterLabel);
+    m_characterCombo = new QComboBox(top);
+    m_characterCombo->setToolTip(
+        tr("The character whose mouths you are assigning: the list on the\n"
+           "right then shows only its levels and sub-scenes."));
+    row->addWidget(m_characterCombo, 1);
     row->addWidget(new QLabel(tr("Mouths:"), top));
     m_targetCombo = new QComboBox(top);
     m_targetCombo->setToolTip(
@@ -90,6 +97,11 @@ ZtoryMouthApplyPopup::ZtoryMouthApplyPopup()
 
   connect(m_targetCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, &ZtoryMouthApplyPopup::onTargetChanged);
+  connect(m_characterCombo, QOverload<int>::of(&QComboBox::activated), this,
+          [this](int) {
+            m_targetChosenByHand = true;  // the user said whose
+            fillTargets();
+          });
   connect(m_columnCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, [this](int) {
             pairColumnWithTarget();
@@ -117,8 +129,29 @@ void ZtoryMouthApplyPopup::showEvent(QShowEvent *) {
   m_targets     = ZtoryMouthApply::findTargets(scene);
   m_phonemeCols = ZtoryMouthApply::findPhonemeColumns(top);
 
-  m_targetCombo->clear();
-  for (const MouthApplyTarget &t : m_targets) m_targetCombo->addItem(t.label);
+  // The characters that HAVE mouths here, in column order; ● none needed:
+  // a character with no mapped mouths has nothing to apply.
+  m_characters = ZtoryMouthApply::characters(scene);
+  m_characterCombo->blockSignals(true);
+  m_characterCombo->clear();
+  for (const QString &key : m_characters.keys)
+    for (const MouthApplyTarget &t : m_targets)
+      if (m_characters.groupOf.value(t.level, QString()) == key) {
+        m_characterCombo->addItem(m_characters.labels.value(key), key);
+        break;
+      }
+  // A target outside the tree of the working xsheet (rare: an unexposed
+  // copy) still has to be reachable.
+  bool orphan = false;
+  for (const MouthApplyTarget &t : m_targets)
+    if (!m_characters.groupOf.contains(t.level)) orphan = true;
+  if (orphan && m_characterCombo->findData(QString()) < 0)
+    m_characterCombo->addItem(tr("Other levels"), QString());
+  m_characterCombo->blockSignals(false);
+  // With one character there is nothing to choose: the row stays quiet.
+  m_characterCombo->setVisible(m_characterCombo->count() > 1);
+  m_characterLabel->setVisible(m_characterCombo->count() > 1);
+  fillTargets();
 
   m_columnCombo->clear();
   for (int col : m_phonemeCols) {
@@ -188,7 +221,10 @@ void ZtoryMouthApplyPopup::pairColumnWithTarget() {
                                     Qt::CaseInsensitive);
     if (!hit) continue;
     m_pairing = true;
-    m_targetCombo->setCurrentIndex(i);
+    const int ci = m_characterCombo->findData(
+        m_characters.groupOf.value(m_targets[i].level, QString()));
+    if (ci >= 0) m_characterCombo->setCurrentIndex(ci);
+    fillTargets(i);
     m_pairing = false;
     return;
   }
@@ -198,7 +234,7 @@ void ZtoryMouthApplyPopup::pairColumnWithTarget() {
 
 QComboBox *ZtoryMouthApplyPopup::makeSetCombo(const QString &current) const {
   auto *cb = new QComboBox();
-  const int ti = m_targetCombo->currentIndex();
+  const int ti = currentTarget();
   if (ti >= 0 && ti < m_targets.size())
     // The set's NAME rides in the item's data: it is what apply looks the set
     // up by, and the text may say where it comes from.
@@ -233,6 +269,29 @@ void ZtoryMouthApplyPopup::resetRanges() {
   m_table->setCellWidget(0, 0, from);
   m_table->setCellWidget(0, 1, to);
   m_table->setCellWidget(0, 2, makeSetCombo(QString()));
+}
+
+int ZtoryMouthApplyPopup::currentTarget() const {
+  const QVariant d = m_targetCombo->currentData();
+  return d.isValid() ? d.toInt() : -1;
+}
+
+void ZtoryMouthApplyPopup::fillTargets(int target) {
+  const QString key = m_characterCombo->currentData().toString();
+  const bool pairing = m_pairing;
+  m_pairing = true;  // refilling is not the user choosing
+  m_targetCombo->clear();
+  for (int i = 0; i < m_targets.size(); i++) {
+    const MouthApplyTarget &t = m_targets[i];
+    // No character list (one character, or none known): every target.
+    const QString g = m_characters.groupOf.value(t.level, QString());
+    if (m_characterCombo->count() > 0 && g != key) continue;
+    m_targetCombo->addItem(t.label, i);
+  }
+  const int pick = m_targetCombo->findData(target);
+  if (pick >= 0) m_targetCombo->setCurrentIndex(pick);
+  m_pairing = pairing;
+  onTargetChanged(m_targetCombo->currentIndex());
 }
 
 void ZtoryMouthApplyPopup::onTargetChanged(int) {
@@ -302,7 +361,7 @@ QVector<MouthApplyRange> ZtoryMouthApplyPopup::readRanges(QString *why) const {
 }
 
 void ZtoryMouthApplyPopup::onApply() {
-  const int ti = m_targetCombo->currentIndex();
+  const int ti = currentTarget();
   if (ti < 0 || ti >= m_targets.size()) return;
 
   QString why;

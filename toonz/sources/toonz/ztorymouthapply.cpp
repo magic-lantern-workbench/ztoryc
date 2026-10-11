@@ -1,4 +1,5 @@
 #include "ztorymouthapply.h"
+#include <QRegularExpression>
 #include "ztorymouthlibrary.h"
 
 #include "tapp.h"
@@ -462,6 +463,87 @@ QVector<MouthApplyTarget> ZtoryMouthApply::findTargets(ToonzScene *scene) {
   for (const MouthApplyTarget &t : out)
     if (!t.map.sets.isEmpty()) usable.push_back(t);
   return usable;
+}
+
+//----------------------------------------------------------------------------
+
+MouthCharacters ZtoryMouthApply::characters(ToonzScene *scene) {
+  MouthCharacters out;
+  TXsheet *top = workingXsheet();
+  if (!scene || !top) return out;
+  const auto libs = ZtoryMouthLibrary::characterScenesByName();
+  // Everything below a sub-scene belongs to it; the first claim wins (a level
+  // shared by two characters stays with the first, left of the other).
+  std::function<void(TXsheet *, const QString &, int, QSet<TXsheet *> &)> claim =
+      [&](TXsheet *xsh, const QString &key, int depth, QSet<TXsheet *> &seen) {
+        if (!xsh || depth > 8 || seen.contains(xsh)) return;
+        seen.insert(xsh);
+        for (int c = 0; c < xsh->getColumnCount(); c++) {
+          int r0 = 0, r1 = -1;
+          xsh->getCellRange(c, r0, r1);
+          for (int r = r0; r <= r1; r++) {
+            const TXshCell cell = xsh->getCell(r, c);
+            if (cell.isEmpty() || !cell.m_level) continue;
+            TXshLevel *lv = cell.m_level.getPointer();
+            if (!out.groupOf.contains(lv)) out.groupOf.insert(lv, key);
+            if (TXshChildLevel *cl = lv->getChildLevel())
+              claim(cl->getXsheet(), key, depth + 1, seen);
+          }
+        }
+      };
+  for (int c = 0; c < top->getColumnCount(); c++) {
+    int r0 = 0, r1 = -1;
+    top->getCellRange(c, r0, r1);
+    QSet<TXshLevel *> done;
+    for (int r = r0; r <= r1; r++) {
+      const TXshCell cell = top->getCell(r, c);
+      if (cell.isEmpty() || !cell.m_level) continue;
+      TXshLevel *lv = cell.m_level.getPointer();
+      if (done.contains(lv)) continue;
+      done.insert(lv);
+      TXshChildLevel *cl = lv->getChildLevel();
+      if (!cl) {  // a level right here: «Other levels»
+        if (!out.groupOf.contains(lv)) out.groupOf.insert(lv, QString());
+        if (!out.keys.contains(QString())) {
+          out.keys << QString();
+          out.labels.insert(QString(), QObject::tr("Other levels"));
+        }
+        continue;
+      }
+      const QString name = QString::fromStdWString(lv->getName());
+      if (out.keys.contains(name)) continue;
+      out.keys << name;
+      // Brought from a character's scene: the character's name (SOFIA_1 is
+      // SOFIA).  Made here: the column's name, which is what the user reads
+      // in the xsheet, else the sub-scene's.
+      auto lib = libs.constFind(ZtoryMouthLibrary::characterKey(name));
+      if (lib != libs.constEnd()) {
+        // The asset's name; with the scene's when they differ (in Messina the
+        // asset PRINCIAZZURRO points at PRINCENERENTOLA.tnz).
+        const QString who = lib.value().first;
+        const QString scn = QFileInfo(lib.value().second.getQString()).completeBaseName();
+        out.labels.insert(name, who.compare(scn, Qt::CaseInsensitive) == 0
+                                    ? who
+                                    : QObject::tr("%1 (%2)").arg(who, scn));
+        out.libraryKeys.insert(name);
+      } else {
+        // The column's name, unless it is Tahoma's «Col4», which says nothing.
+        QString col;
+        if (TStageObject *so = top->getStageObject(top->getColumnObjectId(c)))
+          col = QString::fromStdString(so->getName());
+        static const QRegularExpression kDefault(QStringLiteral("^Col\\d+$"));
+        out.labels.insert(
+            name, (col.isEmpty() || kDefault.match(col).hasMatch())
+                      ? QObject::tr("sub-scene %1, column %2 (in this scene)")
+                            .arg(name).arg(c + 1)
+                      : QObject::tr("%1 (in this scene)").arg(col));
+      }
+      out.groupOf.insert(lv, name);
+      QSet<TXsheet *> seen;
+      claim(cl->getXsheet(), name, 1, seen);
+    }
+  }
+  return out;
 }
 
 //----------------------------------------------------------------------------

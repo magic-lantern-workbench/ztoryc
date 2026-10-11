@@ -39,6 +39,9 @@
 
 #include <QString>
 #include <QVector>
+#include <QHash>
+#include <QSet>
+#include <QStringList>
 
 class TXsheet;
 class TXshLevel;
@@ -90,6 +93,20 @@ struct MouthApplyReport {
   QString summary() const;
 };
 
+//! Which CHARACTER each level belongs to, to choose the character first and
+//! then only its levels and sets (Franco, 2026-10-11: with several characters
+//! in a shot the list of levels was too long to choose from).  A character is
+//! a sub-scene exposed in the working xsheet: one brought from a character's
+//! scene takes that character's name, one made here is named after its
+//! column.  Levels exposed directly there are the "Other levels".
+struct MouthCharacters {
+  QHash<TXshLevel *, QString> groupOf;  //!< level -> key ("" = other levels)
+  QStringList keys;                     //!< in column order
+  QHash<QString, QString> labels;       //!< key -> what the user reads
+  bool fromLibrary(const QString &key) const { return libraryKeys.contains(key); }
+  QSet<QString> libraryKeys;
+};
+
 namespace ZtoryMouthApply {
 
 //! L'xsheet in cui si sta lavorando: quello CORRENTE, non quello in cima alla
@@ -101,6 +118,9 @@ TXsheet *workingXsheet();
 //! sotto-scene. Un personaggio riggato le ha annidate, quindi cercare solo in
 //! cima non troverebbe niente.
 QVector<MouthApplyTarget> findTargets(ToonzScene *scene);
+
+//! The characters of the scene and which levels belong to each.
+MouthCharacters characters(ToonzScene *scene);
 
 //! Le colonne di TESTO che contengono viseme, nell'xsheet \p xsh.
 //! Si riconoscono dal CONTENUTO e non dal nome: il nome della colonna e'

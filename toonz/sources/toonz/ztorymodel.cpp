@@ -281,6 +281,18 @@ static void ztoryArmSceneTest() {
                 cur == sc->getChildStack()->getTopXsheet() ? "yes" : "no",
                 cur ? cur->getColumnCount() : -1);
       }
+      {  // the characters the mouth windows would offer
+        const MouthCharacters mc = ZtoryMouthApply::characters(
+            TApp::instance()->getCurrentScene()->getScene());
+        for (const QString &k : mc.keys) {
+          int n = 0;
+          for (auto it = mc.groupOf.constBegin(); it != mc.groupOf.constEnd(); ++it)
+            if (it.value() == k) n++;
+          fprintf(stderr, "[ZTORY] scenetest: character '%s' (key '%s'%s): %d levels\n",
+                  qPrintable(mc.labels.value(k)), qPrintable(k),
+                  mc.fromLibrary(k) ? ", library" : "", n);
+        }
+      }
       // The mouth targets the lip sync popup would offer here.
       for (const MouthApplyTarget &t : ZtoryMouthApply::findTargets(
                TApp::instance()->getCurrentScene()->getScene())) {
