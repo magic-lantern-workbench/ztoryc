@@ -248,8 +248,12 @@ spento (`productionTracker="off"`), mai i file veri:
   stesso uuid del `.ztoryc`, i dati che c'erano restano. Nota: navtrk aveva `productionTracker="off"` da
   prima di oggi (allora sh060 resta giustamente fuori dal tracker). Nota a parte, non di questo ramo: le
   copie `navcrash_test` e `messina_copy` vengono aperte nel progetto **sandbox** (titolo «[sandbox]»), a
-  differenza di `arquata_copy`; unica differenza vista, il `tahomaproject.xml` accanto a
-  `ztorycproject.xml`. Da capire separatamente.
+  differenza di `arquata_copy`. **Spiegato (2026-10-11):** non era il `tahomaproject.xml` ma la mancanza di
+  `scenes/scenes.xml`, il file che dice «il progetto e' la cartella sopra»: `loadSceneProject`
+  (`tproject.cpp:1090-1126`) lo cerca risalendo dalla scena e, se non lo trova, usa sandbox. I progetti veri
+  ce l'hanno; le due copie erano state fatte copiando solo alcuni file. Aggiunto alle copie. Guardandoci e'
+  saltato fuori un difetto vero, gia' su master: aprire uno storyboard «solo locale» lo pubblicava lo stesso
+  nel tracker (`aec1e4fe9`).
 - **Passo 4 — già fatto dal 2c (2026-10-07).** Non restano copie fra Board e modello: gli ascoltatori
   di `shotDataChanged` (Navigator, titolo del viewer, Tracker) aggiornano solo ciò che mostrano; i
   `notifyShotEdited` sono avvisi. Resta solo un doppio ciclo innocuo in «assegna sequenza».
