@@ -279,7 +279,7 @@ void ZtoryRecovery::snapshot() {
   {
     ZtoryModel *zm                                  = ZtoryModel::instance();
     const ZtoryModel::ShotDocumentState &doc = zm->shotDocumentState();
-    if (!doc.isShotScene && !doc.isCharacterScene && zm->shotCount() > 0) {
+    if (!doc.keepsOwnSidecar() && zm->shotCount() > 0) {
       std::vector<const ShotData *> shots;
       for (int i = 0; i < zm->shotCount(); i++) shots.push_back(&zm->shot(i));
       const QString name = QFileInfo(scenePath).completeBaseName() + ".ztoryc";

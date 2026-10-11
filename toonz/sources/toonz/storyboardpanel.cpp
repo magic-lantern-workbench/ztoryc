@@ -1,5 +1,6 @@
 #include "storyboardpanel.h"
 #include "ztoryshotops.h"
+#include "ztorysceneclass.h"
 #include "ztorytaskflow.h"
 #include "xsheetdragtool.h"  // XsheetGUI::setPlayRange
 #include "ztoryanimatic.h"   // ZtoryAnimaticController::invalidateSoundTrack
@@ -2789,7 +2790,8 @@ void StoryboardPanel::updateColumnName(int si) {
   // An exported SHOT or a CHARACTER scene is not a storyboard: its sub-scene
   // columns are characters, not shots. Named after a shot label, SOFIA's
   // column in sh040 became «sh010» (Franco, 2026-09-27).
-  if (ZtoryModel::instance()->shotDocumentState().isShotScene || ZtoryModel::instance()->shotDocumentState().isCharacterScene) return;
+  // A plain or not yet classified scene neither (ztorysceneclass.h).
+  if (ZtoryModel::instance()->shotDocumentState().keepsOwnSidecar()) return;
   TApp *app = TApp::instance();
   ToonzScene *scene = app->getCurrentScene()->getScene();
   if (!scene) return;
@@ -3196,7 +3198,11 @@ void StoryboardPanel::markShotDocumentChanged() {
   // (path cleared) and nothing for a scene that keeps its own sidecar.
   if (m_currentZtoryPath.isEmpty()) return;
   const auto &doc = ZtoryModel::instance()->shotDocumentState();
-  if (doc.isShotScene || doc.isCharacterScene) return;
+  // Typing in the Board of a scene nobody classified would be lost without a
+  // word: ask now what it is (ztorysceneclass.h).
+  if (doc.unclassified)
+    QTimer::singleShot(0, this, [] { ZtorySceneClass::askBecauseEdited(); });
+  if (doc.keepsOwnSidecar()) return;
   ZtoryModel::instance()->markShotDocumentDirty();
 }
 
@@ -3218,6 +3224,10 @@ void StoryboardPanel::saveZtoryc() {
   // li cancellerebbe in silenzio — l'utente se ne accorgerebbe al lip sync
   // dello shot dopo, quando le bocche non si assegnano piu'.
   if (ZtoryModel::instance()->shotDocumentState().isCharacterScene) return;
+  // A plain scene keeps its one-line sidecar; one nobody has classified yet
+  // must not become a storyboard just because a Board saw it
+  // (ztorysceneclass.h).
+  if (ZtoryModel::instance()->shotDocumentState().keepsOwnSidecar()) return;
   // Use m_currentZtoryPath (set at end of refreshFromScene) instead of
   // ztoryPath() so we never write m_shots data to a different scene's file.
   // While m_shots is being rebuilt (clearShots clears it), this is empty →
@@ -3381,6 +3391,8 @@ void StoryboardPanel::loadZtoryc() {
   // new/empty scene is never mistaken for a shot scene).
   ZtoryModel::instance()->shotDocumentState().isShotScene      = false;
   ZtoryModel::instance()->shotDocumentState().isCharacterScene = false;
+  ZtoryModel::instance()->shotDocumentState().isPlainScene     = false;
+  ZtoryModel::instance()->shotDocumentState().unclassified     = false;
   // Cleared before parsing: the root element below is what decides it, and a
   // scene with no attribute has simply never opted out.
   ZtoryModel::instance()->shotDocumentState().trackerOff = false;
@@ -3417,6 +3429,10 @@ void StoryboardPanel::loadZtoryc() {
     // is for this scene, and a rebuild must not clear what it holds — an
     // imported screenplay was lost that way.
     restoreKeptScene();
+    // A saved scene with no sidecar that nobody classified: not a storyboard
+    // until the user says so (ztorysceneclass.h asks).
+    ZtoryModel::instance()->shotDocumentState().unclassified =
+        ZtoryModel::instance()->currentSceneIsUnclassified();
     ZtoryModel::instance()->setShotDataLoadedFor(path);
     ZtoryModel::instance()->setScriptFile(scriptFromFile);
     ZtoryModel::instance()->resetProjectLevelDefaults();
@@ -3577,6 +3593,7 @@ void StoryboardPanel::loadZtoryc() {
   // never rewritten with role="storyboard".
   ZtoryModel::instance()->shotDocumentState().isShotScene      = (sceneRole == "shot");
   ZtoryModel::instance()->shotDocumentState().isCharacterScene = (sceneRole == "character");
+  ZtoryModel::instance()->shotDocumentState().isPlainScene     = (sceneRole == "plain");
   // The SFH-explosion repair lives in memory; the next ⌘S writes it (step 3b:
   // opening a scene never writes its .ztoryc).
   Q_UNUSED(sfhRepaired)
@@ -7483,28 +7500,7 @@ QList<TFilePath> StoryboardPanel::exportShotScenesToDir(
 
       QString ztorcPath = QString::fromStdWString(outPath.getWideString());
       ztorcPath.replace(QRegularExpression("\\.tnz$"), ".ztoryc");
-      QFile f(ztorcPath);
-      if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QXmlStreamWriter xml(&f);
-        xml.setAutoFormatting(true);
-        xml.writeStartDocument();
-        xml.writeStartElement("ztoryc");
-        xml.writeAttribute("version",     "2");
-        xml.writeAttribute("role",        "shot");
-        xml.writeAttribute("projectShot", sd.uuid);
-        xml.writeAttribute("project",     projectDb);
-        // Inherit project-level metadata so shot scene knows its context.
-        xml.writeStartElement("project");
-        xml.writeAttribute("production", model->production());
-        xml.writeAttribute("season",     model->season());
-        xml.writeAttribute("episode",    model->episode());
-        xml.writeAttribute("title",      model->title());
-        xml.writeAttribute("technique",  tech);
-        xml.writeEndElement();
-        xml.writeEndElement();
-        xml.writeEndDocument();
-        f.close();
-      }
+      ZtorySceneClass::writeShotLink(ztorcPath, sd.uuid, projectDb, tech);
 
       // Export = the storyboard is locked in: Storyboard goes Done, and
       // ZtoryTaskFlow readies the next task (usually Layout). A storyboard

@@ -18,6 +18,7 @@
 #include "projectpopup.h"
 #include "ztorymodel.h"
 #include "ztorycharacter.h"
+#include "ztorysceneclass.h"
 #include "ztorytaskflow.h"
 #include "ztorystartup.h"
 #include "columncommand.h"
@@ -1137,6 +1138,11 @@ void StartupPopup::applyWorkflowForScene(const QString &scenePath) {
     QString ztoryPath = scenePath;
     ztoryPath.replace(QRegularExpression("\\.tnz$"), ".ztoryc");
     QFile zf(ztoryPath);
+    // Nessun sidecar = scena non classificata: niente cambio di workflow, lo
+    // decide la domanda che arriva all'apertura (ztorysceneclass.h).  Prima la
+    // si mandava nelle room dello storyboard, e le sue sotto-scene diventavano
+    // shot.
+    if (!zf.exists()) return;
     if (zf.open(QIODevice::ReadOnly | QIODevice::Text)) {
       const QString head = QString::fromUtf8(zf.read(1024));
       // Si LEGGE il ruolo, non si deduce cercando «shot»: con il terzo ruolo
@@ -1150,7 +1156,13 @@ void StartupPopup::applyWorkflowForScene(const QString &scenePath) {
           QRegularExpression("technique=\"([^\"]*)\"").match(head);
       if (mt.hasMatch()) technique = mt.captured(1);
     }
-    cmd = ZtoryModel::workflowCommand(role, technique);
+    if (role == QLatin1String("plain")) {
+      // La scena semplice ricorda il suo workflow; se non ne ha, resta dov'e'.
+      cmd = ZtorySceneClass::workflowCommandForRoom(
+          ZtorySceneClass::plainWorkflowOf(scenePath));
+      if (cmd.isEmpty()) return;
+    } else
+      cmd = ZtoryModel::workflowCommand(role, technique);
   } else {
     static const char *kCmds[] = {
       MI_WorkflowStoryboard, MI_Workflow2D,
@@ -1362,6 +1374,21 @@ void StartupPopup::onCreateButton() {
           break;
         }
     }
+  }
+
+  // The other roles are declared here too (ztorysceneclass.h): a storyboard
+  // gets its sidecar at the first ⌘S and is not asked about meanwhile; a scene
+  // made in a drawing workflow is plain from the start, so its sub-scenes are
+  // never taken for shots.
+  {
+    const QString tnz = QString::fromStdWString(scenePath.getWideString());
+    if (wfIdx == 0)
+      ZtoryModel::instance()->noteSceneClassified(tnz);
+    else if (wfIdx >= 1 && wfIdx <= 3 &&
+             !ZtorySceneClass::declarePlain(
+                 tnz, wfIdx == 1 ? "Tradigital" : wfIdx == 2 ? "Cutout"
+                                                             : "StopMotion"))
+      DVGui::warning(tr("Could not mark this scene as a plain scene."));
   }
 
   // Create initial shots only for Storyboard Mode
@@ -2119,6 +2146,7 @@ void StartupScenesList::addScene(const QString &name, const QString &path) {
     if (role == "storyboard")     { label = "SB"; colour = QColor(255, 160,   0, 220); }
     else if (role == "shot")      { label = "SH"; colour = QColor( 90, 160, 255, 220); }
     else if (role == "character") { label = "CH"; colour = QColor( 90, 200, 120, 220); }
+    else if (role == "plain")     { label = "PL"; colour = QColor(150, 150, 150, 220); }
 
     if (!label.isEmpty() && !pixmap.isNull()) {
       QPainter p(&pixmap);
@@ -2192,84 +2220,11 @@ void StartupScenesList::contextMenuEvent(QContextMenuEvent *event) {
   const QString path = it->data(Qt::UserRole).toString();
   if (path.isEmpty() || path == ":" || path == ":PT") return;
 
-  // Vuoto = la scena non ha ancora un .ztoryc accanto, quindi nessun ruolo.
-  // Prima qui si usciva, e il menu compariva solo DOPO aver aperto la scena
-  // almeno una volta: e' l'apertura che scrive il sidecar. Ma aprirla e' gia'
-  // l'atto che agisce sul ruolo sbagliato, quindi il menu arrivava tardi.
-  // Ora c'e' comunque, e la scelta crea il sidecar (vedi ZtoryCharacter::setRole).
-  const QString current = ZtoryCharacter::roleOf(path);
-
-  QMenu menu(this);
-  menu.addAction(current.isEmpty() ? tr("Role: not set yet")
-                                   : tr("Role: %1").arg(current))
-      ->setEnabled(false);
-  menu.addSeparator();
-  struct { const char *role; const char *label; } kRoles[] = {
-    {"storyboard", QT_TR_NOOP("Storyboard  (SB)")},
-    {"shot",       QT_TR_NOOP("Shot  (SH)")},
-    {"character",  QT_TR_NOOP("Character  (CH)")},
-  };
-  for (const auto &r : kRoles) {
-    QAction *a = menu.addAction(tr(r.label));
-    a->setCheckable(true);
-    a->setChecked(current == QLatin1String(r.role));
-    a->setData(QString(r.role));
-  }
-
-  QAction *chosen = menu.exec(event->globalPos());
-  if (!chosen || !chosen->isEnabled()) return;
-  const QString role = chosen->data().toString();
-  if (role.isEmpty() || role == current) return;
-
-  QString why;
-  if (!ZtoryCharacter::setRole(path, role, &why)) {
-    DVGui::warning(tr("Could not change the role: %1").arg(why));
-    return;
-  }
-
-  // ⚠️ Cambiare il ruolo impedisce le pubblicazioni FUTURE, ma non tocca cio'
-  // che questa scena ha gia' pubblicato: quegli shot restano nel tracker per
-  // sempre, perche' da qui in poi nessuno li ripubblica e nessuno li toglie.
-  // E' cosi' che un progetto si ritrova quattro SH010 di quattro file diversi,
-  // indistinguibili fra loro (successo davvero, 2026-08-17).
-  if (current == QLatin1String("storyboard") &&
-      role != QLatin1String("storyboard")) {
-    ZtoryModel *m        = ZtoryModel::instance();
-    const QString dbPath = m->projectDbPath();
-    // Solo se la scena appartiene AL PROGETTO che il tracker ha in memoria:
-    // togliere shot da un altro progetto sarebbe un danno silenzioso.
-    const QString projDir = QFileInfo(dbPath).absolutePath();
-    const bool sameProject =
-        !dbPath.isEmpty() && !projDir.isEmpty() &&
-        QFileInfo(path).absoluteFilePath().startsWith(projDir + "/");
-    const QString source =
-        QFileInfo(ZtoryCharacter::sidecarPathFor(path)).fileName();
-    const int n = sameProject ? m->projectShotCountFromSource(source) : 0;
-    if (n > 0) {
-      QMessageBox ask(this);
-      ask.setWindowTitle(tr("Shots in the Production Tracker"));
-      ask.setIcon(QMessageBox::Question);
-      ask.setText(tr("This scene has %1 shot(s) in the Production Tracker, "
-                     "published while it was a storyboard.")
-                      .arg(n));
-      ask.setInformativeText(
-          tr("Now that it is not a storyboard any more, nothing will keep them "
-             "up to date — and a shot called like one of another storyboard "
-             "makes the two impossible to tell apart.\n\n"
-             "Their task statuses, assignees and breakdown are removed with "
-             "them."));
-      QPushButton *rem =
-          ask.addButton(tr("Remove them"), QMessageBox::AcceptRole);
-      ask.addButton(tr("Keep them"), QMessageBox::RejectRole);
-      ask.exec();
-      if (ask.clickedButton() == rem) {
-        const int removed = m->removeProjectShotsFromSource(source);
-        m->saveProjectDb();
-        emit m->taskStatusChanged();  // il tracker si ridisegna
-        DVGui::info(tr("%1 shot(s) removed from the project.").arg(removed));
-      }
-    }
-  }
+  // Lo stesso popup dell'apertura e di Workflow > Scene Type… (ztorysceneclass.h):
+  // prima qui c'era un menu a parte che poteva fare di una scena uno «shot»
+  // senza legarla a nessuno shot del tracker, e l'unica pulizia degli shot
+  // pubblicati stava solo qui.  Ora le regole sono in un posto solo.
+  if (!ZtorySceneClass::chooseFor(path, this)) return;
   // Rifare la miniatura e' l'unico modo di far vedere subito la pastiglia
   // nuova: senza, la correzione sembrerebbe non aver fatto niente.
   const QString name = it->text();
