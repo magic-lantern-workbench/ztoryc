@@ -1111,6 +1111,8 @@ public:
   // publication).  Each one registers here; with none alive — a workflow
   // whose rooms have no Board, e.g. Cutout — the model writes it itself.
   void addShotDocumentWriter(QObject *writer);
+  // No Board: the opened scene's project data (a shot: its back-link's).
+  void reloadProjectDataForScene(const QString &shotBackLink);
 private:
   ShotDocumentState m_docState;
   QSet<QString> m_sceneClassifiedSession, m_sceneClassDeclined;
