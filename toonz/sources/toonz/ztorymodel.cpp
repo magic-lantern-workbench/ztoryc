@@ -3532,6 +3532,20 @@ void ZtoryModel::addShotDocumentWriter(QObject *writer) {
           [this, writer]() { m_shotDocumentWriters.remove(writer); });
 }
 
+// The project data of the scene just opened with no Board alive: reset, then
+// the tracker of its project (or the one a shot's back-link names, if it is
+// there).  Never reset without reloading: that is what emptied Messina's
+// tracker on 2026-10-07.
+void ZtoryModel::reloadProjectDataForScene(const QString &shotBackLink) {
+  reconcileWithXsheet();
+  resetProjectLevelDefaults();
+  if (!shotBackLink.isEmpty() && QFile::exists(shotBackLink))
+    loadProjectDbFromPath(shotBackLink);
+  else
+    loadProjectDb();
+  emit productionReloaded();
+}
+
 void ZtoryModel::readShotDocumentWithoutBoard() {
   if (!m_shotDocumentWriters.isEmpty()) return;  // the Boards read it
   ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
@@ -3540,7 +3554,13 @@ void ZtoryModel::readShotDocumentWithoutBoard() {
   path.replace(QRegularExpression("\\.tnz$"), ".ztoryc");
   if (shotDataLoadedFor(path)) return;  // read once per opening, as the Board
   QFile file(path);
-  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    // No sidecar: this project's data, not the previous scene's (which may be
+    // another project's).  Not the empty scene of a start-up.
+    m_docState = ShotDocumentState();
+    if (!scene->isUntitled()) reloadProjectDataForScene(QString());
+    return;
+  }
   const QByteArray bytes = file.readAll();
   // ONLY a storyboard's .ztoryc is a shot list.  A shot scene's sidecar holds
   // the back-link and a <project> block, a character's its mouth sets: reading
@@ -3563,6 +3583,22 @@ void ZtoryModel::readShotDocumentWithoutBoard() {
       m_docState                  = ShotDocumentState();
       m_docState.isShotScene      = (role == "shot");
       m_docState.isCharacterScene = (role == "character");
+      // Nothing is read FROM the sidecar (the 2026-10-07 lesson), but the
+      // project data must be this scene's: kept from the previous scene it
+      // could be another project's, and the next save of the tracker writes
+      // it here (2026-10-11: starting from Arquata and opening a Messina
+      // character, Arquata's assets reached Messina's tracker — on copies).
+      // A shot's tracker is the one its back-link names, as in the Board.
+      QString backLink;
+      if (m_docState.isShotScene) {
+        QXmlStreamReader again(bytes);
+        while (!again.atEnd())
+          if (again.readNext() == QXmlStreamReader::StartElement) {
+            backLink = again.attributes().value("project").toString();
+            break;
+          }
+      }
+      reloadProjectDataForScene(backLink);
       return;
     }
   }
