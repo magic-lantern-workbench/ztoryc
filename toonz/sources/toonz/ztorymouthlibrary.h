@@ -34,6 +34,8 @@ class ToonzScene;
 struct MouthLibraryItem {
   QString   character;   // the asset name of the library
   QString   subScene;    // empty = the mouths are a level
+  QString   libSubScene; // the same sub-scene's name in the library (may differ:
+                         // a copy brought into a shot can be renamed)
   QString   label;       // where, as the user reads it
   TFilePath shotOwner;   // ZtoryMouthMap owner in the shot (decoded)
   TFilePath libOwner;    // …and in the library
@@ -89,6 +91,10 @@ QHash<QString, QPair<QString, TFilePath>> characterScenesByName();
 // shot SOFIA.tnz comes in as the sub-scene «SOFIA_1», and matching the bare
 // name found no character at all (2026-09-27).
 QString characterKey(const QString &subSceneName);
+//! The character a sub-scene belongs to, from the sub-scenes above it (the one
+//! named as a character's scene), whether or not that library has sets; empty
+//! if none.  Knowing WHOSE it is forbids borrowing someone else's sets.
+QString characterOfSubScene(ToonzScene *scene, const QString &sub);
 
 // Runs `fn` once NO modal window is open (checked every quarter of a second,
 // given up after a minute). The questions at open and save used to pop right

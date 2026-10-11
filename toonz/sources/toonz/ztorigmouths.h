@@ -117,6 +117,16 @@ private:
   //! un .cpp vorrebbe dire tirarsi dietro il moc per niente.
   bool eventFilter(QObject *obj, QEvent *event) override;
 
+  //! The character first, then only its levels and sets (MouthCharacters).
+  //! Hidden in a character's own scene: every level there is that character.
+  QComboBox   *m_characterCombo = nullptr;
+  QLabel      *m_characterLabel = nullptr;
+  MouthCharacters m_characters;
+  QString      m_characterKey;
+  bool         m_characterChosen = false;  //!< picked by the user this scene
+  const void  *m_characterScene  = nullptr;  //!< the scene that choice is for
+  //! Whether \p lv is shown for the character chosen (always, if no choice).
+  bool inChosenCharacter(TXshLevel *lv) const;
   QComboBox   *m_levelCombo = nullptr;
   //! Nasconde dalla tendina i livelli che una mappa non ce l'hanno.
   //! Spenta quando si deve mappare un livello nuovo, che per definizione

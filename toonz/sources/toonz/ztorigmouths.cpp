@@ -206,6 +206,32 @@ ZtoRigMouthsTab::ZtoRigMouthsTab(QWidget *parent) : QWidget(parent) {
   lay->setContentsMargins(4, 4, 4, 4);
   lay->setSpacing(4);
 
+  // ── riga del personaggio ──────────────────────────────────────────────
+  // Prima il personaggio, poi i SUOI livelli e i SUOI set: con piu'
+  // personaggi in uno shot l'elenco dei livelli era troppo lungo per sceglierci
+  // (Franco, 2026-10-11).  Un personaggio fatto direttamente nella scena e'
+  // una sotto-scena come gli altri, e le sue bocche si mappano qui.
+  {
+    auto *row = new QHBoxLayout();
+    row->setSpacing(4);
+    m_characterLabel = new QLabel(tr("Character:"), this);
+    row->addWidget(m_characterLabel);
+    m_characterCombo = new QComboBox(this);
+    m_characterCombo->setToolTip(
+        tr("Whose mouths: the characters in this shot, one per sub-scene.\n"
+           "One brought from a character's scene has its name; one made here\n"
+           "is named after its column. Marked with a dot: it has mouth sets."));
+    row->addWidget(m_characterCombo, 1);
+    lay->addLayout(row);
+    connect(m_characterCombo, QOverload<int>::of(&QComboBox::activated), this,
+            [this](int) {
+              m_characterKey    = m_characterCombo->currentData().toString();
+              m_characterChosen = true;
+              m_levelsSignature.clear();  // the list changes with the choice
+              refreshLevelCombo();
+            });
+  }
+
   // ── riga del livello ──────────────────────────────────────────────────
   {
     auto *row = new QHBoxLayout();
@@ -558,6 +584,7 @@ void ZtoRigMouthsTab::refreshLevelCombo() {
   // qui sotto esce subito e non si ricostruisce niente: il filtro sembra rotto
   // mentre e' solo la cache che non sa di doverlo considerare.
   sig += (m_onlyMapped && m_onlyMapped->isChecked()) ? "|mapped" : "|all";
+  sig += "|who:" + m_characterKey;
   if (sig == m_levelsSignature && m_levelCombo->count() > 0) return;
   // Cambiati i livelli, cio' che si sapeva dei loro file non vale piu'.
   if (sig != m_levelsSignature) m_mapCache.clear();
@@ -585,6 +612,62 @@ void ZtoRigMouthsTab::refreshLevelCombo() {
     QSet<TXshLevel *> withSets;
     for (const MouthApplyTarget &t : m_sources) withSets.insert(t.level);
 
+    // ── I personaggi ─────────────────────────────────────────────────────
+    // Non nella scena di un personaggio: li' ogni livello e' lui, e dividerlo
+    // per sotto-scene lo farebbe a pezzi.
+    const QString tnz =
+        QString::fromStdWString(scene->getScenePath().getWideString());
+    const bool characterScene =
+        !tnz.isEmpty() &&
+        ZtoryCharacter::roleOf(tnz) == QLatin1String("character");
+    // A choice made in another scene does not carry over.
+    if (m_characterScene != scene) {
+      m_characterScene  = scene;
+      m_characterChosen = false;
+    }
+    m_characters = characterScene ? MouthCharacters()
+                                  : ZtoryMouthApply::characters(scene);
+    {
+      QSet<QString> mappedKeys;
+      for (TXshLevel *lv : withSets)
+        mappedKeys.insert(m_characters.groupOf.value(lv, QString()));
+      QStringList keys = m_characters.keys;
+      // Levels left in the cast with no cell, or outside the tree: «Other».
+      TLevelSet *cast = scene->getLevelSet();
+      for (int i = 0; i < cast->getLevelCount() && !keys.contains(QString()); i++)
+        if (TXshLevel *lv = cast->getLevel(i))
+          if ((lv->getSimpleLevel() || lv->getChildLevel()) &&
+              !m_characters.groupOf.contains(lv))
+            keys << QString();
+      if (!m_characters.labels.contains(QString()))
+        m_characters.labels.insert(QString(), tr("Other levels"));
+      m_characterCombo->blockSignals(true);
+      m_characterCombo->clear();
+      for (const QString &k : keys)
+        m_characterCombo->addItem(
+            (mappedKeys.contains(k) ? "● " : "") + m_characters.labels.value(k), k);
+      // Which one: the user's choice; else the current level's character if it
+      // has mouths; else the first with mouths; else the first.
+      int pick = m_characterChosen ? m_characterCombo->findData(m_characterKey) : -1;
+      if (pick < 0)
+        if (TXshLevelHandle *lh = TApp::instance()->getCurrentLevel())
+          if (TXshLevel *cur = lh->getLevel())
+            if (withSets.contains(cur))
+              pick = m_characterCombo->findData(
+                  m_characters.groupOf.value(cur, QString()));
+      for (int i = 0; pick < 0 && i < keys.size(); i++)
+        if (mappedKeys.contains(keys[i])) pick = i;
+      if (pick < 0 && m_characterCombo->count() > 0) pick = 0;
+      if (pick >= 0) m_characterCombo->setCurrentIndex(pick);
+      m_characterCombo->blockSignals(false);
+      const bool show = !characterScene && m_characterCombo->count() > 1;
+      m_characterCombo->setVisible(show);
+      m_characterLabel->setVisible(show);
+      m_characterKey = show ? m_characterCombo->currentData().toString()
+                            : QString();
+      if (!show) m_characters = MouthCharacters();  // no filtering
+    }
+
     TLevelSet *ls = scene->getLevelSet();
     for (int i = 0; i < ls->getLevelCount(); i++) {
       TXshLevel *lv = ls->getLevel(i);
@@ -594,6 +677,7 @@ void ZtoRigMouthsTab::refreshLevelCombo() {
       TXshSimpleLevel *sl = lv->getSimpleLevel();
       TXshChildLevel  *cl = lv->getChildLevel();
       if (!sl && !cl) continue;
+      if (!inChosenCharacter(lv)) continue;
       const QString name = QString::fromStdWString(lv->getName());
       // Si mostra il nome della COLONNA quando c'e' (e' quello che l'utente
       // ha scritto e che vede nell'xsheet), col nome del livello accanto —
@@ -747,6 +831,11 @@ void ZtoRigMouthsTab::onLevelChanged(int) {
   refreshSetCombo();
 }
 
+bool ZtoRigMouthsTab::inChosenCharacter(TXshLevel *lv) const {
+  if (m_characters.keys.isEmpty() && m_characters.groupOf.isEmpty()) return true;
+  return m_characters.groupOf.value(lv, QString()) == m_characterKey;
+}
+
 void ZtoRigMouthsTab::refreshSetCombo() {
   m_filling = true;
   m_setCombo->clear();
@@ -777,6 +866,10 @@ void ZtoRigMouthsTab::refreshSetCombo() {
       sources.push_back(t);
     }
   }
+  // Only the chosen character's sets (the level being worked on always).
+  for (int i = sources.size() - 1; i >= 0; --i)
+    if (sources[i].level != m_level && !inChosenCharacter(sources[i].level))
+      sources.removeAt(i);
   const bool several = sources.size() > 1;
   for (const MouthApplyTarget &src : sources) {
     for (const MouthSet &ms : src.map.sets) {

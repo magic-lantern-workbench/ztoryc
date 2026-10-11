@@ -51,6 +51,9 @@ private:
   //! Una cella con la tendina dei set del bersaglio corrente.
   QComboBox *makeSetCombo(const QString &current) const;
 
+  //! The character first, then only its mouths (MouthCharacters).
+  QComboBox    *m_characterCombo = nullptr;
+  QLabel       *m_characterLabel = nullptr;
   QComboBox    *m_targetCombo = nullptr;
   QComboBox    *m_columnCombo = nullptr;
   QTableWidget *m_table       = nullptr;
@@ -60,6 +63,11 @@ private:
   QLabel       *m_note        = nullptr;
 
   QVector<MouthApplyTarget> m_targets;
+  MouthCharacters m_characters;
+  //! The target the «Mouths» list has selected (an index into m_targets), -1.
+  int currentTarget() const;
+  //! The «Mouths» list for the character chosen; selects \p target if listed.
+  void fillTargets(int target = -1);
   //! L'utente ha scelto il bersaglio a mano: da quel momento l'accoppiamento
   //! automatico non ci mette piu' becco.
   //!

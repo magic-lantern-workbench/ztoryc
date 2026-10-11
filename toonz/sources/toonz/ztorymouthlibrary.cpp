@@ -22,6 +22,7 @@
 #include <QDialogButtonBox>
 #include <QFile>
 #include <QFileInfo>
+#include <QDateTime>
 #include <QHash>
 #include <QLabel>
 #include <QListWidget>
@@ -86,8 +87,11 @@ QHash<QString, Library> librariesByName() {
 }
 
 // Down the tree of sub-scenes from `top`, the first one called `name`: its
-// xsheet, and the names of the sub-scenes above it (outermost first).
-TXsheet *findSubScene(TXsheet *top, const QString &name, QStringList *above) {
+// xsheet, the names of the sub-scenes above it (outermost first) and, in
+// `columns`, the column of each step down — above ones, then its own.
+TXsheet *findSubScene(TXsheet *top, const QString &name, QStringList *above,
+                      QVector<int> *columns = nullptr) {
+  QVector<int> colPath;
   std::function<TXsheet *(TXsheet *, QStringList, QSet<TXsheet *> &, int)>
       walk = [&](TXsheet *xsh, QStringList path, QSet<TXsheet *> &seen,
                  int depth) -> TXsheet * {
@@ -106,14 +110,17 @@ TXsheet *findSubScene(TXsheet *top, const QString &name, QStringList *above) {
         if (!cl || done.contains(cell.m_level.getPointer())) continue;
         done.insert(cell.m_level.getPointer());
         const QString n = QString::fromStdWString(cell.m_level->getName());
+        colPath.push_back(c);
         if (n == name) {
           if (above) *above = path;
+          if (columns) *columns = colPath;
           return cl->getXsheet();
         }
         QStringList deeper = path;
         deeper << n;
         if (TXsheet *found = walk(cl->getXsheet(), deeper, seen, depth + 1))
           return found;
+        colPath.pop_back();
       }
     }
     return nullptr;
@@ -125,20 +132,74 @@ TXsheet *findSubScene(TXsheet *top, const QString &name, QStringList *above) {
 // The library of the sub-scene `sub`: the nearest sub-scene ABOVE it named as
 // a character's scene. The sub-scene's own name is no help — «sub» is
 // Tahoma's default, SOFIA and BRONTOLO both have one.
+// `inside`: the columns from the character's sub-scene down to `sub` — the
+// same steps lead to it in the character's own scene (libraryName below).
 bool libraryOfSubScene(TXsheet *top, const QString &sub,
-                       const QHash<QString, Library> &libs, Library *out) {
+                       const QHash<QString, Library> &libs, Library *out,
+                       QVector<int> *inside = nullptr) {
   QStringList above;
-  if (!findSubScene(top, sub, &above)) return false;
+  QVector<int> columns;
+  if (!findSubScene(top, sub, &above, &columns)) return false;
   for (int i = above.size() - 1; i >= 0; --i) {
     // Not the bare name: a scene brought into a shot takes a «_1».
     auto it = libs.constFind(ZtoryMouthLibrary::characterKey(above[i]));
     if (it == libs.constEnd()) it = libs.constFind(above[i].toLower());
     if (it != libs.constEnd()) {
       *out = it.value();
+      if (inside) *inside = columns.mid(i + 1);
       return true;
     }
   }
   return false;
+}
+
+// What the sub-scene is called in the character's OWN scene.  Bringing the
+// character into a shot that already has a sub-scene of the same name makes
+// Tahoma rename its copy: SOFIA's «sub» became «sub_3» in sh100, and her
+// sets — written for «sub» — were looked for under «sub_3» and not found
+// (Franco, 2026-10-11: «ho piu' set ma nello shot me ne vede solo uno»).  The
+// copy has the scene's structure, so the same columns lead to the original
+// sub-scene; its name is read there.  If the structure no longer matches
+// (the copy was edited), the shot's name, as before.
+QString libraryName(const Library &lib, const QVector<int> &inside,
+                    const QString &shotName) {
+  if (inside.isEmpty()) return shotName;
+  static QHash<QString, QString> cache;  // the scene file is read once
+  const QString file = lib.scene.getQString();
+  QString key = file + "|" +
+                QString::number(QFileInfo(file).lastModified().toSecsSinceEpoch());
+  for (int c : inside) key += "/" + QString::number(c);
+  auto hit = cache.constFind(key);
+  if (hit != cache.constEnd()) return hit->isEmpty() ? shotName : *hit;
+  QString found;
+  try {
+    ToonzScene scene;
+    scene.loadTnzFile(lib.scene);
+    TXsheet *xsh = scene.getXsheet();
+    for (int step = 0; xsh && step < inside.size(); step++) {
+      const int c = inside[step];
+      TXshColumn *col = (c < xsh->getColumnCount()) ? xsh->getColumn(c) : nullptr;
+      TXsheet *next = nullptr;
+      if (col && !col->isEmpty()) {
+        int r0 = 0, r1 = -1;
+        xsh->getCellRange(c, r0, r1);
+        for (int r = r0; r <= r1 && !next; r++) {
+          const TXshCell cell = xsh->getCell(r, c);
+          if (cell.isEmpty() || !cell.m_level) continue;
+          TXshChildLevel *cl = cell.m_level->getChildLevel();
+          if (!cl) continue;
+          if (step == inside.size() - 1)
+            found = QString::fromStdWString(cell.m_level->getName());
+          next = cl->getXsheet();
+        }
+      }
+      xsh = next;
+    }
+  } catch (...) {
+    found.clear();
+  }
+  cache.insert(key, found);
+  return found.isEmpty() ? shotName : found;
 }
 
 // How many frames the library's own copy of the sub-scene has (-1 unknown).
@@ -342,13 +403,18 @@ QVector<MouthLibraryItem> ZtoryMouthLibrary::pending(ToonzScene *scene) {
 
   for (const QString &sub : subs) {
     Library lib;
-    if (!libraryOfSubScene(scene->getXsheet(), sub, libs, &lib)) continue;
+    QVector<int> inside;
+    if (!libraryOfSubScene(scene->getXsheet(), sub, libs, &lib, &inside))
+      continue;
+    // The library knows the sub-scene by ITS name (libraryName).
+    const QString libSub = libraryName(lib, inside, sub);
     MouthMap shotMap, libMap;
     if (!ZtoryMouthMap::load(scenePath, sub, shotMap)) continue;
-    ZtoryMouthMap::load(lib.scene, sub, libMap);  // none yet is fine
+    ZtoryMouthMap::load(lib.scene, libSub, libMap);  // none yet is fine
     MouthLibraryItem item;
     item.character = lib.character;
     item.subScene  = sub;
+    item.libSubScene = libSub;
     item.label     = QObject::tr("%1 ▸ %2 (sub-scene)").arg(lib.character, sub);
     item.shotOwner = scenePath;
     item.libOwner  = lib.scene;
@@ -356,7 +422,7 @@ QVector<MouthLibraryItem> ZtoryMouthLibrary::pending(ToonzScene *scene) {
     if (item.added.isEmpty() && item.changed.isEmpty()) continue;
     // Drawings made in the shot: the set would point at frames the
     // library's sub-scene does not have.
-    const int frames = librarySubSceneFrames(lib.scene, sub);
+    const int frames = librarySubSceneFrames(lib.scene, libSub);
     if (frames >= 0) {
       for (const QVector<MouthSet> *v : {&item.added, &item.changed})
         for (const MouthSet &s : *v)
@@ -407,8 +473,13 @@ void ZtoryMouthLibrary::showPublishDialog(QWidget *parent, bool onSave) {
   for (int i = 0; i < items.size(); i++) {
     if (chosen[i].isEmpty()) continue;
     QString why;
-    if (mergeInto(items[i].libOwner, items[i].subScene, items[i].shotOwner,
-                  chosen[i], &why))
+    // Into the library under ITS name for the sub-scene, and the sets with it.
+    QVector<MouthSet> sets = chosen[i];
+    const QString libSub = items[i].libSubScene.isEmpty() ? items[i].subScene
+                                                          : items[i].libSubScene;
+    if (!items[i].subScene.isEmpty())
+      for (MouthSet &s : sets) s.subScene = libSub;
+    if (mergeInto(items[i].libOwner, libSub, items[i].shotOwner, sets, &why))
       done << QObject::tr("%1: %2 set(s)").arg(items[i].label).arg(chosen[i].size());
     else
       failed << QObject::tr("%1: %2").arg(items[i].label, why);
@@ -453,10 +524,16 @@ bool ZtoryMouthLibrary::libraryMapForSubScene(ToonzScene *scene,
       QLatin1String("character"))
     return false;
   Library lib;
-  if (!libraryOfSubScene(scene->getXsheet(), sub, librariesByName(), &lib))
+  QVector<int> inside;
+  if (!libraryOfSubScene(scene->getXsheet(), sub, librariesByName(), &lib,
+                         &inside))
     return false;
-  if (!ZtoryMouthMap::load(lib.scene, sub, *map) || map->sets.isEmpty())
+  const QString libSub = libraryName(lib, inside, sub);
+  if (!ZtoryMouthMap::load(lib.scene, libSub, *map) || map->sets.isEmpty())
     return false;
+  // In this scene the sets belong to ITS sub-scene: saved here, they must not
+  // land on another one that happens to carry the library's name.
+  for (MouthSet &s : map->sets) s.subScene = sub;
   if (character) *character = lib.character;
   return true;
 }
@@ -520,6 +597,15 @@ void ZtoryMouthLibrary::showUpdateDialog(QWidget *parent, bool onOpen) {
       failed << QObject::tr("%1: %2").arg(items[i].label, why);
   }
   report(parent, title, done, failed);
+}
+
+QString ZtoryMouthLibrary::characterOfSubScene(ToonzScene *scene,
+                                               const QString &sub) {
+  if (!scene) return QString();
+  Library lib;
+  if (!libraryOfSubScene(scene->getXsheet(), sub, librariesByName(), &lib))
+    return QString();
+  return lib.character;
 }
 
 QString ZtoryMouthLibrary::characterKey(const QString &subSceneName) {
