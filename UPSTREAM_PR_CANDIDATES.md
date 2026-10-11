@@ -460,6 +460,45 @@ not portable.
 - ✅ **CRASH: tool option controls never unregister from the tools' properties** — `include/tproperty.h`, `common/tproperty.cpp`. Every `ToolOptionControl` subclass calls `m_property->addListener(this)` in its constructor (`tnztools/tooloptionscontrols.cpp`, 15 sites) and nothing ever calls `removeListener`. The tools — and their properties — live for the whole session; the tool options bars do not (one per room, rebuilt when rooms are re-applied). A destroyed bar leaves its controls registered, and the next `notifyListeners()` calls freed memory. **Caught under lldb** (debug build, MallocScribble/PreScribble): crash in `TProperty::notifyListeners` from `PlasticTool::onSelectionChanged` on a column switch, the property (`vertexName`) had 8 listeners, the first pointing at reallocated memory (`0xaaaaaaaa…`). Fix at the root, for every control: `TProperty::Listener` keeps the properties it listens to and unregisters in its destructor (inline — a nested class is not exported from the DLL on Windows); `~TProperty` removes itself from its listeners; copy/assignment keep the old semantics with the bookkeeping; `notifyListeners` iterates a copy. *(Our trigger was Ztoryc re-applying rooms on opening a character scene; the missing unregister is stock code — to reproduce on stock: rebuild a room's tool options bar, then change a tool property.)*
 - ❓ **PSD layer load leaves the file open on failure** — `common/psdlib/psd.cpp`, `TPSDReader::load`. `openFile(); doImage(); fclose(m_file);` all inside a `try` whose `catch (...)` swallows: if `doImage` throws, `fclose` is skipped. On Windows the PSD stays locked — also for Photoshop. Fix: `m_file = nullptr` after the normal close, `fclose` in the `catch` when still open. *(Diagnosed by review, not reproduced.)*
 
+#### ✨ New (2026-10-11)
+
+- ⚠️ **Use-after-free in the palette viewer when a scene from another project
+  is opened** — `toonz/iocommand.cpp`, `IoCmd::loadScene()`, the
+  `if (sceneProject && !sceneProject->isCurrent())` block
+  (`upstream/master:2019`). It calls `FullColorPalette::instance()->clear()`,
+  which releases the raster palette — but on an empty column, with autocreate on
+  and raster as the default level type, `TApp::updateCurrentLevel()`
+  (`tapp.cpp:~447`) has made **that very palette** the current level palette.
+  Measured: same address, refcount 1, so `clear()` deletes it while the palette
+  viewers still hold a raw `TPalette::Page*`. Any repaint before the load ends
+  reads freed memory, and the load itself opens one: the «It is not possible to
+  load file» box (`ToonzScene::loadResources`) runs its own event loop. Caught
+  under lldb in `PageViewer::paintEvent` (`paletteviewergui.cpp:624`) with the
+  palette pointer `0x0053002000300033` — UTF-16 text, the freed block reused.
+  Fix: `getCurrentLevelPalette()->setPalette(nullptr)` right before the
+  `clear()`. Ztoryc `e3ea681fc` (branch `fix/palette-uaf-project-switch`,
+  `f3bb464fb`). The `clear()` in `newScene()` (`upstream/master:1417`) has the
+  same shape, not seen crashing. *(Diagnosed and fixed on Ztoryc; code identical
+  upstream, **not yet reproduced on stock**: needs a scene from another project
+  with a missing file, opened while an empty column is current, and a repaint
+  during the load — intermittent, it took a macOS privacy prompt to trigger it
+  reliably.)*
+
+---
+
+- ⚠️ **`PageViewer` draws a palette it does not own** — `toonzqt/paletteviewergui.cpp`,
+  `PageViewer::setPage` / `paintEvent`. The viewer keeps only a raw
+  `TPalette::Page *m_page`; any palette freed elsewhere while shown is painted
+  from freed memory. Two crashes on Ztoryc on 2026-10-11: the project switch
+  above, and one opening a scene (after the load, in the main loop: the page's
+  style ids were garbage), not reproduced. Fix: the viewer also holds a
+  `TPaletteP` to the palette of its page (it cannot be freed while shown); a
+  diagnostic line is written when the viewer is its last holder. Ztoryc
+  `e32b865c3`. Generic hardening, independent of the cause. *(Not reproduced
+  on stock.)*
+
+---
+
 ### 2.2 — Features that can go upstream as they are
 
 - 🟡 **Alt (⌥) + middle-drag = the Rotate tool, held** — `toonz/sceneviewerevents.cpp`

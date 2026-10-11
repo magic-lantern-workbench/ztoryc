@@ -94,20 +94,6 @@ degli status).
   2026-06-13 — e su RGBA lo stesso problema si ripresenta senza nemmeno il
   tone che nel fill nativo dà la direzionalità.
   **Non riproporlo.** Si riapre solo se lo riapre lui.
-- **La tendina delle bocche mostra i livelli di tutti i personaggi — SI LASCIA
-  COSI'** (Franco, 2026-08-28, dopo aver visto i set di SOFIA mentre lavorava
-  sul lupo): *«quando le mappo lo faccio nella scena del singolo character
-  quindi non dovrebbe essere una situazione che si verifica troppo spesso e
-  visto che i set hanno anche il nome del personaggio potremmo lasciarlo
-  cosi'»*. Cioe': la mescolanza c'e', ma si vede solo in una scena con piu'
-  personaggi mappati insieme, che non e' come si lavora. **Non riproporre il
-  raggruppamento per personaggio nella tendina.**
-  Quello che invece E' stato corretto (commit `df4df3a1a`): una sotto-scena non
-  eredita piu' la mappa di un omonimo, e c'e' la casella «only mouth levels».
-  Resta aperto, ma come lavoro a se' e non come difetto: **collegare la
-  sotto-scena al `characterUuid` registrandolo all'import** — oggi non si puo'
-  dedurre, `TXshChildLevel` ha solo nome e icona e i `<target>` del `.zmouth`
-  sono soli numeri di fotogramma.
 - **I crash e i problemi sulle SCENE VECCHIE** (2026-08-14): *«per quanto
   riguarda i crash e i problemi con scene vecchie lascerei stare, vediamo se
   ricapita lavorandoci»*. Coperti da questa decisione:
@@ -176,6 +162,29 @@ degli status).
 ---
 
 ## 🎬 Ztoryc — storyboard, animatic, thumbs
+
+### 🆕 2026-10-11 — aperti dalla sessione (rilascio 0.17 il 12/10)
+
+- **Rilascio 0.17 (minor) il 2026-10-12**: si parte dalla review con i subagent (`ztoryc-reviewer` +
+  `license-guard`) su TUTTI i commit dalla 0.16.2 — eccezione alla pausa dei subagent decisa da Franco.
+  Nelle note: il `.ztoryc` si scrive col ⌘S; la domanda sul tipo di scena (popup + Workflow > Scene
+  Type…); la riga «Scene:» alla creazione; nelle bocche prima il personaggio, poi i suoi set.
+- **Prove a mano che restano** del rifacimento shot (`docs/SHOT_DOCUMENT_PLAN.md`): Add accanto a una
+  colonna audio; Delete dal Board stando dentro uno shot; Cut → Paste di uno shot con un disegno fatto
+  dentro; Copy/Cut/Paste incrociati Board ↔ Animatic.
+- **Crash della palette su sh280 (Messina) — causa ignota.** `PageViewer::paintEvent` su una pagina di
+  palette liberata, dopo il caricamento, non riprodotto (copia con i disegni, vero con lldb). Prevenuto da
+  `e32b865c3` (il viewer tiene la palette); se capita il caso, `crash/palette_watch.log` scrive quale
+  palette. Il gemello in `IoCmd::newScene` (`FullColorPalette::clear()` senza stacco) non e' mai stato
+  visto crashare.
+- **Piccoli, da osservare**: ogni apertura riscrive `production.ztrack` con gli `<alias>` in ordine diverso
+  (QHash: stesso contenuto, file riscritto — rumore su Drive); nella tendina «Character» delle bocche
+  compaiono anche le sotto-scene di sfondo (prezzo dell'includere i personaggi fatti nella scena);
+  il Save As di una scena SHOT non crea il `.ztoryc` della scena nuova (gia' cosi' su master prima del
+  rifacimento: da decidere se serve).
+- **Copie di prova** in `reference/test_projects/`: `messina_full` (99 scene, disegni di sh100/sh260/sh280
+  e dello storyboard, Kitsu tolto), `messina_copy` e `navcrash_test` con `scenes/scenes.xml` aggiunto.
+  Gli script in `scenetest/` impostano la copia come progetto corrente prima di lanciare.
 
 ### 🆕 2026-09-26 — il `.ztoryc`: estrazione, prove, versione del formato (P1 prima del congelamento)
 
@@ -1548,6 +1557,23 @@ bocca sul viso), che riempie in automatico il `DESTINAZIONE` dello script.
 ---
 
 ## 🗂️ Kitsu / produzione
+
+### 🆕 2026-10-06 — Cut + Paste di uno shot e i dati del production.ztrack (P2, review 0.16.2 D1)
+
+Dalla 0.16.2 Cut + Paste riporta lo shot intero nel `.ztoryc` (testi, uuid, tecnica, task, numero in
+Keep). **Non** riporta i dati che stanno solo nel `ProjectShot` del production.ztrack: `kitsuShotId`,
+`breakdown`, `hasBreakdownBase`, `breakdownBaseShotId`, `breakdownBase`. Il salvataggio fatto dal Cut
+(`onDeleteShot` → `saveZtoryc` → `publishShotsToProjectDb`, ztorymodel.cpp ~1969) toglie la voce dal
+tracker; il Paste la ricrea con sola tecnica e task. Non è una regressione (la 0.16.1 perdeva tutto).
+- **Da collaudare** su una scena di prova collegata al tracker, con un breakdown compilato: Cut + Paste,
+  poi guardare il production.ztrack.
+- Strade: tenere in sospeso il `ProjectShot` finché la voce è nella clip, oppure copiarlo nel
+  `ZtoryClipEntry` insieme allo `ShotData`. Con la copia unica dei dati (`docs/SHOT_DOCUMENT_PLAN.md`)
+  il problema si sposta nel passo 5 (operazioni uniche).
+- **2026-10-07, sul ramo `feature/shot-document`: probabilmente risolto dal passo 3b.** Il Cut non salva più
+  (il `.ztoryc` si scrive solo col ⌘S), quindi non toglie la voce dal tracker mentre lo shot è nella clip; al ⌘S
+  dopo il Paste lo shot ha lo stesso uuid e la pubblicazione ritrova il suo `ProjectShot`. Resta vero se si
+  salva FRA Cut e Paste. Da verificare con la prova sopra, sul ramo.
 
 ### 🎯 DECISO 2026-09-27 — piu' props nello stesso PSD: il file entra intero, come un set
 

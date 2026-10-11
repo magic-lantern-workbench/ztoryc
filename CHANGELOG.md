@@ -1,3 +1,106 @@
+## [2026-10-11] — copia unica degli shot su master; tipo di scena; bocche per personaggio; due crash della palette
+
+### Added
+- **Tipo di scena** (`13a423a44`, decisione di Franco): una scena salvata senza `.ztoryc` non e' piu' presa per
+  storyboard. E' «non classificata» (trattata come scena semplice: il Board non rinomina, non scrive, non
+  pubblica) e all'apertura compare la domanda: Storyboard (con la domanda del tracker), Shot scelto dalla lista
+  del tracker (gli shot gia' coperti in grigio col nome della loro scena), Personaggio, Scena semplice col suo
+  workflow. Nuovo ruolo `role="plain"` (+ `workflow=`); Workflow > Scene Type… riclassifica (conferma e copia
+  `.bak-*` quando si perde qualcosa, offerta di togliere dal tracker gli shot pubblicati); il menu del tasto
+  destro della finestra di avvio usa lo stesso popup; in Auto le scene semplici si aprono nel loro workflow.
+- **Riga «Scene:» nella creazione** (`109104bd1`): con un workflow di disegno si sceglie scena semplice o uno
+  shot del tracker; uno shot che ha gia' la sua scena disattiva Create e offre «Open its scene».
+- **Bocche: prima il personaggio** (`01cda2297`): tendina «Character» in ZtoRig ▸ Mouths e in Assign Mouth
+  Drawings — i personaggi dello shot (uno per sotto-scena, anche quelli fatti nella scena) + «Other levels»;
+  livelli e set solo del personaggio scelto.
+
+### Fixed
+- **Copia unica dei dati degli shot su master** (`7f1a6d6ad`): collaudata prima del merge su copie (scene shot e
+  personaggio di Messina e Arquata, Production Tracker, Send to Board).
+- **Crash della palette al cambio progetto** (`e3ea681fc`, codice Tahoma, candidato upstream): `loadScene`
+  liberava la palette raster mostrata nei viewer (colonna vuota + autocreate raster); un repaint durante il
+  caricamento leggeva memoria liberata. Preso sotto lldb (palette = testo UTF-16).
+- **Il viewer tiene la palette che mostra** (`e32b865c3`, Tahoma): secondo crash dello stesso tipo aprendo sh280
+  di Messina, non riprodotto; ora non puo' accadere, e `crash/palette_watch.log` registra quale palette.
+- **Dati di un progetto finiti in un altro** (`b94276b03`): senza Board, una scena personaggio/shot teneva i dati
+  della scena precedente; su copie, gli asset di Arquata finivano nel tracker di Messina. Ora carica il tracker
+  del suo progetto.
+- **Storyboard «solo locale» pubblicato all'apertura** (`aec1e4fe9`, gia' su master prima).
+- **Bocche negli shot** (`95c903edc`): PRINCENERENTOLA riceveva i set di SOFIA (ripiego per nome); il nome di una
+  sotto-scena rinominata dall'import si ritrova in libreria per posizione.
+
+### Notes
+- **Incidente reale evitato durante le prove**: uno script di prova lanciava Ztoryc col progetto VERO di Arquata
+  come corrente: tracker riscritto all'avvio con lo stesso contenuto (verificato riga per riga). Gli script ora
+  impostano la copia e controllano che i progetti veri non siano nemmeno riscritti.
+- Le copie di prova `navcrash_test`/`messina_copy` si aprivano nel progetto sandbox: mancava `scenes/scenes.xml`.
+- SCANOSS: falso positivo su `paletteviewergui.cpp` (copia di Tahoma in «otx»), push con `SKIP_LICENSE_SCAN=1`
+  col si' di Franco.
+- Review inline: `~/ZtorYc/reviews/2026-10-11_*.md`; quella completa coi subagent e' domani, prima della 0.17.
+
+### Upstream candidates
+- `iocommand.cpp` (stacco palette prima di `FullColorPalette::clear()`), `paletteviewergui.cpp` (il viewer tiene
+  la palette): in `UPSTREAM_PR_CANDIDATES.md`.
+
+## [2026-10-10] — incidente: la build del ramo feature/shot-document ha svuotato il tracker di Messina
+
+### Fixed (ramo, `4aafacd3a`)
+- **production.ztrack di Messina svuotato il 2026-10-07 alle 18:51** (70 shot, 42 asset, 11 storyboard, i
+  legami Kitsu): Franco lavorava sugli shot con la build del ramo; uno shot aperto in Cutout (nessun Board)
+  faceva leggere al modello il sidecar dello shot, che azzerava i dati di progetto senza ricaricarli, e il primo
+  salvataggio del DB li ha scritti. **Recuperato** dalla cronologia di Drive (versione di prima delle 18:51),
+  rimesso il 2026-10-10; il file vuoto resta come `production.ztrack.vuoto_20261007`. Correzione: il modello
+  legge da sé solo le scene storyboard; `saveProjectDb` rifiuta un DB senza shot/asset/storyboard sopra uno che
+  ne ha. Verificato su una copia di Messina; rete di sicurezza identica.
+- Il cane da guardia dei dialoghi della modalità di prova parte all'avvio dell'applicazione (anche senza Board).
+
+### Notes
+- Due crash il 2026-10-07 (17:08 sh240, 18:25 sh250), log persi (cartella dei crash ricreata alle 19:03):
+  attribuiti allo stesso stato, non provati. Il ramo NON va su master prima di una sessione vera su copie di
+  scene shot e personaggio.
+- Lezione: le scene shot hanno nel `.ztoryc` il percorso ASSOLUTO del tracker vero — una copia per prova va
+  ricollegata alla copia.
+
+## [2026-10-06/07] — rilascio 0.16.2; copia unica dei dati degli shot (ramo feature/shot-document, passi 0-6)
+
+Due giorni sul Mac. **Master**: crash del Navigator dopo il «+» dell'Animatic e i tre sospetti dell'audit
+(`afc2b8365` … `26b4d86b6`), rilascio **0.16.2** (`c42ff976b`, note unite di 0.16/0.16.1/0.16.2; la 0.16.1
+cancellata da Franco, zero download). **Ramo `feature/shot-document`** (non ancora su master, decide Franco):
+il rifacimento deciso da Franco il 6/10 — «i dati degli shot hanno una sola copia, nel modello» — passi 0-6 di
+`docs/SHOT_DOCUMENT_PLAN.md`, da `031fbd53b` a `b76718ab3`. Rete di sicurezza (`ZTORYC_ROUNDTRIP`, sei storyboard
+veri) identica a ogni passo. Review inline (niente subagent per qualche giorno, richiesta di Franco).
+
+### Fixed (master, 0.16.2)
+- **Crash del Navigator** dopo il «+» dell'Animatic (indice oltre la fine del modello). **Collaudato.**
+- Cut + Paste dal Board riporta lo shot intero (testi, uuid) e vale come uno spostamento anche per il numero;
+  il Paste di un taglio rimette i livelli nel cast; il Delete esce dalla sotto-scena prima di cancellare;
+  uuid nel modello per identità, non per posizione; i testi passano fra due Board solo sullo stesso shot.
+
+### Modified (ramo feature/shot-document)
+- **Una sola copia dei dati degli shot**, nel modello: i tre Board (uno per room) e il Navigator lavorano sugli
+  stessi oggetti; il modello riconosce gli shot per colonna dello xsheet (anche le Copy della stessa sotto-scena).
+- **Il `.ztoryc` si scrive solo col salvataggio della scena** (decisione di Franco, 6/10): prima il Board lo
+  riscriveva a ogni modifica, anche a ogni tasto, mentre il `.tnz` restava quello salvato — dopo Copy + riordino
+  + Revert l'originale di una Copy perdeva i suoi testi. Ora le modifiche mettono l'asterisco alla scena,
+  chiudere senza salvare chiede, Revert e recupero rimettono `.tnz` e `.ztoryc` dello stesso momento.
+  **Collaudato su navtest1.**
+- **Save As** scrive il `.ztoryc` della copia (prima no). **Il recupero** dopo un crash porta anche il `.ztoryc`.
+- **Senza Board** (flusso Cutout) il modello legge e scrive il `.ztoryc` da sé. **Collaudato.**
+- **Un'unica implementazione delle operazioni sugli shot** (`ZtoryShotOps`) per Board e Animatic — ogni coppia si
+  comportava diversamente: il Merge del Board allungava di un fotogramma per ogni shot unito; Delete e Cut
+  dall'Animatic lasciavano livelli orfani nel cast (il blocco di Export to Board); Add e Paste senza selezione
+  andavano dopo le colonne audio; Copy/Clone del Board prendevano la durata del primo pannello e chiudevano lo
+  shot in cui si disegnava. **Collaudati** Delete, riordino, Merge (48 = 24+24), Merge with Next, Cut/Paste,
+  Copy/Paste, Clone/Paste, Add, ognuno con undo/redo.
+- **L'undo delle operazioni sugli shot nel modello** (decisione di Franco, 7/10): funziona anche senza Board.
+
+### Notes
+- Restano da provare a mano: Add accanto a una colonna audio (navtest1 non ne ha); luce dal Navigator; Send to
+  Board; technique e task dal Production Tracker + salva + riapri.
+- La rete di sicurezza ora forza il flusso Storyboard e rimette quello di Franco (in Cutout le stanze non hanno
+  Board e la prova restava ferma); con lo schermo bloccato non può girare.
+- Candidati upstream: nessuno nuovo (tutto nei file Ztoryc).
+
 ## [2026-10-04] — rilascio 0.16.1; scheletro a scatto, pin sopra il controller, onion skin, audio delle dissolvenze, chiavi uguali ferme
 
 Sessione locale sul Mac, collaudata da Franco su CS2606 (sh230). Commit `05164ec0f`, `9606578e9`, `0656a2ae3`,
