@@ -3637,8 +3637,11 @@ void StoryboardPanel::loadZtoryc() {
   // Publish this storyboard's shots into the project DB so the Production
   // Tracker can aggregate across multiple storyboards. Skip role="shot" scenes
   // (exported shot .tnz from B3c): they are consumers of the project DB, not
-  // sources of the shot list.
-  if (sceneRole == "storyboard") {
+  // sources of the shot list.  Nor a storyboard the user kept "local only":
+  // saveZtoryc already respects that answer, opening the scene did not and
+  // published it anyway (found 2026-10-11).
+  if (sceneRole == "storyboard" &&
+      !ZtoryModel::instance()->shotDocumentState().trackerOff) {
     QString src = QFileInfo(path).fileName();
     if (!src.isEmpty()) {
       {
