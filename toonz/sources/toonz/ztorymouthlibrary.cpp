@@ -33,6 +33,7 @@
 #include <QVBoxLayout>
 
 #include <functional>
+#include <cstdio>
 
 namespace {
 
@@ -200,6 +201,135 @@ QString libraryName(const Library &lib, const QVector<int> &inside,
   }
   cache.insert(key, found);
   return found.isEmpty() ? shotName : found;
+}
+
+// The library recognised by WHAT the sub-scene holds, when its name and the
+// names above it say nothing.  sh370 (Franco, 2026-10-12): SOFIA's chain was
+// SH030 → sub_6 → SOFIA → sub_5 …; taking one nesting out removed «SOFIA»,
+// the only name that told whose mouths they were, and the shot saw one set
+// instead of nine.  The mouth drawings did not change: same files as in the
+// character's own scene.  So: the files of the levels right inside `sub`
+// (by file name — Tahoma renames a level «…_1» on import, the file keeps its
+// name), looked for in each character's scene; the first scene holding them
+// is the library, and the sub-scene holding them there names the sets.
+bool libraryByContent(TXsheet *top, const QString &sub,
+                      const QHash<QString, Library> &libs, Library *out,
+                      QString *libSub) {
+  TXsheet *xsh = findSubScene(top, sub, nullptr);
+  if (!xsh) {
+    if (qEnvironmentVariableIsSet("ZTORYC_SCENETEST"))
+      fprintf(stderr, "[ZTORY] bycontent '%s': sub-scene not found\n", qPrintable(sub));
+    return false;
+  }
+  QSet<QString> files;
+  for (int c = 0; c < xsh->getColumnCount(); c++) {
+    int r0 = 0, r1 = -1;
+    xsh->getCellRange(c, r0, r1);
+    for (int r = r0; r <= r1; r++) {
+      const TXshCell cell = xsh->getCell(r, c);
+      if (cell.isEmpty() || !cell.m_level || cell.m_level->getChildLevel())
+        continue;
+      const QString f = QString::fromStdWString(
+          cell.m_level->getPath().withoutParentDir().getWideString());
+      if (!f.isEmpty()) files.insert(f.toLower());
+      break;
+    }
+  }
+  static const bool diag = qEnvironmentVariableIsSet("ZTORYC_SCENETEST");
+  if (diag)
+    fprintf(stderr, "[ZTORY] bycontent '%s': %d files (%s), %d libraries\n",
+            qPrintable(sub), files.size(),
+            qPrintable(QStringList(files.values()).join(",")), libs.size());
+  if (files.isEmpty()) return false;
+  // Per character scene: drawing file → the sub-scene holding it.  Read once
+  // per version of the file, like libraryName().
+  static QHash<QString, QHash<QString, QString>> index;
+  // The library holding MOST of the drawings, not the first holding one: a
+  // generic drawing («A», a..png) is in several characters' scenes, and the
+  // first match picked another character, with no sets (sh370, 2026-10-12).
+  int bestScore = 0;
+  bool tie      = false;
+  for (auto it = libs.constBegin(); it != libs.constEnd(); ++it) {
+    const QString file = it.value().scene.getQString();
+    const QString key =
+        file + "|" +
+        QString::number(QFileInfo(file).lastModified().toSecsSinceEpoch());
+    if (!index.contains(key)) {
+      QHash<QString, QString> map;
+      try {
+        ToonzScene scene;
+        scene.loadTnzFile(it.value().scene);
+        std::function<void(TXsheet *, int, QSet<TXsheet *> &)> walk =
+            [&](TXsheet *x, int depth, QSet<TXsheet *> &seen) {
+              if (!x || depth > 8 || seen.contains(x)) return;
+              seen.insert(x);
+              for (int c = 0; c < x->getColumnCount(); c++) {
+                int r0 = 0, r1 = -1;
+                x->getCellRange(c, r0, r1);
+                for (int r = r0; r <= r1; r++) {
+                  const TXshCell cell = x->getCell(r, c);
+                  if (cell.isEmpty() || !cell.m_level) continue;
+                  if (TXshChildLevel *cl = cell.m_level->getChildLevel()) {
+                    const QString name =
+                        QString::fromStdWString(cell.m_level->getName());
+                    TXsheet *in = cl->getXsheet();
+                    for (int cc = 0; in && cc < in->getColumnCount(); cc++) {
+                      int a = 0, b = -1;
+                      in->getCellRange(cc, a, b);
+                      for (int rr = a; rr <= b; rr++) {
+                        const TXshCell c2 = in->getCell(rr, cc);
+                        if (c2.isEmpty() || !c2.m_level ||
+                            c2.m_level->getChildLevel())
+                          continue;
+                        const QString f = QString::fromStdWString(
+                            c2.m_level->getPath().withoutParentDir()
+                                .getWideString()).toLower();
+                        if (!f.isEmpty() && !map.contains(f)) map.insert(f, name);
+                        break;
+                      }
+                    }
+                    walk(in, depth + 1, seen);
+                  }
+                  break;
+                }
+              }
+            };
+        QSet<TXsheet *> seen;
+        walk(scene.getXsheet(), 0, seen);
+      } catch (...) {
+        map.clear();
+      }
+      index.insert(key, map);
+    }
+    const QHash<QString, QString> &map = index.value(key);
+    if (diag) {
+      fprintf(stderr, "[ZTORY] bycontent   %s: %d drawings indexed\n",
+              qPrintable(QFileInfo(file).fileName()), map.size());
+    }
+    int score = 0;
+    QHash<QString, int> subVotes;  // the library sub-scene most of them are in
+    for (const QString &f : files) {
+      auto hit = map.constFind(f);
+      if (hit == map.constEnd()) continue;
+      score++;
+      subVotes[hit.value()]++;
+    }
+    if (score == 0 || score < bestScore) continue;
+    if (score == bestScore) {
+      tie = true;
+      continue;
+    }
+    bestScore = score;
+    tie       = false;
+    *out      = it.value();
+    if (libSub) {
+      int votes = 0;
+      for (auto v = subVotes.constBegin(); v != subVotes.constEnd(); ++v)
+        if (v.value() > votes) votes = v.value(), *libSub = v.key();
+    }
+  }
+  // Two characters equally plausible: better no library than the wrong one.
+  return bestScore > 0 && !tie;
 }
 
 // How many frames the library's own copy of the sub-scene has (-1 unknown).
@@ -525,12 +655,22 @@ bool ZtoryMouthLibrary::libraryMapForSubScene(ToonzScene *scene,
     return false;
   Library lib;
   QVector<int> inside;
-  if (!libraryOfSubScene(scene->getXsheet(), sub, librariesByName(), &lib,
-                         &inside))
-    return false;
-  const QString libSub = libraryName(lib, inside, sub);
-  if (!ZtoryMouthMap::load(lib.scene, libSub, *map) || map->sets.isEmpty())
-    return false;
+  QString libSub;
+  const QHash<QString, Library> libs = librariesByName();
+  if (libraryOfSubScene(scene->getXsheet(), sub, libs, &lib, &inside))
+    libSub = libraryName(lib, inside, sub);
+  if (qEnvironmentVariableIsSet("ZTORYC_SCENETEST"))
+    fprintf(stderr, "[ZTORY] mapfor '%s': by name -> '%s' (%s)\n", qPrintable(sub),
+            qPrintable(libSub), qPrintable(lib.character));
+  // By name failed, or found a library without sets for it: by content.
+  if (libSub.isEmpty() || !ZtoryMouthMap::load(lib.scene, libSub, *map) ||
+      map->sets.isEmpty()) {
+    *map = MouthMap();
+    if (!libraryByContent(scene->getXsheet(), sub, libs, &lib, &libSub))
+      return false;
+    if (!ZtoryMouthMap::load(lib.scene, libSub, *map) || map->sets.isEmpty())
+      return false;
+  }
   // In this scene the sets belong to ITS sub-scene: saved here, they must not
   // land on another one that happens to carry the library's name.
   for (MouthSet &s : map->sets) s.subScene = sub;
@@ -603,7 +743,10 @@ QString ZtoryMouthLibrary::characterOfSubScene(ToonzScene *scene,
                                                const QString &sub) {
   if (!scene) return QString();
   Library lib;
-  if (!libraryOfSubScene(scene->getXsheet(), sub, librariesByName(), &lib))
+  const QHash<QString, Library> libs = librariesByName();
+  QString libSub;
+  if (!libraryOfSubScene(scene->getXsheet(), sub, libs, &lib) &&
+      !libraryByContent(scene->getXsheet(), sub, libs, &lib, &libSub))
     return QString();
   return lib.character;
 }

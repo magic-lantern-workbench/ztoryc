@@ -513,31 +513,97 @@ MouthCharacters ZtoryMouthApply::characters(ToonzScene *scene) {
       const QString name = QString::fromStdWString(lv->getName());
       if (out.keys.contains(name)) continue;
       out.keys << name;
-      // Brought from a character's scene: the character's name (SOFIA_1 is
-      // SOFIA).  Made here: the column's name, which is what the user reads
-      // in the xsheet, else the sub-scene's.
-      auto lib = libs.constFind(ZtoryMouthLibrary::characterKey(name));
-      if (lib != libs.constEnd()) {
-        // The asset's name; with the scene's when they differ (in a real project
-        // the asset PRINCE points at PRINCESS_01.tnz).
-        const QString who = lib.value().first;
-        const QString scn = QFileInfo(lib.value().second.getQString()).completeBaseName();
-        out.labels.insert(name, who.compare(scn, Qt::CaseInsensitive) == 0
-                                    ? who
-                                    : QObject::tr("%1 (%2)").arg(who, scn));
-        out.libraryKeys.insert(name);
-      } else {
-        // The column's name, unless it is Tahoma's «Col4», which says nothing.
-        QString col;
-        if (TStageObject *so = top->getStageObject(top->getColumnObjectId(c)))
-          col = QString::fromStdString(so->getName());
-        static const QRegularExpression kDefault(QStringLiteral("^Col\\d+$"));
-        out.labels.insert(
-            name, (col.isEmpty() || kDefault.match(col).hasMatch())
-                      ? QObject::tr("sub-scene %1, column %2 (in this scene)")
-                            .arg(name).arg(c + 1)
-                      : QObject::tr("%1 (in this scene)").arg(col));
+      // The column's name, unless it is Tahoma's «Col4», which says nothing.
+      QString col;
+      if (TStageObject *so = top->getStageObject(top->getColumnObjectId(c)))
+        col = QString::fromStdString(so->getName());
+      static const QRegularExpression kDefault(QStringLiteral("^Col\\d+$"));
+      if (kDefault.match(col).hasMatch()) col.clear();
+      // WHO and WHERE, both: the character the column holds (brought from its
+      // scene: SOFIA_1 is SOFIA) and the column it is in, which is what the
+      // user reads in the xsheet.  Only the sub-scene right under the column
+      // used to be looked at: in sh370 the wolf showed as «LUPO» (its column,
+      // renamed SH020, unsaid) and SOFIA — one sub-scene deeper — as «SH030
+      // (in this scene)», so the list had one name of each kind and neither
+      // said both (Franco, 2026-10-12).  The character is now searched at any
+      // depth, the first found in column order.
+      QString libKey;  // the sub-scene matching a character's library
+      std::function<void(TXsheet *, int)> findChar = [&](TXsheet *xsh, int depth) {
+        if (!xsh || depth > 8 || !libKey.isEmpty()) return;
+        for (int cc = 0; cc < xsh->getColumnCount() && libKey.isEmpty(); cc++) {
+          int a = 0, b = -1;
+          xsh->getCellRange(cc, a, b);
+          for (int rr = a; rr <= b && libKey.isEmpty(); rr++) {
+            const TXshCell cell2 = xsh->getCell(rr, cc);
+            if (cell2.isEmpty() || !cell2.m_level) continue;
+            TXshChildLevel *sub = cell2.m_level->getChildLevel();
+            if (!sub) continue;
+            const QString n = QString::fromStdWString(cell2.m_level->getName());
+            if (libs.contains(ZtoryMouthLibrary::characterKey(n))) libKey = n;
+            else findChar(sub->getXsheet(), depth + 1);
+            break;  // one cell is enough: a column exposes one sub-scene
+          }
+        }
+      };
+      if (libs.contains(ZtoryMouthLibrary::characterKey(name)))
+        libKey = name;
+      else
+        findChar(cl->getXsheet(), 1);
+      // No sub-scene named as a character (a nesting taken out removed it):
+      // the character the DRAWINGS belong to, as the mouth library now finds
+      // it (ZtoryMouthLibrary, by content).
+      QString byContent;
+      if (libKey.isEmpty()) {
+        byContent = ZtoryMouthLibrary::characterOfSubScene(scene, name);
+        std::function<void(TXsheet *, int)> look = [&](TXsheet *xsh, int depth) {
+          if (!xsh || depth > 8 || !byContent.isEmpty()) return;
+          for (int cc = 0; cc < xsh->getColumnCount() && byContent.isEmpty(); cc++) {
+            int a = 0, b = -1;
+            xsh->getCellRange(cc, a, b);
+            for (int rr = a; rr <= b; rr++) {
+              const TXshCell cell2 = xsh->getCell(rr, cc);
+              if (cell2.isEmpty() || !cell2.m_level) continue;
+              if (TXshChildLevel *sub = cell2.m_level->getChildLevel()) {
+                byContent = ZtoryMouthLibrary::characterOfSubScene(
+                    scene, QString::fromStdWString(cell2.m_level->getName()));
+                if (byContent.isEmpty()) look(sub->getXsheet(), depth + 1);
+              }
+              break;
+            }
+          }
+        };
+        if (byContent.isEmpty()) look(cl->getXsheet(), 1);
       }
+      QString who = byContent;
+      if (!libKey.isEmpty()) {
+        auto lib = libs.constFind(ZtoryMouthLibrary::characterKey(libKey));
+        // The asset's name; with the scene's when they differ (in a real
+        // project the asset PRINCE points at PRINCESS_01.tnz).
+        const QString asset = lib.value().first;
+        const QString scn =
+            QFileInfo(lib.value().second.getQString()).completeBaseName();
+        who = asset.compare(scn, Qt::CaseInsensitive) == 0
+                  ? asset
+                  : QObject::tr("%1 (%2)").arg(asset, scn);
+        // Library lookups by group name hold only when the column IS the
+        // character's sub-scene; deeper ones are found by column path
+        // (ZtoryMouthLibrary::libraryName).
+        if (libKey == name) out.libraryKeys.insert(name);
+      }
+      QString label;
+      if (!who.isEmpty())
+        label = (col.isEmpty() ||
+                 (!libKey.isEmpty() && col.compare(libKey, Qt::CaseInsensitive) == 0) ||
+                 col.compare(who, Qt::CaseInsensitive) == 0)
+                    ? who
+                    : QObject::tr("%1 — column %2").arg(who, col);
+      else
+        label = col.isEmpty()
+                    ? QObject::tr("sub-scene %1, column %2 (in this scene)")
+                          .arg(name)
+                          .arg(c + 1)
+                    : QObject::tr("%1 (in this scene)").arg(col);
+      out.labels.insert(name, label);
       out.groupOf.insert(lv, name);
       QSet<TXsheet *> seen;
       claim(cl->getXsheet(), name, 1, seen);
