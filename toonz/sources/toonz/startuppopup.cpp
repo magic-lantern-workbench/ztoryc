@@ -60,6 +60,7 @@
 #include <QPainter>
 #include <QRegularExpression>
 #include <QFile>
+#include <QDateTime>
 #include <QScrollBar>
 #include <QMouseEvent>
 #include <QDesktopServices>
@@ -1404,6 +1405,20 @@ void StartupPopup::onCreateButton() {
   s->getProperties()->getOutputProperties()->setFrameRate(fps);
   s->getCurrentCamera()->setSize(size);
   s->getCurrentCamera()->setRes(res);
+
+  // A sidecar already at this path belongs to the scene being overwritten, or
+  // to one created here and never saved (the role is written at creation).
+  // Left there, a new storyboard of the same name reopened as plain or shot
+  // and its Board texts were never saved, with no warning (review 0.17, I4).
+  // Put aside, not deleted: it may hold an old storyboard's texts.
+  {
+    const QString old = ZtorySceneClass::sidecarFor(
+        QString::fromStdWString(scenePath.getWideString()));
+    if (QFile::exists(old))
+      QFile::rename(old, old + ".bak-" +
+                             QDateTime::currentDateTime().toString(
+                                 "yyyyMMdd-HHmmss"));
+  }
 
   // ---- Ztoryc: apply workflow + switch rooms ----
   int wfIdx = m_workflowCB->currentIndex();

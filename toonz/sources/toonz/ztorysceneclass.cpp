@@ -25,6 +25,7 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QSet>
 #include <QTimer>
 #include <QTreeWidget>
@@ -67,6 +68,72 @@ bool backupSidecar(const QString &sidecar) {
   return QFile::copy(sidecar, sidecar + ".bak-" + stamp);
 }
 
+// Whether \p tnz lives in the project whose Production Tracker is in memory.
+// A shot or character link is written against THAT tracker, so classifying a
+// scene of another project (from the start-up list) linked it to the wrong
+// one — and opening it then wrote one project's tracker into the other's, the
+// damage of 2026-10-07 by another road (review 0.17, B1).
+bool inCurrentProject(const QString &tnz) {
+  const QString dbPath  = ZtoryModel::instance()->projectDbPath();
+  const QString projDir = QFileInfo(dbPath).absolutePath();
+  return !dbPath.isEmpty() && !projDir.isEmpty() &&
+         QFileInfo(tnz).absoluteFilePath().startsWith(projDir + "/");
+}
+
+bool isOpenScene(const QString &tnz) {
+  return QFileInfo(tnz) == QFileInfo(currentScenePath());
+}
+
+// The Tracker answer a storyboard's sidecar holds (the two names the Board
+// writes, ZtoryModel::writeShotDocument).
+bool sidecarTrackerOff(const QString &sidecar) {
+  QFile f(sidecar);
+  if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
+  QXmlStreamReader xml(&f);
+  while (!xml.atEnd())
+    if (xml.readNext() == QXmlStreamReader::StartElement) {
+      const auto a = xml.attributes();
+      return a.value("productionTracker") == QLatin1String("off") ||
+             a.value("projectPublication") == QLatin1String("local");
+    }
+  return false;
+}
+
+// Changes only the Tracker answer in a storyboard's sidecar, keeping the shots
+// and texts it holds: for a scene that is not the open one, whose data is not
+// in memory to be written with ⌘S.
+bool setSidecarTrackerOff(const QString &sidecar, bool off, QString *error) {
+  QFile in(sidecar);
+  if (!in.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    if (error) *error = QObject::tr("cannot read %1").arg(QFileInfo(sidecar).fileName());
+    return false;
+  }
+  QString text = QString::fromUtf8(in.readAll());
+  in.close();
+  static const QRegularExpression kRoot("<ztoryc\\b[^>]*>");
+  const QRegularExpressionMatch m = kRoot.match(text);
+  if (!m.hasMatch()) {
+    if (error) *error = QObject::tr("%1 is not a .ztoryc").arg(QFileInfo(sidecar).fileName());
+    return false;
+  }
+  static const QRegularExpression kAttrs(
+      "\\s+(productionTracker|projectPublication)=\"[^\"]*\"");
+  QString root = m.captured(0);
+  root.remove(kAttrs);
+  if (off) {
+    const int close = root.endsWith("/>") ? root.size() - 2 : root.size() - 1;
+    root.insert(close, " productionTracker=\"off\" projectPublication=\"local\"");
+  }
+  text.replace(m.capturedStart(0), m.capturedLength(0), root);
+  QSaveFile out(sidecar);
+  if (!out.open(QIODevice::WriteOnly | QIODevice::Text) ||
+      out.write(text.toUtf8()) < 0 || !out.commit()) {
+    if (error) *error = QObject::tr("cannot write %1").arg(QFileInfo(sidecar).fileName());
+    return false;
+  }
+  return true;
+}
+
 // ── The dialog ───────────────────────────────────────────────────────────────
 
 class SceneClassDialog final : public QDialog {
@@ -94,6 +161,7 @@ private:
   QComboBox *m_plainWorkflow;
   QPushButton *m_ok;
   QString m_scenePath;
+  bool m_ownProject = true;  // the scene is in the project of the Tracker
 };
 
 SceneClassDialog::SceneClassDialog(const QString &tnzPath, Role current,
@@ -141,7 +209,16 @@ SceneClassDialog::SceneClassDialog(const QString &tnzPath, Role current,
                         "Animatic."));
   m_tracker = new QCheckBox(
       QObject::tr("Show its shots in the project's Production Tracker"), this);
-  m_tracker->setChecked(hasTracker);
+  // The box starts from what the scene says, not from «the project has a
+  // Tracker»: Apply on a storyboard kept local, touching nothing, published
+  // it with the next ⌘S (review 0.17, I1).  The open scene's answer is in
+  // memory (it may not be saved yet), another scene's in its sidecar.
+  bool keptLocal = false;
+  if (current == Role::Storyboard)
+    keptLocal = isOpenScene(tnzPath)
+                    ? ZtoryModel::instance()->shotDocumentState().trackerOff
+                    : sidecarTrackerOff(ZtorySceneClass::sidecarFor(tnzPath));
+  m_tracker->setChecked(hasTracker && !keptLocal);
   m_tracker->setEnabled(hasTracker);
   m_tracker->setStyleSheet("margin-left: 22px;");
   lay->addWidget(m_tracker);
@@ -191,6 +268,22 @@ SceneClassDialog::SceneClassDialog(const QString &tnzPath, Role current,
   lay->addWidget(buttons);
 
   if (!hasTracker) m_group->button(int(Role::Shot))->setEnabled(false);
+  m_ownProject = inCurrentProject(tnzPath);
+  if (!m_ownProject) {
+    const QString why = QObject::tr(
+        "This scene is not in the project open now: it can be linked to a shot "
+        "or a character only with its own project open.");
+    for (Role r : {Role::Shot, Role::Character}) {
+      m_group->button(int(r))->setEnabled(false);
+      m_group->button(int(r))->setToolTip(why);
+    }
+    m_shots->setEnabled(false);
+    m_character->setEnabled(false);
+    auto *note = new QLabel(why, this);
+    note->setWordWrap(true);
+    note->setStyleSheet("color: gray;");
+    lay->insertWidget(lay->count() - 1, note);
+  }
 
   // The current role, or for a scene nobody classified the workflow it is
   // opened in: the likeliest answer, still to be confirmed.
@@ -278,7 +371,9 @@ void SceneClassDialog::updateState() {
   // The lists stay usable whatever is selected: picking from one IS choosing
   // its role (a disabled list could not be clicked to say "this shot").
   m_tracker->setVisible(r == Role::Storyboard);
-  m_ok->setEnabled(r != Role::Shot || !shotUuid().isEmpty());
+  const bool linked = r == Role::Shot || r == Role::Character;
+  m_ok->setEnabled((r != Role::Shot || !shotUuid().isEmpty()) &&
+                   (m_ownProject || !linked));
 }
 
 // ── Applying the answer ──────────────────────────────────────────────────────
@@ -289,12 +384,8 @@ void SceneClassDialog::updateState() {
 // to remove them.  Only for the project the Tracker holds: removing shots of
 // another project would be silent damage.
 void offerToUnpublish(const QString &tnz, QWidget *parent) {
-  ZtoryModel *m        = ZtoryModel::instance();
-  const QString dbPath = m->projectDbPath();
-  const QString projDir = QFileInfo(dbPath).absolutePath();
-  const bool sameProject =
-      !dbPath.isEmpty() && !projDir.isEmpty() &&
-      QFileInfo(tnz).absoluteFilePath().startsWith(projDir + "/");
+  ZtoryModel *m          = ZtoryModel::instance();
+  const bool sameProject = inCurrentProject(tnz);
   const QString source = QFileInfo(ZtorySceneClass::sidecarFor(tnz)).fileName();
   const int n = sameProject ? m->projectShotCountFromSource(source) : 0;
   if (n <= 0) return;
@@ -325,6 +416,18 @@ bool apply(const SceneClassDialog &dlg, const QString &tnz, Role current) {
   const Role next       = dlg.role();
   QString why;
   bool ok = true;
+  // The dialog already greys these out; refused here too, the damage being
+  // another project's tracker (B1).
+  if ((next == Role::Shot || next == Role::Character) && !inCurrentProject(tnz)) {
+    DVGui::warning(QObject::tr("This scene is not in the project open now: open "
+                               "its project to link it to a shot or a character."));
+    return false;
+  }
+  // With no Tracker in the project nothing was asked: «off» written now would
+  // keep the storyboard out of the Tracker the project may have later (I1).
+  const bool hasTracker =
+      QFile::exists(ZtoryModel::instance()->projectDbPath());
+  const bool keepLocal = hasTracker && !dlg.trackerOn();
 
   // What the old role kept in the sidecar is gone with the new one: say so,
   // and keep a copy.  A plain scene's sidecar holds nothing.
@@ -353,12 +456,23 @@ bool apply(const SceneClassDialog &dlg, const QString &tnz, Role current) {
   switch (next) {
   case Role::Storyboard:
     if (current == Role::Storyboard) {
-      // Same type: only the Tracker answer, which reaches the file with ⌘S.
-      ZtoryModel::instance()->shotDocumentState().trackerOff = !dlg.trackerOn();
-      ZtoryModel::instance()->markShotDocumentDirty();
-      return true;
+      // Same type: only the Tracker answer.  The open scene's reaches the file
+      // with ⌘S; another scene's is changed in its own sidecar — it used to
+      // land on the OPEN scene's state, and the chosen one kept its answer (I1).
+      if (!hasTracker) return true;
+      if (isOpenScene(tnz)) {
+        ZtoryModel::ShotDocumentState &st =
+            ZtoryModel::instance()->shotDocumentState();
+        if (st.trackerOff != keepLocal) {
+          st.trackerOff = keepLocal;
+          ZtoryModel::instance()->markShotDocumentDirty();
+        }
+        return true;
+      }
+      ok = setSidecarTrackerOff(sidecar, keepLocal, &why);
+      break;
     }
-    ok = ZtorySceneClass::declareStoryboard(tnz, !dlg.trackerOn(), &why);
+    ok = ZtorySceneClass::declareStoryboard(tnz, keepLocal, &why);
     break;
   case Role::Shot:
     ok = ZtorySceneClass::declareShot(tnz, dlg.shotUuid(),
@@ -392,7 +506,13 @@ bool apply(const SceneClassDialog &dlg, const QString &tnz, Role current) {
     offerToUnpublish(tnz, const_cast<SceneClassDialog *>(&dlg)->parentWidget());
   // The open scene is read again as what it now is: the Board, the model and
   // the workflow follow the sidecar exactly as when a scene is opened.
-  if (QFileInfo(tnz) == QFileInfo(currentScenePath())) {
+  if (isOpenScene(tnz)) {
+    // The answer goes into memory too, BEFORE the scene is read again: the
+    // Board keeps what memory holds about the scene over what the file says
+    // (loadZtoryc, restoreKeptScene), and gave back the old «tracker on» over
+    // the «off» just written — the next ⌘S published the shots (I2).
+    if (next == Role::Storyboard)
+      ZtoryModel::instance()->shotDocumentState().trackerOff = keepLocal;
     TApp::instance()->getCurrentScene()->notifySceneSwitched();
     // A new storyboard's shots (and anything typed in the Board meanwhile)
     // are only in memory: the asterisk, so closing asks to save them.

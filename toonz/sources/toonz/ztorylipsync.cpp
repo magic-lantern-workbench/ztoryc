@@ -438,6 +438,8 @@ bool ZtoryLipSync::startWhisper() {
   m_proc->start(exe, args);
   if (!m_proc->waitForStarted(5000)) {
     m_running = false;
+    QFile::remove(m_whisperWav);
+    m_whisperWav.clear();
     emit finished(false, {}, tr("Could not start whisper-cli."));
     return false;
   }
@@ -619,6 +621,11 @@ void ZtoryLipSync::onProcessDone(int exitCode) {
     return;
   }
 
+  // The 16 kHz copy is ours whatever happened (review 0.17, M7).
+  if (!m_whisperWav.isEmpty()) {
+    QFile::remove(m_whisperWav);
+    m_whisperWav.clear();
+  }
   if (exitCode != 0) {
     // Il messaggio di whisper-cli e' su stderr; senza, l'utente riceve solo un
     // numero. E il 137 (SIGKILL) ha un significato preciso su macOS.
@@ -632,10 +639,6 @@ void ZtoryLipSync::onProcessDone(int exitCode) {
     return;
   }
 
-  if (!m_whisperWav.isEmpty()) {
-    QFile::remove(m_whisperWav);
-    m_whisperWav.clear();
-  }
   QFile f(m_jsonPath);
   if (!f.open(QIODevice::ReadOnly)) {
     // whisper-cli can fail and still exit 0 (an audio file it cannot read):

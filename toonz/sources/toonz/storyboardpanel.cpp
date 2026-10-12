@@ -3608,8 +3608,9 @@ void StoryboardPanel::loadZtoryc() {
       QFile pf(m_shotBackLinkProject);
       if (pf.exists()) {
         ZtoryModel *m = ZtoryModel::instance();
-        m->loadProjectDbFromPath(m_shotBackLinkProject);
-        if (!m_shotBackLinkUuid.isEmpty()) {
+        // false = a back-link to another project's tracker: not loaded (B1)
+        const bool own = m->loadProjectDbFromPath(m_shotBackLinkProject);
+        if (own && !m_shotBackLinkUuid.isEmpty()) {
           // The WIP of the task being worked on is set by
           // ZtoryModel::onSceneSwitchedAdvanceShot → ZtoryTaskFlow::shotOpened.
           // This used to do it too, on the chain's FIRST task — Storyboard —

@@ -62,6 +62,12 @@
 #include <QSettings>
 #include <climits>
 #include <functional>
+#include <cstdio>  // fprintf in the test modes
+#ifdef _WIN32
+#include <process.h>  // _exit
+#else
+#include <unistd.h>  // _exit
+#endif
 
 // ─── ZtoryNumbering ───────────────────────────────────────────────────────────
 // Internal helpers for the SH/SQ/P labelling system.
@@ -457,7 +463,7 @@ void ZtoryModel::onSceneSwitchedAdvanceShot() {
   if (role != "shot" || uuid.isEmpty() || projectDb.isEmpty()) return;
   if (!QFile::exists(projectDb)) return;
 
-  loadProjectDbFromPath(projectDb);
+  if (!loadProjectDbFromPath(projectDb)) return;
   // The rule itself lives in ZtoryTaskFlow (it used to be here AND, divergent,
   // in StoryboardPanel::loadZtoryc — which put Storyboard back to WIP).
   ZtoryTaskFlow::shotOpened(uuid, technique);
@@ -1617,6 +1623,14 @@ void ZtoryModel::saveProjectDb() {
 
   const QByteArray ours = serializeProjectDb();
   const QString key     = ZtoryLocks::canonicalPath(path);
+  // Memory read from ANOTHER tracker file must not be written over this one:
+  // the last belt of B1 (review 0.17).  A project with no file yet is seeded
+  // from a clean slate (loadProjectDb), so that case passes.
+  if (!m_dbBasePath.isEmpty() && key != m_dbBasePath && QFile::exists(path)) {
+    qWarning("[ZTORY] saveProjectDb BLOCKED: memory holds %s, not %s",
+             m_dbBasePath.toUtf8().constData(), path.toUtf8().constData());
+    return;
+  }
   // One instance at a time between reading the file and writing it back.
   QLockFile lock(ZtoryLocks::lockFilePath("ztrack", key));
   lock.setStaleLockTime(0);  // a crashed holder is detected by its pid
@@ -1922,10 +1936,25 @@ void ZtoryModel::reloadProjectDbIfChangedOnDisk() {
   emit taskStatusChanged();
 }
 
-void ZtoryModel::loadProjectDbFromPath(const QString &path) {
+bool ZtoryModel::loadProjectDbFromPath(const QString &path) {
+  // Only the open project's tracker.  The path comes from a shot's back-link,
+  // and a back-link to another project (a scene classified from another
+  // project, a copy of a project) loaded that tracker into memory — then the
+  // next save wrote it over THIS project's file (review 0.17, B1; the copies
+  // of 2026-10-07).  Opening a scene makes its project the current one, so
+  // the right back-link always names this file.
+  const TFilePath own = projectDbFilePath();
+  if (own == TFilePath() ||
+      ZtoryLocks::canonicalPath(path) !=
+          ZtoryLocks::canonicalPath(QString::fromStdWString(own.getWideString()))) {
+    qWarning("[ZTORY] back-link to another project's tracker ignored: %s",
+             path.toUtf8().constData());
+    return false;
+  }
   QFile file(path);
-  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
   readProjectDbBytes(path, file.readAll());
+  return true;
 }
 
 void ZtoryModel::loadProjectDb() {
@@ -3657,9 +3686,8 @@ void ZtoryModel::declareNewSceneByWorkflow() {
 void ZtoryModel::reloadProjectDataForScene(const QString &shotBackLink) {
   reconcileWithXsheet();
   resetProjectLevelDefaults();
-  if (!shotBackLink.isEmpty() && QFile::exists(shotBackLink))
-    loadProjectDbFromPath(shotBackLink);
-  else
+  if (shotBackLink.isEmpty() || !QFile::exists(shotBackLink) ||
+      !loadProjectDbFromPath(shotBackLink))
     loadProjectDb();
   emit productionReloaded();
 }

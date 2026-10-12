@@ -806,7 +806,7 @@ public:
   // for now it owns the team roster (truly project-wide, shared across the
   // project's scenes). Assets/techniques/shots will migrate here next.
   void loadProjectDb();                              // from current project folder
-  void loadProjectDbFromPath(const QString &path);  // B3c: load from explicit path
+  bool loadProjectDbFromPath(const QString &path);  // B3c: load from explicit path
   void saveProjectDb();
   // While held (a Kitsu Sync running), changes made on disk by another Ztoryc
   // are not read back into memory: they are merged at the next save as usual,
