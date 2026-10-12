@@ -89,6 +89,10 @@ public:
 void setPlayRange(int r0, int r1, int step, bool withUndo = true);
 
 bool getPlayRange(int &r0, int &r1, int &step);
+// Ztoryc: whether the render range follows the play range — the scene's flag
+// OR the Render Settings checkbox (a global preference, which the scene only
+// receives once that window has been opened in the session).
+bool isOutputSyncedWithPlayRange();
 
 bool isPlayRangeEnabled();
 

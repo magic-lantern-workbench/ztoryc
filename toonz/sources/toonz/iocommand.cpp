@@ -1,6 +1,7 @@
 #include <memory>
 
 #include "iocommand.h"
+#include "xsheetdragtool.h"  // isOutputSyncedWithPlayRange
 
 // Toonz includes
 #include "menubarcommandids.h"
@@ -1865,7 +1866,7 @@ bool IoCmd::saveScene(const TFilePath &path, int flags) {
   // file) and not when the write threw: promoting the thumbnails of a scene
   // that did not reach the disk would split the two again.
   if (sceneWritten && !saveSubxsheet)
-    ZtoryModel::instance()->notifySceneSaved();
+    ZtoryModel::instance()->notifySceneSaved(isAutosave);
   // Ztoryc: mouth sets made here and not in the character's library — offered
   // after a save by the user; not the autosave, not the export's sub-scene
   // saves (ztorymouthlibrary.h).
@@ -2493,9 +2494,14 @@ bool IoCmd::loadScene(const TFilePath &path, bool updateRecentFile,
     int oldR0, oldR1, step;
     scene->getProperties()->getPreviewProperties()->getRange(oldR0, oldR1, step);
     if (step < 1) step = 1;
-    if (out >= 0)
+    if (out >= 0) {
       scene->getProperties()->getPreviewProperties()->setRange(in, out, step);
-    else  // unset → disable play range
+      // The render range follows, as for any other change of the play range
+      // (XsheetGUI::setPlayRange): set here directly, the play range was the
+      // markers' and the render range stayed the one saved in the file.
+      if (XsheetGUI::isOutputSyncedWithPlayRange())
+        scene->getProperties()->getOutputProperties()->setRange(in, out, step);
+    } else  // unset → disable play range
       scene->getProperties()->getPreviewProperties()->setRange(0, -1, step);
   }
 

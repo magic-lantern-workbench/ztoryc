@@ -1,6 +1,7 @@
 
 
 #include "xsheetdragtool.h"
+#include "tenv.h"
 
 // Tnz6 includes
 #include "xsheetviewer.h"
@@ -343,6 +344,20 @@ public:
 
 //-----------------------------------------------------------------------------
 
+// The checkbox of Render Settings (outputsettingspopup.cpp).
+extern TEnv::IntVar SyncOutputWithPlayRange;
+
+bool XsheetGUI::isOutputSyncedWithPlayRange() {
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  if (scene &&
+      scene->getProperties()->getOutputProperties()->isSyncWithPlayRangeEnabled())
+    return true;
+  // The scene gets the flag only when Render Settings is opened: until then a
+  // play range changed here left the render range behind — sh330 rendered to
+  // 102 with Out at 175 and the box ticked (Franco, 2026-10-12).
+  return SyncOutputWithPlayRange != 0;
+}
+
 void XsheetGUI::setPlayRange(int r0, int r1, int step, bool withUndo) {
   if (r0 > r1) {
     r0 = 0;
@@ -357,9 +372,7 @@ void XsheetGUI::setPlayRange(int r0, int r1, int step, bool withUndo) {
   }
   ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
   scene->getProperties()->getPreviewProperties()->setRange(r0, r1, step);
-  if (scene->getProperties()
-          ->getOutputProperties()
-          ->isSyncWithPlayRangeEnabled())
+  if (XsheetGUI::isOutputSyncedWithPlayRange())
     scene->getProperties()->getOutputProperties()->setRange(r0, r1, step);
   TApp::instance()->getCurrentScene()->notifySceneChanged();
 }

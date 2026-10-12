@@ -353,6 +353,9 @@ void OutputSettingsPopup::onSyncWithPlayRangeChanged(int state) {
     if (r1 < r0) r1 = r0;
     m_startFld->setValue(r0 + 1);
     m_endFld->setValue(r1 + 1);
+    // Ztoryc: the fields alone were not the render range — setValue() does
+    // not emit editingFinished, so the render kept the old one (stock bug).
+    getProperties()->setRange(r0, r1, step);
   }
 }
 
@@ -1348,6 +1351,17 @@ void OutputSettingsPopup::updateField() {
   // start,end,step
   int r0 = 0, r1 = -1, step;
   prop->getRange(r0, r1, step);
+  // Ztoryc: with the box ticked the window shows — and the render uses — the
+  // play range, not the range saved last time (sh330: Out at 175, window and
+  // render at 102; Franco, 2026-10-12).
+  if (!m_isPreviewSettings && prop->isSyncWithPlayRangeEnabled()) {
+    int p0, p1, pStep;
+    scene->getProperties()->getPreviewProperties()->getRange(p0, p1, pStep);
+    if (p0 <= p1) {
+      r0 = p0, r1 = p1;
+      prop->setRange(r0, r1, step);
+    }
+  }
   if (r0 > r1) {
     if (!m_isPreviewSettings && prop->isSyncWithPlayRangeEnabled()) {
       // First time opening Render properties. If sync play range is enabled,
