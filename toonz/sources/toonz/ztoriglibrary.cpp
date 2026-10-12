@@ -363,6 +363,71 @@ struct Context {
   bool isLibraryScene = false;  // working in the character's own scene
 };
 
+// The character an xsheet IS, recognised by its meshes — when no sub-scene
+// is named as a character's scene.  sh370 (Franco, 2026-10-12): a nesting
+// taken out of SOFIA's column removed the sub-scene «SOFIA», and her poses
+// disappeared with it (the mouths had the same problem, fixed by their
+// drawings in ZtoryMouthLibrary).  A part's mesh fingerprint (meshPrintOf:
+// MD5 of the mesh files) is copied unchanged when the character is brought
+// into a shot, so the xsheet holding parts with a library's prints is that
+// character's own.  The library's prints are read once per version of its
+// scene.
+bool characterByMeshes(ToonzScene *scene, TXsheet *xsh,
+                       const QHash<QString, QPair<QString, TFilePath>> &chars,
+                       Context *ctx) {
+  if (!scene || !xsh || chars.isEmpty()) return false;
+  QSet<QString> here;
+  for (const Part &p : partsOf(scene, xsh))
+    if (!p.meshPrint.isEmpty()) here.insert(p.meshPrint);
+  if (here.isEmpty()) return false;
+  static QHash<QString, QSet<QString>> prints;  // scene file|mtime → prints
+  for (auto it = chars.constBegin(); it != chars.constEnd(); ++it) {
+    const QString file = it.value().second.getQString();
+    const QString key =
+        file + "|" +
+        QString::number(QFileInfo(file).lastModified().toSecsSinceEpoch());
+    if (!prints.contains(key)) {
+      QSet<QString> set;
+      try {
+        ToonzScene holder;
+        holder.loadTnzFile(it.value().second);
+        std::function<void(TXsheet *, int, QSet<TXsheet *> &)> walk =
+            [&](TXsheet *x, int depth, QSet<TXsheet *> &seen) {
+              if (!x || depth > 8 || seen.contains(x)) return;
+              seen.insert(x);
+              for (const Part &p : partsOf(&holder, x))
+                if (!p.meshPrint.isEmpty()) set.insert(p.meshPrint);
+              for (int c = 0; c < x->getColumnCount(); c++) {
+                int r0 = 0, r1 = -1;
+                x->getCellRange(c, r0, r1);
+                for (int r = r0; r <= r1; r++) {
+                  const TXshCell cell = x->getCell(r, c);
+                  if (cell.isEmpty() || !cell.m_level) continue;
+                  if (TXshChildLevel *cl = cell.m_level->getChildLevel())
+                    walk(cl->getXsheet(), depth + 1, seen);
+                  break;
+                }
+              }
+            };
+        QSet<TXsheet *> seen;
+        walk(holder.getXsheet(), 0, seen);
+      } catch (...) {
+        set.clear();
+      }
+      prints.insert(key, set);
+    }
+    const QSet<QString> &lib = prints.value(key);
+    for (const QString &m : here)
+      if (lib.contains(m)) {
+        ctx->character = it.value().first;
+        ctx->libScene  = it.value().second;
+        ctx->xsh       = xsh;
+        return true;
+      }
+  }
+  return false;
+}
+
 // The character being worked on: the scene itself when it is a character's
 // scene; in a shot, the sub-scene one is in — or the nearest above it —
 // named as a character's scene (the name the import gives it).
@@ -397,6 +462,19 @@ bool currentContext(Context *ctx) {
     // The character's own xsheet: the child entered at depth i.
     ctx->xsh = node->m_cl->getXsheet();
     return true;
+  }
+  // No name to go by: the meshes of the xsheet one is in, then of the ones
+  // above it.
+  // Only from inside a sub-scene: at the top of a shot one is in no
+  // character, and allContexts() must find every one of them.
+  if (stack->getAncestorCount() > 0 &&
+      characterByMeshes(scene, scene->getXsheet(), chars, ctx))
+    return true;
+  for (int i = stack->getAncestorCount() - 1; i >= 0; --i) {
+    AncestorNode *node = stack->getAncestorInfo(i);
+    if (node && node->m_cl &&
+        characterByMeshes(scene, node->m_cl->getXsheet(), chars, ctx))
+      return true;
   }
   return false;
 }
@@ -438,6 +516,11 @@ QVector<Context> allContexts() {
           ctx.xsh       = cl->getXsheet();
           out << ctx;
           continue;  // its insides are the character's, not another one
+        }
+        Context byMesh;
+        if (characterByMeshes(scene, cl->getXsheet(), chars, &byMesh)) {
+          out << byMesh;
+          continue;
         }
         walk(cl->getXsheet(), depth + 1);
       }

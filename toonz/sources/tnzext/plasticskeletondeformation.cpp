@@ -419,6 +419,23 @@ PlasticSkeletonDeformation::Imp::Imp(PlasticSkeletonDeformation *back,
 
     m_vds.insert(vdKey);
   }
+
+  // Ztoryc: what ZtoRig added to the deformation, which this copy predates.
+  // Without it every duplicate of a Plastic column — Explode / Collapse of a
+  // sub-scene, a cloned stage object — kept the skeleton and the animation and
+  // LOST the poses and correctives: sh370 (Franco, 2026-10-12), a nesting
+  // taken out of SOFIA's column left her mesh with 0 poses of 9.  The pose
+  // guide curves are cloned: shared, editing a pose in the copy would move it
+  // in the original too.
+  m_pinsEnabled    = other.m_pinsEnabled;
+  m_poseActions    = other.m_poseActions;
+  for (PoseAction &a : m_poseActions)
+    if (a.m_guide) {
+      a.m_guide = TDoubleParamP(a.m_guide->clone());
+      a.m_guide->setGrammar(m_grammar);
+    }
+  m_meshCorrectives = other.m_meshCorrectives;
+  m_soOwners        = other.m_soOwners;
 }
 
 //------------------------------------------------------------------
