@@ -355,7 +355,7 @@ PullCounts applyAssetStatuses(const QVector<KitsuAssetStatusEntry> &entries) {
       // No counterpart in this asset type's pipeline: ADOPT the Kitsu task
       // type instead of dropping it. Silently discarding it is what made a
       // pull look like it had worked while leaving the tasks empty — on
-      // «CARTOON SCHOOL 2026», Modeling and Rigging vanished this way because
+      // a real show, Modeling and Rigging vanished this way because
       // Ztoryc's canonical pipeline is Concept/Rough/Clean/Color.
       // Kitsu is the source of truth for the pipeline, so it gets appended.
       if (target.isEmpty()) {
@@ -559,8 +559,8 @@ ZtoryKitsuSync::ZtoryKitsuSync(QObject *parent) : QObject(parent) {
   // Assets LINKED to Kitsu that Kitsu now puts in ANOTHER episode leave this
   // tracker, without asking (Franco, 2026-09-29): an asset belongs to its
   // episode or to the Main Pack, nowhere else. Before, the Sync only added,
-  // and one imported while in reach (VIDEOGIOCO_ALIENO, Cascina's, in
-  // Messina) stayed after being moved on Kitsu. Nothing is deleted on Kitsu,
+  // and one imported while in reach (an asset of another
+  // episode) stayed after being moved on Kitsu. Nothing is deleted on Kitsu,
   // and assets not linked to Kitsu are never touched.
   connect(kc, &KitsuClient::assetsInOtherEpisodes, this,
           [this](const QStringList &ids) {

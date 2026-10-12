@@ -259,7 +259,7 @@ void KitsuConnectDialog::rebuildProjectCombo() {
     }
     // Not in the list (a connection that came back half-way, episodes that
     // could not be read): NO row, rather than the first one. Left on row 0,
-    // «Link selected» moved CS2606 onto CS2605 — the first episode in
+    // «Link selected» moved one episode onto another — the first episode in
     // alphabetical order (Franco, 2026-09-29).
     m_projectCombo->setCurrentIndex(found);
     if (found < 0) {

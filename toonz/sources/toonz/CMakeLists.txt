@@ -294,6 +294,7 @@ set(SOURCES
     ztoryphonemes.cpp
     ztorycharacter.cpp
     ztorysceneclass.cpp
+    ztorytestmode.cpp
     ztorymouthmap.cpp
     ztorymouthapply.cpp
     ztoryrecovery.cpp

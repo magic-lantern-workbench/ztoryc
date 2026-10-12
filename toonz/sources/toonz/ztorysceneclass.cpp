@@ -18,6 +18,7 @@
 #include <QDialogButtonBox>
 #include <QDirIterator>
 #include <QFile>
+#include <QDir>
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QLabel>
@@ -60,12 +61,42 @@ Role readRole(const QString &sidecar) {
   return Role::Storyboard;
 }
 
+// The newest copy of \p sidecar kept while the scene was a storyboard WITH
+// shots (backupSidecar names them <sidecar>.bak-yyyyMMdd-HHmmss, so the name
+// order is the time order); empty if none.
+QString storyboardBackupOf(const QString &sidecar) {
+  const QFileInfo fi(sidecar);
+  const QDir dir = fi.dir();
+  const QStringList baks = dir.entryList(
+      QStringList() << fi.fileName() + ".bak-*", QDir::Files, QDir::Name);
+  for (int i = baks.size() - 1; i >= 0; i--) {
+    const QString path = dir.filePath(baks[i]);
+    if (readRole(path) != Role::Storyboard) continue;
+    QFile f(path);
+    if (f.open(QIODevice::ReadOnly | QIODevice::Text) &&
+        f.readAll().contains("<shot "))
+      return path;
+  }
+  return QString();
+}
+
 // Changing what a scene is drops what its sidecar held for the old role (the
 // storyboard's texts, the shot's link, the mouth sets): a copy stays next to it.
 bool backupSidecar(const QString &sidecar) {
   const QString stamp =
       QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss");
-  return QFile::copy(sidecar, sidecar + ".bak-" + stamp);
+  const QString bak = sidecar + ".bak-" + stamp;
+  // The open storyboard's texts typed since the last ⌘S are only in memory
+  // (the file is written with the scene): the copy is made from memory, or
+  // they would be lost with the type change (review 0.17, M5).
+  ZtoryModel *m = ZtoryModel::instance();
+  if (m->shotDataLoadedFor(sidecar) && m->shotCount() > 0 &&
+      !m->shotDocumentState().keepsOwnSidecar()) {
+    std::vector<const ShotData *> shots;
+    for (int i = 0; i < m->shotCount(); i++) shots.push_back(&m->shot(i));
+    if (m->writeShotDocument(bak, shots)) return true;
+  }
+  return QFile::copy(sidecar, bak);
 }
 
 // Whether \p tnz lives in the project whose Production Tracker is in memory.
@@ -77,7 +108,14 @@ bool inCurrentProject(const QString &tnz) {
   const QString dbPath  = ZtoryModel::instance()->projectDbPath();
   const QString projDir = QFileInfo(dbPath).absolutePath();
   return !dbPath.isEmpty() && !projDir.isEmpty() &&
-         QFileInfo(tnz).absoluteFilePath().startsWith(projDir + "/");
+         QFileInfo(tnz).absoluteFilePath().startsWith(projDir + "/",
+#ifdef _WIN32
+                                                      // c:\ and C:\ are one disk
+                                                      Qt::CaseInsensitive
+#else
+                                                      Qt::CaseSensitive
+#endif
+         );  // review 0.17, M12
 }
 
 bool isOpenScene(const QString &tnz) {
@@ -472,6 +510,30 @@ bool apply(const SceneClassDialog &dlg, const QString &tnz, Role current) {
       ok = setSidecarTrackerOff(sidecar, keepLocal, &why);
       break;
     }
+    {
+      // A scene that WAS a storyboard: its shots kept their uuids in the copy
+      // made when it stopped being one.  Declared afresh, they came back with
+      // new uuids and the next publish dropped the Tracker's old rows —
+      // statuses, assignees, Kitsu ids — if «Keep them» had kept them
+      // (review 0.17, M6).  Brought back, the shots are the same shots.
+      const QString bak = storyboardBackupOf(sidecar);
+      if (!bak.isEmpty() &&
+          DVGui::MsgBox(
+              QObject::tr("This scene was a storyboard before. Its shots and "
+                          "texts were kept in %1.\n\nBring them back? Its "
+                          "shots stay the same shots in the Production "
+                          "Tracker, with their statuses.")
+                  .arg(QFileInfo(bak).fileName()),
+              QObject::tr("Bring them back"), QObject::tr("Start empty"),
+              0) == 1) {
+        ok = (!QFile::exists(sidecar) || QFile::remove(sidecar)) &&
+             QFile::copy(bak, sidecar) &&
+             (!hasTracker || setSidecarTrackerOff(sidecar, keepLocal, &why));
+        if (!ok && why.isEmpty())
+          why = QObject::tr("cannot restore %1").arg(QFileInfo(bak).fileName());
+        break;
+      }
+    }
     ok = ZtorySceneClass::declareStoryboard(tnz, keepLocal, &why);
     break;
   case Role::Shot:
@@ -564,7 +626,7 @@ QString ZtorySceneClass::sidecarFor(const QString &tnzPath) {
 static bool writeRoleOnly(const QString &sidecar, const QString &role,
                           QString *error, bool trackerOff = false,
                           const QString &workflow = QString()) {
-  QFile f(sidecar);
+  QSaveFile f(sidecar);  // never a half-written sidecar (review 0.17, M1)
   if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
     if (error) *error = QObject::tr("cannot write %1").arg(QFileInfo(sidecar).fileName());
     return false;
@@ -582,6 +644,10 @@ static bool writeRoleOnly(const QString &sidecar, const QString &role,
   if (!workflow.isEmpty()) xml.writeAttribute("workflow", workflow);
   xml.writeEndElement();
   xml.writeEndDocument();
+  if (xml.hasError() || !f.commit()) {
+    if (error) *error = QObject::tr("cannot write %1").arg(QFileInfo(sidecar).fileName());
+    return false;
+  }
   return true;
 }
 
@@ -639,7 +705,7 @@ bool ZtorySceneClass::writeShotLink(const QString &sidecarPath,
                                     const QString &projectDb,
                                     const QString &technique) {
   ZtoryModel *model = ZtoryModel::instance();
-  QFile f(sidecarPath);
+  QSaveFile f(sidecarPath);  // never a half-written sidecar (review 0.17, M1)
   if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
   QXmlStreamWriter xml(&f);
   xml.setAutoFormatting(true);
@@ -659,7 +725,7 @@ bool ZtorySceneClass::writeShotLink(const QString &sidecarPath,
   xml.writeEndElement();
   xml.writeEndElement();
   xml.writeEndDocument();
-  return true;
+  return !xml.hasError() && f.commit();
 }
 
 bool ZtorySceneClass::declareShot(const QString &tnzPath, const QString &shotUuid,

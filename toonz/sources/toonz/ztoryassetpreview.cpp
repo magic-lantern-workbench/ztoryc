@@ -54,7 +54,7 @@ QString carryingTask(const Asset &a, TaskStatus *status) {
 
 // The PSDs a character's scene is built from, read in the .tnz itself: its
 // levels are their layers, «+extras/BRONTOLO/ch_brontolo#@1#group.psd».
-// For a character with no PSD to rig linked — fifteen of seventeen on CS2606,
+// For a character with no PSD to rig linked — fifteen of seventeen on a real episode,
 // whose scenes were made before the link existed (2026-09-27).
 QStringList ztoryPsdsUsedByScene(const QString &tnz) {
   QStringList out;
@@ -139,7 +139,7 @@ ZtoryAssetPreviewSource ztoryAssetPreviewSource(
                     match == ZtoryModel::AssetMatch::Convention;
   QString picture;
   // A character: its PSD to rig first. The icon of its scene is only a
-  // fallback — on CS2606 all seventeen were fully transparent, written on
+  // fallback — on a real episode all seventeen were fully transparent, written on
   // an empty frame (2026-09-27).
   if (ZtoryModel::isCharacterType(a.type)) {
     const QString rig = m->resolveAssetRigPsd(a);

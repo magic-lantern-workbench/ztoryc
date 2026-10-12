@@ -1228,7 +1228,7 @@ void StartupPopup::refreshCharacterChoices() {
   // ⚠️ Gli asset si leggono dal production.ztrack del progetto SCELTO QUI, non
   // da quello che il modello ha in memoria. All'avvio il popup si apre prima di
   // qualsiasi scena, il modello e' vuoto e la tendina mostrava solo «Add
-  // character…» (Franco, 2026-09-25, cs2606ME2_NCP). Tocca solo i dati di
+  // character…» (Franco, 2026-09-25, a real project). Tocca solo i dati di
   // progetto, non lo storyboard: e' cio' che fa gia' il riquadro del
   // Production Tracker qui accanto. E serve anche alla creazione, che scrive
   // il collegamento alla scena e il Rigging in WIP proprio in questo modello.
@@ -1550,7 +1550,7 @@ void StartupPopup::onCreateButton() {
     // These are the PROJECT's data (production.ztrack), not the scene's, and
     // the fields start empty: written as they were, a new storyboard left
     // blank emptied the production, code, episode, title and naming pattern
-    // of a project that had them (found on a copy of Messina, 2026-10-12;
+    // of a project that had them (found on a copy of a client project, 2026-10-12;
     // the code was the same in 0.16.2).  A field left empty — or the pattern
     // left at its default — keeps what the project already has.
     {

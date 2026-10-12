@@ -84,7 +84,7 @@ ZtoryPsdCheck ztoryCheckPsd(const QString &file) {
     else if (qint64 need = layerDataEnd(h); need > fi.size())
       // A file cut short reads WITHOUT errors: past the end fread gives
       // nothing and the layers come in with garbage (measured on a copy of
-      // CS2606_BG04 cut at 60%). The layers say how long their data is.
+      // a real background cut at 60%). The layers say how long their data is.
       r.problem = QObject::tr("%1 is cut short (%2 MB of at least %3): an "
                               "interrupted copy? Copy it again from the "
                               "original")
@@ -97,8 +97,8 @@ ZtoryPsdCheck ztoryCheckPsd(const QString &file) {
         const TPSDLayerInfo &li = h.linfo[i];
         // A dot in a layer's name: Tahoma builds a path from it
         // («name#libreriaDett.RAF#group.psd») and reads «.RAF» as the file's
-        // type — «Opening File Error», and the layer is not loaded (CS2606
-        // BG03, 2026-09-27). Said before, with the name to change.
+        // type — «Opening File Error», and the layer is not loaded (a real
+        // background, 2026-09-27). Said before, with the name to change.
         if (li.name && QString::fromLocal8Bit(li.name).contains('.'))
           dotted << QString::fromLocal8Bit(li.name);
         if (li.section > 0) continue;  // a folder's start or end: no pixels

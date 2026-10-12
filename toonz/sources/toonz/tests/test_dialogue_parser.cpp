@@ -107,7 +107,7 @@ int main() {
   check("Vuoto", "", {});
 
   // Alias: un nome dello script forzato a mano su un personaggio.
-  m_speakerAliases.insert("principessa", "uuid-PRINCENERENTOLA");
+  m_speakerAliases.insert("principessa", "uuid-PRINCESS_01");
   check("Alias: nome del copione agganciato al personaggio",
         "PRINCIPESSA\nDammi la scarpetta",
         {"PRINCIPESSA*|Dammi la scarpetta"});

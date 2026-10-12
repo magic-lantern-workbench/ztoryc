@@ -1010,7 +1010,7 @@ QString PanelWidget::dialog()   const { return m_dialogField->toPlainText(); }
 //-----------------------------------------------------------------------------
 // «Seleziona il nome e forzalo su un personaggio» (richiesta di Franco,
 // 2026-08-15). Negli script i nomi non coincidono mai del tutto con quelli del
-// tracker — «PRINCIPESSA» nel copione, «PRINCENERENTOLA» fra gli asset — e le
+// tracker — «PRINCIPESSA» nel copione, «PRINCESS_01» fra gli asset — e le
 // due alternative sarebbero correggere il copione o rinominare l'asset: due
 // cose che non si fanno per far contento un riconoscimento.
 // L'alias vale per TUTTO il progetto: se e' quel personaggio qui, lo e' anche
@@ -2810,7 +2810,7 @@ void StoryboardPanel::updateColumnName(int si) {
   // It corrupts more than one name, because the label is both the output and
   // the INPUT: refreshFromScene() re-derives each shot's label from its column
   // name, so a shifted write comes back as truth on the next refresh and the
-  // whole set marches one notch further every time.  Measured on CS2605CA_UGC
+  // whole set marches one notch further every time.  Measured on a real storyboard
   // (Col1 = shot, Col2/Col3 = the two sound columns, Col4… = the other shots):
   // 31 shots out of 32 were writing two columns to the left.
   int col = m_shots[si].data->xsheetColumn;
@@ -3268,6 +3268,13 @@ void StoryboardPanel::saveZtoryc() {
   syncWidgetsToData();
   QString path = m_currentZtoryPath;
 
+  // The autosave keeps an existing file up to date and nothing more: it does
+  // not create the file (that is when the Tracker question comes), does not
+  // ask and does not publish — all of that waits for the user's ⌘S
+  // (review 0.17, M2).
+  const bool autosave = ZtoryModel::instance()->inAutosave();
+  if (autosave && !QFile::exists(path)) return;
+
   // First-time creation: ask user whether to register as project storyboard.
   // Only ask once per session (ZtoryModel::instance()->shotDocumentState().trackerOff sticky until reload).
   // Guard: skip for empty/untitled scenes (no shots yet — nothing to register).
@@ -3311,7 +3318,7 @@ void StoryboardPanel::saveZtoryc() {
     ZtoryModel::instance()->setShotDataLoadedFor(path);
   }
   // Publish structural metadata to the project DB (unless user opted out).
-  if (!ZtoryModel::instance()->shotDocumentState().trackerOff) {
+  if (!autosave && !ZtoryModel::instance()->shotDocumentState().trackerOff) {
     QString sourceFile = QFileInfo(path).fileName();
     if (!sourceFile.isEmpty()) {
       // Prima di pubblicare, non dopo: pubblicare e POI dire che c'e' un
@@ -4093,7 +4100,7 @@ void StoryboardPanel::detectAndUpdatePanels(int shotIdx) {
   // frame. The merge writes exactly those — a key at the end of each joined
   // segment, so the transforms do not interpolate across the join — and each
   // one made a 1-frame panel: two shots of one drawing merged into five
-  // panels (Franco, 2026-09-28, sh220+sh230 of CS2605).
+  // panels (Franco, 2026-09-28, sh220+sh230 of an episode).
   const int lastFrame =
       timelineDuration + ZtoryShotOps::xdInHeadOffset(xsh) - 1;
   for (int r : keyFrames) {
@@ -4539,8 +4546,8 @@ bool StoryboardPanel::reconcileShotsWithScene(
   // Every shot needs an identity. The same sub-scene in several columns (a
   // shared copy) is matched IN ORDER — its first occurrence with the first,
   // and so on — which is what loadZtoryc does with the .ztoryc entries. One
-  // copy in the scene used to make this give up for the whole Board (CS2605
-  // has one, 2026-09-28).
+  // copy in the scene used to make this give up for the whole Board (a real
+  // episode has one, 2026-09-28).
   QHash<TXshChildLevel *, QVector<int>> oldIndex;  // occurrences, in order
   for (int i = 0; i < (int)m_shots.size(); i++) {
     TXshChildLevel *cl = m_shots[i].childLevel;
@@ -5555,9 +5562,26 @@ void UndoBoardState::undo() const {
   // were never in m_removedLevels.
   ZtoryShotOps::returnUsedLevelsToCast(
       TApp::instance()->getCurrentScene()->getScene());
+  // What the operation created goes out of the cast with it (M8).
+  if (!m_addedLevels.empty()) {
+    ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+    TLevelSet *ls     = scene ? scene->getLevelSet() : nullptr;
+    TXsheet *top      = scene ? scene->getChildStack()->getTopXsheet() : nullptr;
+    if (ls && top)
+      for (const TXshLevelP &lvl : m_addedLevels)
+        if (!top->isLevelUsed(lvl.getPointer()))
+          ls->removeLevel(lvl.getPointer(), false);
+  }
 }
 
 void UndoBoardState::redo() const {
+  if (!m_addedLevels.empty()) {
+    ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+    TLevelSet *ls     = scene ? scene->getLevelSet() : nullptr;
+    if (ls)
+      for (const TXshLevelP &lvl : m_addedLevels)
+        if (!ls->getLevel(lvl->getName())) ls->insertLevel(lvl.getPointer());
+  }
   ztoryRestoreShotSnapshot(m_after);
   if (ztoryAudioSnapDiffers(m_before.audio, m_after.audio))
     ztoryRestoreAudioSnap(m_after.audio);
@@ -5647,7 +5671,8 @@ void StoryboardPanel::onAddShot() {
   const int insertCol = hasSel ? m_shots[m_selectedShotIndex].data->xsheetColumn + 1
                                : ZtoryShotOps::columnAfterLastShot(xsh);
   // The operation itself, shared with the Animatic (step 5).
-  if (!ZtoryShotOps::insertNewShot(insertCol)) return;
+  TXshChildLevel *addedLevel = ZtoryShotOps::insertNewShot(insertCol);
+  if (!addedLevel) return;
 
   // The model's object for the new column (step 2b): reconciling, the model
   // gives it one panel as long as the column.
@@ -5680,8 +5705,9 @@ void StoryboardPanel::onAddShot() {
   selectShot(insertAt);
 
   auto after = captureSnapshot();
-  TUndoManager::manager()->add(
-      new UndoBoardState(this, tr("Add Shot"), std::move(before), std::move(after)));
+  TUndoManager::manager()->add(new UndoBoardState(
+      this, tr("Add Shot"), std::move(before), std::move(after), {},
+      {TXshLevelP(addedLevel)}));
 }
 
 void StoryboardPanel::onEditShot(int shotIdx) {
@@ -6062,7 +6088,7 @@ void StoryboardPanel::onMoveShot(int fromShot, int toShot) {
       // molto peggio, chiamava clearCells() sulle colonne audio: TXshSoundColumn
       // eredita da TXshCellColumn, quindi si lascia svuotare senza protestare.
       // Il riordino CANCELLAVA le tracce audio, in silenzio. Segnalato da Franco
-      // il 2026-09-18 su CS2605CA_UGC.
+      // il 2026-09-18 su uno storyboard vero.
       //
       // Le colonne che ospitano shot, chieste alla SCENA.
       // (non si chiamano `slots`: e' una macro di Qt e la dichiarazione sparisce)
@@ -8132,7 +8158,7 @@ bool writeAnimaticFcpxml(const QString &path, const QString &projectName, int fp
   // past the edit of both clips (handles). Writing the two clips overlapped
   // instead made Resolve lay them end to end anyway: every dissolve pushed the
   // rest of the picture later by its length, while the audio, connected to
-  // the first clip, stayed put (Messina: 22+46+16+40 frames, 5 s out of sync
+  // the first clip, stayed put (a client project: 22+46+16+40 frames, 5 s out of sync
   // by the end; Franco, 2026-10-02). Now the cut is at the middle of each
   // dissolve: the clip before ends there (its rendered tail is the handle),
   // the clip after starts there, entered `head` frames into its media (its
@@ -8158,7 +8184,7 @@ bool writeAnimaticFcpxml(const QString &path, const QString &projectName, int fp
     // dissolves any more — the offsets come from the main xsheet, which already
     // overlaps the shots at each dissolve (as compStart does), so subtracting
     // the overlaps again moved the audio earlier by 22, 68, 84, 124 frames after
-    // each of Messina's dissolves (Franco, 2026-10-02).
+    // each of a real project's dissolves (Franco, 2026-10-02).
     if (i == 0) {
       aid = 0;
       for (const auto &a : audio) {

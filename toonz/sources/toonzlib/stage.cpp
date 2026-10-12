@@ -593,7 +593,7 @@ void StageBuilder::addCell(PlayerSet &players, ToonzScene *scene, TXsheet *xsh,
 // A Plastic puppet holds ONE drawing for the whole shot: the pose lives in
 // the deformation, not in the cell. "Same cell" does not mean "same image"
 // there, and skipping the repeats left the onion skin with the skeleton ghosts
-// and no drawing (Franco, 2026-10-03 and 2026-10-04, CS2606 sh230).
+// and no drawing (Franco, 2026-10-03 and 2026-10-04, a real sh230).
 static bool isPlasticDeformed(TXsheet *xsh, int col) {
   TStageObject *obj = xsh->getStageObject(TStageObjectId::ColumnId(col));
   if (!obj) return false;

@@ -57,15 +57,15 @@ Con `ZTORYC_ROUNDTRIP=1`, Ztoryc apre la scena passata sulla riga di comando, ri
 `.ztoryc` e si chiude (`_exit`, senza scrivere preferenze né `env.ini`); chiude da solo le finestre
 modali (i «file mancante» delle copie senza disegni).
 
-Corpus in `/Volumes/ZioSam/tahoma2d-workspace/reference/test_projects/roundtrip/` — copie, tracker
+Corpus in `reference/test_projects/roundtrip/` (fuori dal repo) — copie, tracker
 spento (`productionTracker="off"`), mai i file veri:
 
 | copia | origine | shot |
 |---|---|---|
-| rt01 | Messina, storyboard `CS26_06ME_STB_NCP_V1` | 70 |
-| rt02 | Cascina, `SB_` | 71 |
-| rt03 | Maggiolata Zombie | 34 |
-| rt04 | filorosso `SB_test` (il `.ztoryc` era rimasto a 7 shot, la scena ne ha 1) | 1 |
+| rt01 | progetto A, storyboard principale | 70 |
+| rt02 | progetto B, `SB_` | 71 |
+| rt03 | progetto C | 34 |
+| rt04 | progetto D, `SB_test` (il `.ztoryc` era rimasto a 7 shot, la scena ne ha 1) | 1 |
 | rt05 | argo intro | 3 |
 | rt06 | ZtorycTest `demo_ztoryc_v1` (vecchio, senza uuid) | 8 |
 
@@ -202,8 +202,8 @@ spento (`productionTracker="off"`), mai i file veri:
     azzeramenti del Board e poi il DB di progetto). Rete di sicurezza identica; provato a mano in flusso
     Cutout su navtest1: il modello legge all'apertura e al ⌘S scrive un `.ztoryc` identico a quello letto,
     insieme al `.tnz`. **Il passo 3 è chiuso**, salvo le prove a mano elencate sopra.
-- **🚨 INCIDENTE 2026-10-07 — il 3d ha svuotato il production.ztrack di Messina.** Franco ha lavorato con la
-  build del ramo sugli shot di Messina (sh240/sh250, flusso Cutout, senza Board): due crash (ripristini del
+- **🚨 INCIDENTE 2026-10-07 — il 3d ha svuotato il production.ztrack di un progetto vero.** Franco ha lavorato con la
+  build del ramo sugli shot di quel progetto (sh240/sh250, flusso Cutout, senza Board): due crash (ripristini del
   recupero alle 17:08 e 18:25) e alle 18:51 il `production.ztrack` riscritto vuoto (0 shot, 0 asset, 0
   storyboard; da 107 KB a 1,7 KB). **Causa**: `readShotDocumentWithoutBoard` leggeva anche il sidecar di una
   scena SHOT: azzerava i dati di progetto (`resetProjectLevelDefaults`), ne ricaricava solo produzione/titolo
@@ -215,13 +215,13 @@ spento (`productionTracker="off"`), mai i file veri:
   modello legge da sé SOLO le scene storyboard (per shot e personaggio prende solo il ruolo e non tocca nulla);
   in più `saveProjectDb` rifiuta di scrivere un DB senza shot, asset e storyboard sopra un file che ne ha (il
   firewall esistente guardava solo i metadati, e qui i metadati erano stati riempiti dallo shot). Verificato su
-  una copia di Messina (sh250 in Cutout, con il legame del back-link riscritto verso la copia): il modello non
+  una copia di quel progetto (sh250 in Cutout, con il legame del back-link riscritto verso la copia): il modello non
   rilegge più il sidecar dello shot, il tracker della copia resta intatto, il file vero non è stato toccato.
   Il cane da guardia dei dialoghi della modalità di prova ora parte all'avvio dell'applicazione
   (`Q_COREAPP_STARTUP_FUNCTION`), non dal Board: funziona anche nei flussi senza Board.
 - **Prove sulle scene shot e personaggio (2026-10-11), modo `ZTORYC_SCENETEST`.** Apre la scena nel flusso
   scelto, scrive il DB di progetto come farebbe una modifica, fa ⌘S (o Save As) ed esce; lo script
-  `reference/test_projects/scenetest/run_scenetest.sh` confronta i tracker veri di Messina e Arquata e quello
+  `reference/test_projects/scenetest/run_scenetest.sh` confronta i tracker dei progetti veri e quello
   della copia. **Passate, con i tracker veri intatti in ogni lancio (circa 35):** sh250 in Cutout ⌘S (shot
   riconosciuto, 70 shot / 42 asset caricati, salvato; 13 lanci di fila) e Save As; sh250 in Storyboard ⌘S
   (tracker riscritto con tutti i dati); CH_LEO e ZIO in Character, DRAGONESSA in Cutout (personaggio
@@ -247,8 +247,8 @@ spento (`productionTracker="off"`), mai i file veri:
   `.ztoryc` (6 shot, tecniche conservate). Con il tracker attivo sulla scena sh060 entra nel tracker con lo
   stesso uuid del `.ztoryc`, i dati che c'erano restano. Nota: navtrk aveva `productionTracker="off"` da
   prima di oggi (allora sh060 resta giustamente fuori dal tracker). Nota a parte, non di questo ramo: le
-  copie `navcrash_test` e `messina_copy` vengono aperte nel progetto **sandbox** (titolo «[sandbox]»), a
-  differenza di `arquata_copy`. **Spiegato (2026-10-11):** non era il `tahomaproject.xml` ma la mancanza di
+  copie `navcrash_test` e `copy_A` vengono aperte nel progetto **sandbox** (titolo «[sandbox]»), a
+  differenza di `copy_B`. **Spiegato (2026-10-11):** non era il `tahomaproject.xml` ma la mancanza di
   `scenes/scenes.xml`, il file che dice «il progetto e' la cartella sopra»: `loadSceneProject`
   (`tproject.cpp:1090-1126`) lo cerca risalendo dalla scena e, se non lo trova, usa sandbox. I progetti veri
   ce l'hanno; le due copie erano state fatte copiando solo alcuni file. Aggiunto alle copie. Guardandoci e'

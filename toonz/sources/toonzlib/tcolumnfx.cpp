@@ -1300,7 +1300,7 @@ void TLevelColumnFx::doCompute(TTile &tile, double frame,
       // code (and its assert, silent in release) then cropped the wrong part of
       // the mask image. In the main xsheet, characters scaled to 0.36-0.45 lost
       // their pupils wherever the eye was off-centre in its image; inside the
-      // sub-xsheets, at scale 1, the masks were right (CS2606 sh160, 2026-10-02).
+      // sub-xsheets, at scale 1, the masks were right (a real sh160, 2026-10-02).
       if (info.m_affine.isTranslation())
         tileRectD += TPointD(lx_2 - info.m_affine.a13, ly_2 - info.m_affine.a23);
       else {
@@ -1712,7 +1712,7 @@ std::string TLevelColumnFx::getAlias(double frame,
   // two columns one alias: called as a layer, the mask column was served the
   // eye white from the cache and drew it over the pupil — in the output, not
   // in the preview, and depending on the resolution, because whether the
-  // cache is hit depends on the tiles (CS2606 sh160, 2026-10-02).
+  // cache is hit depends on the tiles (a real sh160, 2026-10-02).
   if (m_levelColumn->isMask()) {
     rdata += "maskcol";
     if (info.m_applyMask) rdata += "_apply";

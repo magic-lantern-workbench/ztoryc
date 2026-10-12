@@ -857,7 +857,7 @@ std::set<int> explodeStageObjects(
     // own assert says the id must not be None -- and asserts are not compiled
     // in release, which is where this crashed.
     //
-    // Reproduced under lldb 2026-08-04 on MaggiolataZombie/sh260 (Explode from
+    // Reproduced under lldb 2026-08-04 on a real scene, sh260 (Explode from
     // the column header menu), with "refusing to create object with invalid id
     // code=0" printed immediately before the SIGSEGV.
     if (!ids.contains(innerId)) continue;

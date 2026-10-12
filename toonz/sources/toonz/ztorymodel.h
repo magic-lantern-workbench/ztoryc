@@ -461,12 +461,12 @@ class ZtoryModel : public QObject {
   // it when the scene is reopened.  Empty = no screenplay imported.
   QString                           m_scriptFile;
   QString                           m_production;  // user-defined production name
-  QString                           m_code;        // short project code (Kitsu code, e.g. CS26)
+  QString                           m_code;        // short project code (Kitsu code, e.g. PRJ)
   QString                           m_title;       // user-defined project title
   QString                           m_episode;     // user-defined episode
-  QString                           m_season;      // user-defined season (e.g. CS26)
+  QString                           m_season;      // user-defined season (e.g. S01)
   QString                           m_namingPattern; // export naming convention (B3d)
-  // Ztoryc (2026-09-27): the episode's NUMBER («06» in CS2606) — m_episode is
+  // Ztoryc (2026-09-27): the episode's NUMBER («06» in PRJ06) — m_episode is
   // the episode's name as on Kitsu — and the convention of the ASSET files,
   // used both to recognise them and to rename them.
   QString                           m_episodeNumber;
@@ -494,7 +494,7 @@ class ZtoryModel : public QObject {
   // personaggio si importa il model sheet come immagine.
   // Nomi dello script forzati a mano su un personaggio, in minuscolo -> uuid.
   // Serve perche' negli script i nomi non coincidono mai del tutto con quelli
-  // del tracker: «PRINCIPESSA» nel copione, «PRINCENERENTOLA» fra gli asset.
+  // del tracker: «PRINCIPESSA» nel copione, «PRINCESS_01» fra gli asset.
   // Senza, l'unica via sarebbe correggere il copione o rinominare l'asset —
   // due cose che non si vogliono fare per far funzionare un riconoscimento.
   QHash<QString, QString>           m_speakerAliases;
@@ -767,13 +767,13 @@ public:
   QString namingPattern() const { return m_namingPattern; }
   void    setNamingPattern(const QString &s) { m_namingPattern = s; }
   // The episode number as set, or read from the episode name when it starts
-  // with the code followed by digits: code CS26 + «CS2606_MESSINA» → «06».
+  // with the code followed by digits: code PRJ + «PRJ06_EPISODE» → «06».
   QString episodeNumber() const { return m_episodeNumber; }
   void    setEpisodeNumber(const QString &s) { m_episodeNumber = s; }
   QString effectiveEpisodeNumber() const;
   // Only the part read from the episode name (empty if it cannot be read).
   // The tracker saves the field EMPTY when it equals this, or «06» would be
-  // frozen and stay 06 when the episode becomes CS2607.
+  // frozen and stay 06 when the episode becomes PRJ07.
   QString derivedEpisodeNumber() const;
   // The asset files' convention: as set, or the default below. Tokens: those
   // of the naming pattern plus {EPNUM}, {TYPE} (PS BG CH FX) and {NAME} (the
@@ -784,7 +784,7 @@ public:
   QString assetFilePattern() const { return m_assetFilePattern; }
   void    setAssetFilePattern(const QString &s) { m_assetFilePattern = s; }
   // The file name the convention gives an asset (no folder): BACCHETTA MAGICA,
-  // version 1, «psd» → «CS2606_PS_bacchetta-magica_V1.psd».
+  // version 1, «psd» → «PRJ06_PS_magic-wand_V1.psd».
   QString assetFileName(const Asset &a, int version, const QString &suffix) const;
   // Reads a file's base name with the convention for asset `a`'s type: the
   // name part and the version (0 if the pattern has none). False when the file
@@ -1050,7 +1050,6 @@ public:
   void    updateAllPreviews();
 
   // ── Operazioni su shot ────────────────────────────────────────────────────
-  void addShot(int insertAt = -1);
   // Creates a fully-wired shot (xsheet column + sub-scene) with a given name.
   // Used by ZtoryStartupDialog to pre-populate a new project.
   void addShotNamed(const QString &name);
@@ -1309,6 +1308,11 @@ private:
   // instance last read or wrote. When the file on disk differs from it, someone
   // else wrote it, and saves merge (ZtrackMerge) instead of overwriting.
   QByteArray m_dbBase;
+  // The user removed something by hand (an asset, a storyboard's shots): an
+  // empty tracker written now is a deletion, not memory caught empty — the
+  // one case the empty-over-full firewall of saveProjectDb() lets through,
+  // once (review 0.17, M4).
+  bool m_userRemovedProjectData = false;
   QString    m_dbBasePath;  // canonical path m_dbBase belongs to
   QFileSystemWatcher *m_dbWatcher     = nullptr;
   QTimer             *m_dbReloadTimer = nullptr;
@@ -1383,5 +1387,17 @@ signals:
   // Public emitter for renderFinished() — Qt signals are protected, so
   // rendercommand.cpp (outside this class) routes completion through here.
   void notifyRenderFinished() { emit renderFinished(); }
-  void notifySceneSaved() { emit sceneSaved(); }
+  // \p autosave: Tahoma's timed autosave (IoCmd AUTO_SAVE).  Listeners that
+  // would ask the user something or publish to the Tracker wait for a save
+  // the user made (review 0.17, M2): a modal question popping up while one
+  // draws, on a timer, is not a question — it is an interruption.
+  void notifySceneSaved(bool autosave = false) {
+    m_inAutosave = autosave;
+    emit sceneSaved();
+    m_inAutosave = false;
+  }
+  bool inAutosave() const { return m_inAutosave; }
+
+private:
+  bool m_inAutosave = false;
 };

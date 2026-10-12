@@ -610,9 +610,14 @@ std::vector<TXshLevelP> deleteShotColumns(std::vector<int> xshCols) {
   }
   top->updateFrameCount();
   // Drop the orphans; the returned handles keep them alive for the undo.
+  // isLevelUsed() walks the whole xsheet tree on every call: one walk here,
+  // same answer — taking a level out of the cast does not change the xsheet
+  // (review 0.17, M9).
+  std::set<TXshLevel *> stillUsed;
+  top->getUsedLevels(stillUsed);
   TLevelSet *ls = scene->getLevelSet();
   for (TXshLevel *lvl : shotLevels) {
-    if (!lvl || top->isLevelUsed(lvl)) continue;
+    if (!lvl || stillUsed.count(lvl)) continue;
     removed.push_back(TXshLevelP(lvl));
     ls->removeLevel(lvl, false);
   }

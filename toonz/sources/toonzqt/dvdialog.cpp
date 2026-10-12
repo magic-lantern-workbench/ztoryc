@@ -377,7 +377,7 @@ void Dialog::hideEvent(QHideEvent *event) {
   // Ztoryc: m_currentScreen is set only for a dialog with a saved geometry;
   // otherwise it stays null, and a dialog that was on no screen when hidden
   // (a second render progress window, opened off-screen) crashed here on
-  // Cancel (CS2606 sh170, 2026-10-02). Fall back to this window's screen, then
+  // Cancel (a real sh170, 2026-10-02). Fall back to this window's screen, then
   // to the primary one; with no screen at all, skip the clamping.
   if (!currentScreen && windowHandle()) currentScreen = windowHandle()->screen();
   if (!currentScreen) currentScreen = QGuiApplication::primaryScreen();

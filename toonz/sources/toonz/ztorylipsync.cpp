@@ -1217,7 +1217,7 @@ QString ztoryPrepareLipSync(const ZtoryShotContext &ctx,
   // quell'inizio e' il fotogramma 1, tranne con una dissolvenza in entrata: le
   // prime righe sono la testa ferma della dissolvenza (XD-in) e il contenuto
   // vero, audio iniettato compreso, parte dopo. Partire da 1 anticipava le
-  // parole e le bocche di tutta la testa (Franco, 2026-10-04, CS2606).
+  // parole e le bocche di tutta la testa (Franco, 2026-10-04).
   // The wav is the GROSS span (see grossShotSpan): its instant 0 is row 1 of
   // the sub-scene, the dissolve head included — unless part of the head falls
   // before the start of the animatic and has no audio.

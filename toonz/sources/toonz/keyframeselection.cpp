@@ -136,7 +136,7 @@ bool deleteKeyframesWithoutUndo(
     // `position = splinePoint - m_frameCenter`, and everywhere `pos = m_offset
     // + position`. That is why the object shifts with a spline AND without one.
     //
-    // Reported by Franco 2026-08-04 on MaggiolataZombie/sh260: deleting the
+    // Reported by Franco 2026-08-04 on a real scene (sh260): deleting the
     // leading keys of a run to start from the last key's position dropped the
     // object, with identical values at the surviving key.
     //

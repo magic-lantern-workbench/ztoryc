@@ -56,8 +56,8 @@ struct KitsuProject {
 
 //----------------------------------------------------------------------------
 // One episode of a tvshow (/api/data/projects/<id>/episodes).
-// A Ztoryc project maps to ONE episode, not to the whole show: «Cartoon School
-// 2026» is a single Kitsu project holding six episodes, and each episode is its
+// A Ztoryc project maps to ONE episode, not to the whole show: a school's
+// season is a single Kitsu project holding six episodes, and each episode is its
 // own Ztoryc project. Binding to the project alone would make every episode's
 // shots show up in every tracker.
 //----------------------------------------------------------------------------

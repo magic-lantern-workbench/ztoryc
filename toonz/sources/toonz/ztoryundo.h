@@ -104,16 +104,23 @@ class UndoBoardState final : public TUndo {
     // last users.  The smart pointers keep them alive while this undo lives, so
     // undo() can put them back and the snapshots' level pointers stay valid.
     std::vector<TXshLevelP>    m_removedLevels;
+    // The opposite: levels the operation CREATED (Add's empty sub-scene).
+    // Undo takes them out of the cast — left there, every Add + ⌘Z left an
+    // orphan sub-scene in the scene (review 0.17, M8) — and redo puts them
+    // back; the smart pointers keep them alive in between.
+    std::vector<TXshLevelP>    m_addedLevels;
 public:
     // `panel` is no longer needed (the model restores, step 6); kept so the
     // call sites stay as they were.  It may be null.
     UndoBoardState(StoryboardPanel * /*panel*/, const QString &label,
                    ZtoryBoardSnap before,
                    ZtoryBoardSnap after,
-                   std::vector<TXshLevelP> removedLevels = {})
+                   std::vector<TXshLevelP> removedLevels = {},
+                   std::vector<TXshLevelP> addedLevels   = {})
         : m_label(label)
         , m_before(std::move(before)), m_after(std::move(after))
-        , m_removedLevels(std::move(removedLevels)) {}
+        , m_removedLevels(std::move(removedLevels))
+        , m_addedLevels(std::move(addedLevels)) {}
 
     void    undo() const override;
     void    redo() const override;

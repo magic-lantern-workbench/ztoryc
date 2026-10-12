@@ -1030,7 +1030,7 @@ QWidget *ZtoryProductionPanel::buildProjectTab() {
   auto *form  = new QFormLayout(w);
   m_prodEdit   = new QLineEdit(w);
   m_codeEdit   = new QLineEdit(w);
-  m_codeEdit->setPlaceholderText(QObject::tr("e.g. CS26 — short code used in {CODE}"));
+  m_codeEdit->setPlaceholderText(QObject::tr("e.g. PRJ — short code used in {CODE}"));
   m_codeEdit->setToolTip(QObject::tr(
       "Short project code (Kitsu 'code'), used as the {CODE} naming token.\n"
       "Keep it brief (≈3 chars, no spaces)."));
@@ -1056,16 +1056,16 @@ QWidget *ZtoryProductionPanel::buildProjectTab() {
   m_epNumEdit = new QLineEdit(w);
   m_epNumEdit->setMaxLength(8);
   m_epNumEdit->setToolTip(QObject::tr(
-      "The episode's number, used as {EPNUM} — «06» in CS2606. Empty: read "
-      "from the episode name when it starts with the code (CS26 + "
-      "CS2606_MESSINA → 06)."));
+      "The episode's number, used as {EPNUM} — «06» in PRJ06. Empty: read "
+      "from the episode name when it starts with the code (PRJ + "
+      "PRJ06_EPISODE → 06)."));
   m_assetPatternEdit = new QLineEdit(w);
   m_assetPatternEdit->setToolTip(QObject::tr(
       "How the asset files are named — used to FIND them in the category "
       "folders and to RENAME them.\nTokens: {CODE} {EPNUM} {EP} {SEASON} "
       "{PROD} {TYPE} {NAME} {VER}\n{TYPE}: PS props, BG backgrounds, CH "
       "characters, FX effects. {NAME}: the asset's name in lower case, words "
-      "joined by «-».\nExample: CS2606_PS_bacchetta-magica_V1.psd"));
+      "joined by «-».\nExample: PRJ06_PS_magic-wand_V1.psd"));
   form->addRow(QObject::tr("Episode number:"),   m_epNumEdit);
   form->addRow(QObject::tr("Asset file names:"), m_assetPatternEdit);
 
@@ -1556,7 +1556,7 @@ void ZtoryProductionPanel::applyProjectFromFields() {
   if (m_patternEdit && !m_patternEdit->text().trimmed().isEmpty())
     m->setNamingPattern(m_patternEdit->text().trimmed());
   // Saved only when it differs from what the episode name says: a derived
-  // «06» written back would stay 06 when the episode becomes CS2607.
+  // «06» written back would stay 06 when the episode becomes PRJ07.
   if (m_epNumEdit) {
     const QString n = m_epNumEdit->text().trimmed();
     m->setEpisodeNumber(n == m->derivedEpisodeNumber() ? QString() : n);

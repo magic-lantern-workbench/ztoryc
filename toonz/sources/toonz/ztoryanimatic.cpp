@@ -5995,7 +5995,7 @@ ZtoryAnimaticPanel::ZtoryAnimaticPanel(QWidget *parent, bool switchEnabled)
 //-----------------------------------------------------------------------------
 // «Seleziona il nome e forzalo su un personaggio» (richiesta di Franco,
 // 2026-08-15). Negli script i nomi non coincidono mai del tutto con quelli del
-// tracker — «PRINCIPESSA» nel copione, «PRINCENERENTOLA» fra gli asset — e le
+// tracker — «PRINCIPESSA» nel copione, «PRINCESS_01» fra gli asset — e le
 // due alternative sarebbero correggere il copione o rinominare l'asset: due
 // cose che non si fanno per far contento un riconoscimento.
 // L'alias vale per TUTTO il progetto: se e' quel personaggio qui, lo e' anche
@@ -6920,7 +6920,7 @@ void materializeCells(TXshChildLevel *cl, int duration, bool fillToEnd = false) 
 // holds only a POINTER to the level: undoing a merge put the main columns back
 // but left the first shot's sub-scene with the second shot's drawings and the
 // junction keys in it — hidden past its end, and the next merge showed them as
-// extra panels (Franco, 2026-09-28, sh220+sh230 of CS2605). Same technique as
+// extra panels (Franco, 2026-09-28, sh220+sh230 of an episode). Same technique as
 // the razor: cloneChild deep-copies the sub-scene, its column is orphaned
 // (the level pointer keeps it alive), and `before` is repointed at the copy.
 void backupChildForUndo(int col, ZtoryBoardSnap &before) {
@@ -7250,7 +7250,8 @@ void ZtoryAnimaticPanel::onAddShot() {
     insertAt = *std::max_element(selPtr->begin(), selPtr->end()) + 1;
 
   // The same Add as the Board's (step 5).
-  if (!ZtoryShotOps::insertNewShot(insertAt)) return;
+  TXshChildLevel *addedLevel = ZtoryShotOps::insertNewShot(insertAt);
+  if (!addedLevel) return;
   ZtoryModel::instance()->resequenceXsheet();
   m_track->refreshFromScene();
   // Board syncs via resequenceXsheet() → modelReset() → onModelResequenced()
@@ -7258,8 +7259,9 @@ void ZtoryAnimaticPanel::onAddShot() {
 
   {
     auto after = ztoryCaptureShotSnapshot();
-    TUndoManager::manager()->add(
-        new UndoBoardState(board, tr("Add Shot"), std::move(before), std::move(after)));
+    TUndoManager::manager()->add(new UndoBoardState(
+        board, tr("Add Shot"), std::move(before), std::move(after), {},
+        {TXshLevelP(addedLevel)}));
   }
 }
 

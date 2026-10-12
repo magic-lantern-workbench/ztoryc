@@ -3,7 +3,6 @@
 #include "ztorycharacter.h"
 #include "ztoryshotops.h"
 #include "ztorysceneclass.h"
-#include "ztorymouthapply.h"  // ZTORYC_SCENETEST
 #include "ztorymouthlibrary.h"
 #include "toonz/preferences.h"
 #include "toonzqt/dvdialog.h"
@@ -56,18 +55,11 @@
 #include <QLabel>
 #include <QPointer>
 #include <QElapsedTimer>
-#include "iocommand.h"  // ZTORYC_SCENETEST
 #include "ztrackmerge.h"
 #include "ztorylocks.h"
 #include <QSettings>
 #include <climits>
 #include <functional>
-#include <cstdio>  // fprintf in the test modes
-#ifdef _WIN32
-#include <process.h>  // _exit
-#else
-#include <unistd.h>  // _exit
-#endif
 
 // ─── ZtoryNumbering ───────────────────────────────────────────────────────────
 // Internal helpers for the SH/SQ/P labelling system.
@@ -166,169 +158,6 @@ QColor ZtoryModel::taskStatusColor(TaskStatus s) {
   default:                 return QColor("#9E9E9E");  // grey
   }
 }
-
-// Test mode (ZTORYC_ROUNDTRIP, see StoryboardPanel::refreshFromScene): armed as
-// soon as the application exists — not by a Board or the model, which a
-// workflow with no Board (Cutout, Character) creates late or never, after the
-// first modal box has already stopped the load.
-static void ztoryArmRoundtripWatchdog() {
-  // Copies of real storyboards miss their panel drawings, and Tahoma stops the load with a
-  // modal «file missing» box.  Nobody is there to press OK, so close it: only
-  // the .ztoryc matters to the round trip.
-  if (qEnvironmentVariableIsSet("ZTORYC_ROUNDTRIP")) {
-    QTimer *dismiss = new QTimer(qApp);
-    dismiss->setInterval(50);
-    // ZTORYC_DIALOG_HOLD_MS: leave each box up that long before closing it,
-    // as a person reading it would — the windows behind it repaint meanwhile
-    // (the palette crash of 2026-10-11 needed exactly that).
-    static const int holdMs = qEnvironmentVariableIntValue("ZTORYC_DIALOG_HOLD_MS");
-    QObject::connect(dismiss, &QTimer::timeout, qApp, []() {
-      static QPointer<QWidget> seen;
-      static QElapsedTimer since;
-      QWidget *active = QApplication::activeModalWidget();
-      if (active && active != seen) { seen = active; since.start(); }
-      if (active && holdMs > 0 && since.elapsed() < holdMs) return;
-      if (QWidget *w = active) {
-        QString text;
-        for (QLabel *l : w->findChildren<QLabel *>())
-          if (!l->text().isEmpty()) text += l->text().left(160) + " | ";
-        fprintf(stderr, "[ZTORY] roundtrip: closing dialog '%s': %s\n",
-                qPrintable(w->windowTitle()), qPrintable(text));
-        if (QDialog *d = qobject_cast<QDialog *>(w)) d->reject();
-        else w->close();
-      }
-    });
-    dismiss->start();
-  }
-}
-Q_COREAPP_STARTUP_FUNCTION(ztoryArmRoundtripWatchdog)
-
-// Test mode (ZTORYC_SCENETEST, docs/SHOT_DOCUMENT_PLAN.md): the shot and
-// character scenes the round trip never covers — the path that emptied a real
-// tracker on 2026-10-07 (a shot opened in Cutout, no Board). Once the scene
-// from the command line is loaded, in whatever workflow the preferences say:
-// write the project DB as an edit would, then ⌘S ("save") or Save As
-// ("saveas:<abs .tnz>"), and exit. Watching the tracker is the script's job.
-static void ztoryArmSceneTest() {
-  QString action = qEnvironmentVariable("ZTORYC_SCENETEST");
-  if (action.isEmpty()) return;
-  QTimer *poll = new QTimer(qApp);
-  poll->setInterval(500);
-  QObject::connect(poll, &QTimer::timeout, qApp, [poll, action]() {
-    TApp *app = TApp::instance();
-    if (!app || !app->getCurrentScene()) return;
-    ToonzScene *scene = app->getCurrentScene()->getScene();
-    if (!scene || scene->isUntitled()) return;
-    poll->stop();
-    QTimer::singleShot(6000, qApp, [action]() {
-      ZtoryModel *m = ZtoryModel::instance();
-      fprintf(stderr, "[ZTORY] scenetest: role=%s shots=%d assets=%d\n",
-              m->shotDocumentState().isShotScene ? "shot"
-              : m->shotDocumentState().isCharacterScene ? "character"
-              : m->shotDocumentState().isPlainScene     ? "plain"
-              : m->shotDocumentState().unclassified     ? "unclassified"
-                                                        : "storyboard",
-              (int)m->projectShots().size(), (int)m->assets().size());
-      // ZTORYC_SCENETEST_SUBSCENE=<.tnz>: load it as a sub-scene first, as
-      // File > Load As Sub-Scene does (a character brought into a shot).
-      const QString sub = qEnvironmentVariable("ZTORYC_SCENETEST_SUBSCENE");
-      if (!sub.isEmpty()) {
-        const bool ok = IoCmd::loadSubScene(TFilePath(sub.toStdWString()));
-        fprintf(stderr, "[ZTORY] scenetest: loaded sub-scene %s: %s\n",
-                qPrintable(sub), ok ? "ok" : "FAILED");
-      }
-      {  // the sub-scenes in the cast, by name, and the current xsheet
-        ToonzScene *sc = TApp::instance()->getCurrentScene()->getScene();
-        QStringList subs;
-        TLevelSet *ls = sc->getLevelSet();
-        for (int i = 0; i < ls->getLevelCount(); i++)
-          if (ls->getLevel(i) && ls->getLevel(i)->getChildLevel())
-            subs << QString::fromStdWString(ls->getLevel(i)->getName());
-        TXsheet *cur = TApp::instance()->getCurrentXsheet()->getXsheet();
-        std::function<void(TXsheet *, int)> tree = [&](TXsheet *x, int d) {
-          if (!x || d > 6) return;
-          for (int c = 0; c < x->getColumnCount(); c++) {
-            int r0 = 0, r1 = -1;
-            x->getCellRange(c, r0, r1);
-            QSet<TXshLevel *> done;
-            for (int r = r0; r <= r1; r++) {
-              const TXshCell cell = x->getCell(r, c);
-              if (!cell.m_level || done.contains(cell.m_level.getPointer())) continue;
-              done.insert(cell.m_level.getPointer());
-              if (TXshChildLevel *cl = cell.m_level->getChildLevel()) {
-                fprintf(stderr, "[ZTORY] scenetest:   tree %s[col %d] %s\n",
-                        qPrintable(QString(d * 2, ' ')), c,
-                        qPrintable(QString::fromStdWString(cell.m_level->getName())));
-                tree(cl->getXsheet(), d + 1);
-              }
-            }
-          }
-        };
-        tree(cur, 0);
-        if (cur)
-          for (int c = 0; c < cur->getColumnCount(); c++) {
-            int r0 = 0, r1 = -1;
-            cur->getCellRange(c, r0, r1);
-            const TXshCell cell = cur->getCell(r0, c);
-            fprintf(stderr, "[ZTORY] scenetest:   column %d rows %d-%d: %s\n", c, r0, r1,
-                    cell.m_level ? qPrintable(QString::fromStdWString(cell.m_level->getName()))
-                                 : "(empty)");
-          }
-        for (const QString &n : subs) {
-          MouthMap lm;
-          QString who;
-          const bool ok = ZtoryMouthLibrary::libraryMapForSubScene(sc, n, &lm, &who);
-          fprintf(stderr, "[ZTORY] scenetest:   library of '%s': %s %s %d sets\n",
-                  qPrintable(n), ok ? "yes" : "no", qPrintable(who),
-                  (int)lm.sets.size());
-        }
-        fprintf(stderr, "[ZTORY] scenetest: sub-scenes in cast: %s | current xsheet is top: %s, %d columns\n",
-                qPrintable(subs.join(",")),
-                cur == sc->getChildStack()->getTopXsheet() ? "yes" : "no",
-                cur ? cur->getColumnCount() : -1);
-      }
-      {  // the characters the mouth windows would offer
-        const MouthCharacters mc = ZtoryMouthApply::characters(
-            TApp::instance()->getCurrentScene()->getScene());
-        for (const QString &k : mc.keys) {
-          int n = 0;
-          for (auto it = mc.groupOf.constBegin(); it != mc.groupOf.constEnd(); ++it)
-            if (it.value() == k) n++;
-          fprintf(stderr, "[ZTORY] scenetest: character '%s' (key '%s'%s): %d levels\n",
-                  qPrintable(mc.labels.value(k)), qPrintable(k),
-                  mc.fromLibrary(k) ? ", library" : "", n);
-        }
-      }
-      // The mouth targets the lip sync popup would offer here.
-      for (const MouthApplyTarget &t : ZtoryMouthApply::findTargets(
-               TApp::instance()->getCurrentScene()->getScene())) {
-        QStringList names;
-        for (const MouthSet &ms : t.map.sets) names << ms.name;
-        fprintf(stderr, "[ZTORY] scenetest: mouths '%s' sub='%s' from='%s' %d sets: %s\n",
-                qPrintable(t.label), qPrintable(t.subScene),
-                qPrintable(t.fromCharacter), (int)t.map.sets.size(),
-                qPrintable(names.join(",")));
-      }
-      if (action == "probe") {  // look only: nothing is written
-        fprintf(stderr, "[ZTORY] scenetest: probe done\n");
-        fflush(stderr);
-        QTimer::singleShot(500, qApp, []() { _exit(0); });
-        return;
-      }
-      m->saveProjectDb();
-      TApp::instance()->getCurrentScene()->setDirtyFlag(true);
-      bool ok = action.startsWith("saveas:")
-                    ? IoCmd::saveScene(TFilePath(action.mid(7).toStdWString()), 0)
-                    : IoCmd::saveAll();
-      fprintf(stderr, "[ZTORY] scenetest: %s %s\n", qPrintable(action),
-              ok ? "saved" : "FAILED");
-      fflush(stderr);
-      QTimer::singleShot(3000, qApp, []() { _exit(0); });
-    });
-  });
-  poll->start();
-}
-Q_COREAPP_STARTUP_FUNCTION(ztoryArmSceneTest)
 
 ZtoryModel::ZtoryModel() : m_fps(24) {
   m_follow = QSettings().value("Ztoryc/followBoardTimeline", false).toBool();
@@ -931,7 +760,7 @@ const Asset *ZtoryModel::assetByName(const QString &name) const {
   const QString n = name.trimmed();
   if (n.isEmpty()) return nullptr;
   // Prima l'alias: e' la correzione esplicita dell'utente («PRINCIPESSA» nel
-  // copione, «PRINCENERENTOLA» fra gli asset) e vince su qualunque
+  // copione, «PRINCESS_01» fra gli asset) e vince su qualunque
   // corrispondenza per nome.
   const QString aliased = speakerAlias(n);
   if (!aliased.isEmpty())
@@ -1016,7 +845,7 @@ QSet<QString> nameWords(const QString &name) {
 }
 
 // The studio's convention CODE_TYPE_name_Vn (Franco, 2026-09-27):
-// «CS2606_PS_bacchetta_V1» → name «bacchetta», version 1. The type code is the
+// «PRJ06_PS_wand_V1» → name «wand», version 1. The type code is the
 // first or second token; the version is optional. False when the file does not
 // follow it for this type code.
 bool parseConventionName(const QString &base, const QString &typeCode,
@@ -1210,7 +1039,7 @@ QString ZtoryModel::resolveAssetFile(const Asset &a, QString *why,
     for (const Cand &c : cands) versions.insert(c.version);
     // Named EXACTLY by the production's convention: not a deduction, green.
     // Only by the production's pattern — the tolerant rule also reads other
-    // episodes' files (CS2605_…), which are not «exactly» anything.
+    // episodes' files (PRJ05_…), which are not «exactly» anything.
     const bool exactName =
         best->byPattern && fileNamePart(best->part) == fileNamePart(a.name);
     QString msg = exactName ? QString()
@@ -1342,6 +1171,7 @@ void ZtoryModel::addAsset(const QString &type, const QString &name) {
 void ZtoryModel::removeAssetAt(int i) {
   if (i < 0 || i >= (int)m_assets.size()) return;
   m_assets.erase(m_assets.begin() + i);
+  m_userRemovedProjectData = true;
   emit assetsChanged();
 }
 
@@ -1473,6 +1303,9 @@ void ZtoryModel::clearPanelRenderCache() { m_panelRenderCache.clear(); }
 //-----------------------------------------------------------------------------
 
 void ZtoryModel::resetProjectLevelDefaults() {
+  // A reset is exactly the memory the firewall exists for: whatever was
+  // removed by hand before it does not make the empty slate a deletion (M4).
+  m_userRemovedProjectData = false;
   m_production.clear();
   m_code.clear();
   m_season.clear();
@@ -1604,9 +1437,9 @@ void ZtoryModel::saveProjectDb() {
   // memory over a file that has them is never a real edit — it is a model whose
   // project data was reset and not reloaded.  On 2026-10-07 a shot scene read
   // with no Board alive did exactly that (its sidecar refilled production/title,
-  // so the metadata check above let it through) and Messina's tracker was
+  // so the metadata check above let it through) and a client project's tracker was
   // written empty: 70 shots, 42 assets, 11 storyboards gone.
-  if (m_projectShots.empty() && m_assets.empty() &&
+  if (!m_userRemovedProjectData && m_projectShots.empty() && m_assets.empty() &&
       m_storyboardFiles.isEmpty() && QFile::exists(path)) {
     QFile rf(path);
     if (rf.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -1670,6 +1503,7 @@ void ZtoryModel::saveProjectDb() {
   // the caller of this save is done with its indices.
   m_dbBase     = ours;
   m_dbBasePath = key;
+  m_userRemovedProjectData = false;
   watchProjectDb(path);
   if (reload && m_dbReloadTimer) m_dbReloadTimer->start(0);
 }
@@ -1867,6 +1701,7 @@ void ZtoryModel::readProjectDbBytes(const QString &path,
   buf.setData(bytes);
   buf.open(QIODevice::ReadOnly | QIODevice::Text);
   loadProjectDbFromDevice(buf);
+  m_userRemovedProjectData = false;
   m_dbBase     = bytes;
   m_dbBasePath = ZtoryLocks::canonicalPath(path);
   watchProjectDb(path);
@@ -2159,7 +1994,7 @@ void ZtoryModel::loadProjectDbFromDevice(QIODevice &file) {
   m_storyboardFiles = sboards;
   // Task names are not case-sensitive. A pull from before addAssetTaskType
   // compared names without case left «modeling»/«Modeling» and
-  // «rigging»/«Rigging» on every character of CS2606 (2026-09-26), the
+  // «rigging»/«Rigging» on every character of an episode (2026-09-26), the
   // lowercase ones stuck at TODO. Merged here, in memory; the file is
   // rewritten clean on the next save.
   for (Technique &t : m_techniques)
@@ -2403,8 +2238,8 @@ QString ZtoryModel::taskShortCode(const QString &taskType) {
 
 //! The pattern used when the project has not set one of its own.
 //!
-//! {CODE} and not {PROD}: production naming uses the short code -- MGZ_, not
-//! MaggiolataZombie_ -- because the full name makes file names unwieldy the
+//! {CODE} and not {PROD}: production naming uses the short code -- MLS_, not
+//! MyLongShow_ -- because the full name makes file names unwieldy the
 //! moment they are joined into a path. {PROD} is kept as the fallback for a
 //! project whose code was never filled in: a long name beats a missing one.
 //! The short code to use in names: the one the user set, or one derived from
@@ -2413,7 +2248,7 @@ QString ZtoryModel::taskShortCode(const QString &taskType) {
 //! Derived rather than left empty because {CODE} is now the head of the default
 //! naming pattern: an empty code would have silently fallen back to the full
 //! production name, which is the very thing the code exists to avoid.
-//! CamelCase gives its capitals (MaggiolataZombie -> MZ); otherwise the first
+//! CamelCase gives its capitals (MyLongShow -> MLS); otherwise the first
 //! three letters. Nothing is written to the project: type your own and that
 //! wins.
 QString ZtoryModel::effectiveCode() const {
@@ -2671,6 +2506,7 @@ int ZtoryModel::removeProjectShotsFromSource(const QString &sourceFile) {
   for (int i = m_storyboardFiles.size() - 1; i >= 0; i--)
     if (m_storyboardFiles[i].compare(sourceFile, Qt::CaseInsensitive) == 0)
       m_storyboardFiles.remove(i);
+  m_userRemovedProjectData = true;
   return before - (int)m_projectShots.size();
 }
 
@@ -3014,24 +2850,6 @@ bool ZtoryModel::assertMainXsheet(bool showWarning) {
         QObject::tr("This operation is only available at the main xsheet level.\n"
                     "Please close the current sub-scene first (double-click outside)."));
   return false;
-}
-
-void ZtoryModel::addShot(int insertAt) {
-  if (!assertMainXsheet(true)) return;
-  ShotData s;
-  PanelData pd;
-  s.panels.push_back(pd);
-  if (insertAt < 0 || insertAt >= (int)m_shots.size()) {
-    m_shots.push_back(s);
-    m_previews.push_back({QPixmap()});
-    generateShotLabel((int)m_shots.size() - 1);
-    emit shotAdded((int)m_shots.size() - 1);
-  } else {
-    m_shots.insertAt(insertAt, s);
-    m_previews.insert(m_previews.begin() + insertAt, {QPixmap()});
-    generateShotLabel(insertAt);
-    emit shotAdded(insertAt);
-  }
 }
 
 void ZtoryModel::addShotNamed(const QString &name) {
@@ -3681,8 +3499,8 @@ void ZtoryModel::declareNewSceneByWorkflow() {
 
 // The project data of the scene just opened with no Board alive: reset, then
 // the tracker of its project (or the one a shot's back-link names, if it is
-// there).  Never reset without reloading: that is what emptied Messina's
-// tracker on 2026-10-07.
+// there).  Never reset without reloading: that is what emptied a client
+// project's tracker on 2026-10-07.
 void ZtoryModel::reloadProjectDataForScene(const QString &shotBackLink) {
   reconcileWithXsheet();
   resetProjectLevelDefaults();
@@ -3718,9 +3536,9 @@ void ZtoryModel::readShotDocumentWithoutBoard() {
     // A saved scene: this project's data, not the previous scene's (which may
     // be another project's) — the classification popup lists the project's
     // shots.  Not the empty scene of a start-up: on 2026-10-11 loading the
-    // current project there (Arquata) left Arquata's assets in memory over
-    // the next scene, a Messina character, and they were saved into
-    // Messina's tracker (a copy, in a test).
+    // current project there (project B) left B's assets in memory over
+    // the next scene, a character of project A, and they were saved into
+    // A's tracker (a copy, in a test).
     if (!scene->isUntitled()) reloadProjectDataForScene(QString());
     return;
   }
@@ -3729,7 +3547,7 @@ void ZtoryModel::readShotDocumentWithoutBoard() {
   // the back-link and a <project> block, a character's its mouth sets: reading
   // them here reset the project data (assets, team, tracker shots) and — no
   // DB reload for a shot scene — left it empty until something saved it: on
-  // 2026-10-07 that emptied Messina's production.ztrack.  For those scenes
+  // 2026-10-07 that emptied a client project's production.ztrack.  For those scenes
   // only the role is taken (the save guards need it); nothing else is touched.
   {
     QString role = QStringLiteral("storyboard");
@@ -3814,7 +3632,10 @@ void ZtoryModel::writeShotDocumentWithoutBoard() {
 // always written ("version 2", role="storyboard").
 bool ZtoryModel::writeShotDocument(const QString &path,
                                    const std::vector<const ShotData *> &shots) {
-  QFile file(path);
+  // QSaveFile: the file is written only with ⌘S and lives on Drive — a write
+  // cut halfway used to leave it truncated, every text of the storyboard gone
+  // (review 0.17, M1).  The old file stays until the new one is complete.
+  QSaveFile file(path);
   if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
   QXmlStreamWriter xml(&file);
   xml.setAutoFormatting(true);
@@ -3960,8 +3781,7 @@ bool ZtoryModel::writeShotDocument(const QString &path,
   }
   xml.writeEndElement();
   xml.writeEndDocument();
-  file.close();
-  return true;
+  return !xml.hasError() && file.commit();
 }
 
 int ZtoryModel::shotIndexForCol(int col) const {

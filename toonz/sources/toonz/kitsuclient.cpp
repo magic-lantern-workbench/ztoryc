@@ -1376,8 +1376,8 @@ void KitsuClient::asPushProcessNext() {
     body["description"] = "";
     body["data"]        = QJsonObject();
     // Created WITHOUT an episode, an asset of a series lands in the Main Pack
-    // and every episode's Sync pulls it in: Cascina's characters turned up in
-    // Messina's tracker (Franco, 2026-09-29). `episode_id` is the field the
+    // and every episode's Sync pulls it in: one episode's characters turned up in
+    // another episode's tracker (Franco, 2026-09-29). `episode_id` is the field the
     // official client (gazu new_asset) sends; Zou stores it as source_id.
     if (!m_asEpisodeId.isEmpty()) body["episode_id"] = m_asEpisodeId;
     QNetworkReply *r = authPost("/api/data/projects/" + m_asProjectId +
@@ -1849,7 +1849,7 @@ bool KitsuClient::episodeScoped(const QJsonObject &entity) const {
   // No episode bound (or not a tvshow): everything belongs here, as before.
   if (m_entityEpisodeId.isEmpty()) return true;
   // In a Kitsu tvshow an asset can belong to ONE episode, and then its
-  // source_id points at that episode. Measured on «CARTOON SCHOOL 2026»: all
+  // source_id points at that episode. Measured on a real six-episode show: all
   // 145 assets are episode-scoped this way, 40/39/38/28 across four episodes —
   // which is why pulling by project alone dragged in the other episodes'.
   const QString src = entity.value("source_id").toString();
@@ -1983,7 +1983,7 @@ void KitsuClient::apLoadTasks() {
       if (ttName.isEmpty() || !m_apAssetName.contains(assetId)) continue;
       // A task Kitsu itself hides: its type is not linked to the asset's
       // type. Adopting it put Rigging/Modeling back in the Prop pipeline at
-      // every Sync (CS2606, 2026-09-27: orphan tasks of the old create-tasks).
+      // every Sync (a real episode, 2026-09-27: orphan tasks of the old create-tasks).
       if (!taskTypeLinked(m_apAssetType.value(assetId),
                           o.value("task_type_id").toString()))
         continue;

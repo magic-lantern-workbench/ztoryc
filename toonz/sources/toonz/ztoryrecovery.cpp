@@ -279,7 +279,18 @@ void ZtoryRecovery::snapshot() {
   {
     ZtoryModel *zm                                  = ZtoryModel::instance();
     const ZtoryModel::ShotDocumentState &doc = zm->shotDocumentState();
-    if (!doc.keepsOwnSidecar() && zm->shotCount() > 0) {
+    // Only if memory holds THIS scene's document: a snapshot taken between a
+    // scene switch and the reading of its file carried empty texts, and a
+    // restore would have put them over the real sidecar (review 0.17, M3).
+    // The path is built as the Board builds it (StoryboardPanel::ztoryPath):
+    // raw, not decoded, or the comparison could fail for a project path.
+    QString loadedKey;
+    if (ToonzScene *sc = TApp::instance()->getCurrentScene()->getScene()) {
+      loadedKey = toQ(sc->getScenePath());
+      loadedKey.replace(QRegularExpression("\\.tnz$"), ".ztoryc");
+    }
+    if (!doc.keepsOwnSidecar() && zm->shotCount() > 0 &&
+        zm->shotDataLoadedFor(loadedKey)) {
       std::vector<const ShotData *> shots;
       for (int i = 0; i < zm->shotCount(); i++) shots.push_back(&zm->shot(i));
       const QString name = QFileInfo(scenePath).completeBaseName() + ".ztoryc";

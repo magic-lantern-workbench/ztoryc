@@ -273,7 +273,7 @@ private:
   TPalette::Page *m_page;
   // Ztoryc: the palette of m_page, held.  m_page is a raw pointer into it, and
   // a palette freed elsewhere while shown here was drawn from freed memory —
-  // two crashes on 2026-10-11 (scene switch, sh280 of Messina).  Held, it
+  // two crashes on 2026-10-11 (scene switch, a real sh280).  Held, it
   // cannot go while shown; when this viewer turns out to be its last holder
   // the moment is written to palette_watch.log, to find who drops it.
   TPaletteP m_pageOwner;

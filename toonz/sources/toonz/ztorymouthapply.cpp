@@ -419,8 +419,8 @@ QVector<MouthApplyTarget> ZtoryMouthApply::findTargets(ToonzScene *scene) {
     if (characterScene) break;
     if (!t.map.sets.isEmpty() || t.subScene.isEmpty()) continue;
     // ⚠️ The chain already knows WHOSE sub-scene this is: then it gets that
-    // character's sets or none.  In sh270 PRINCENERENTOLA's «sub» — her
-    // library has no sets yet — got SOFIA's nine, the only «sub» with a map,
+    // character's sets or none.  In a real shot one character's «sub» — her
+    // library has no sets yet — got another character's nine, the only «sub» with a map,
     // so «not ambiguous» (Franco, 2026-10-11): the same mistake as BRONTOLO on
     // 2026-09-25, by the back door of this fallback.
     if (!ZtoryMouthLibrary::characterOfSubScene(scene, t.subScene).isEmpty())
@@ -518,8 +518,8 @@ MouthCharacters ZtoryMouthApply::characters(ToonzScene *scene) {
       // in the xsheet, else the sub-scene's.
       auto lib = libs.constFind(ZtoryMouthLibrary::characterKey(name));
       if (lib != libs.constEnd()) {
-        // The asset's name; with the scene's when they differ (in Messina the
-        // asset PRINCIAZZURRO points at PRINCENERENTOLA.tnz).
+        // The asset's name; with the scene's when they differ (in a real project
+        // the asset PRINCE points at PRINCESS_01.tnz).
         const QString who = lib.value().first;
         const QString scn = QFileInfo(lib.value().second.getQString()).completeBaseName();
         out.labels.insert(name, who.compare(scn, Qt::CaseInsensitive) == 0
