@@ -43,6 +43,11 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QClipboard>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QStandardPaths>
+#include <QTextStream>
 
 // tcg includes
 #include "tcg/tcg_macros.h"
@@ -147,6 +152,38 @@ int skeletonId() {
   return def ? def->skeletonId(obj->paramsTime(frame()))
              : 1;  // 1 (not -1) is intended.
 }  // Means '' (empty string)
+
+//------------------------------------------------------------------------
+
+// Ztoryc: the deformation of the selected vertex — or none when the selection
+// does not belong to that skeleton.  PlasticSkeletonDeformation::
+// vertexDeformation() indexes the skeleton's vertices unchecked, and the
+// options box asks while the current column is switching: the skeleton id is
+// already the new column's, the selection still the old one's.  Three crashes
+// on 2026-10-12 (sh330), from a column header click, a click on a connected
+// column's skeleton and an undo — all in updateControls() on a column switch.
+SkVD *selectedVertexDeformation(const PlasticSkeletonDeformationP &sd,
+                                int skelId, int v) {
+  if (!sd || v < 0) return 0;
+  const PlasticSkeletonP skel = sd->skeleton(skelId);
+  if (!skel || size_t(v) >= skel->vertices().nodesCount() ||
+      !skel->vertices().isValid(v)) {
+    // Written to a file, not qWarning: launched from the Dock nobody reads
+    // stderr, and this line is what confirms the cause where it used to crash.
+    const QString dir =
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+        "/crash";
+    QDir().mkpath(dir);
+    QFile f(dir + "/plastic_watch.log");
+    if (f.open(QIODevice::Append | QIODevice::Text))
+      QTextStream(&f) << QDateTime::currentDateTime().toString(Qt::ISODate)
+                      << "  selected vertex " << v << " not in skeleton "
+                      << skelId << " (column " << ::column()
+                      << "): crash avoided\n";
+    return 0;
+  }
+  return sd->vertexDeformation(skelId, v);
+}
 
 //------------------------------------------------------------------------
 
@@ -805,7 +842,7 @@ void PlasticToolOptionsBox::updateControls() {
   SkVD *vd   = 0;
   int skelId = ::skeletonId();
   if (sd && l_plasticTool.m_svSel.hasSingleObject())
-    vd = sd->vertexDeformation(skelId, l_plasticTool.m_svSel);
+    vd = selectedVertexDeformation(sd, skelId, l_plasticTool.m_svSel);
 
   QString keyColorName       = getKeyFrameBorderColor().name();
   QString inBetweenColorName = getInBetweenBorderColor().name();
@@ -900,7 +937,7 @@ bool PlasticToolOptionsBox::canSetInterpolation(int frame, TStageObject *stageOb
     int skelId                     = ::skeletonId();
     SkVD *vd                       = 0;
     if (sd && l_plasticTool.m_svSel.hasSingleObject())
-      vd = sd->vertexDeformation(skelId, l_plasticTool.m_svSel);
+      vd = selectedVertexDeformation(sd, skelId, l_plasticTool.m_svSel);
 
     if ((frame == r0 && it->first == r0) || (frame == r1 && it->first == r1)) {
       canSet = getKeysStatus(frame, vd) != 2;
