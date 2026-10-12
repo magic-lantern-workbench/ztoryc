@@ -289,6 +289,12 @@ void ZtoryModel::onSceneSwitchedAdvanceShot() {
       technique = xml.attributes().value("technique").toString();
     }
   }
+  // A shot exported before the save stopped copying them (TLevelSet::
+  // saveFolder) carries the storyboard's Cast folders, empty: one per
+  // character of the film.  Dropped in memory, without marking the scene
+  // modified; the file loses them at the next save (Franco, 2026-10-12).
+  if (role == "shot" && ZtoryShotOps::removeEmptyCastFolders(scene) > 0)
+    TApp::instance()->getCurrentScene()->notifyCastChange();
   if (role != "shot" || uuid.isEmpty() || projectDb.isEmpty()) return;
   if (!QFile::exists(projectDb)) return;
 

@@ -79,6 +79,12 @@ int columnAfterLastShot(TXsheet *mainXsh);
 // sub-scene, or nullptr.  (Step 5: one Add for the Board and the Animatic.)
 TXshChildLevel *insertNewShot(int insertCol, int duration = 24);
 
+// Removes the Cast folders that hold no level, at any depth (the root folder
+// always stays).  For shot scenes: their export used to copy the storyboard's
+// folders empty (TLevelSet::saveFolder).  In memory only — the file loses them
+// at the next save.  Returns how many were removed.
+int removeEmptyCastFolders(ToonzScene *scene);
+
 // Clipboard entries for shot columns (main-xsheet indices, any order; the
 // entries come out in xsheet order).  Every kind takes the shot's TRUE length
 // (shotTrueSpan — not its first panel, nor the column with the closing stop

@@ -9,6 +9,7 @@
 #include "toonz/toonzscene.h"
 
 #include "toonz/levelset.h"
+#include <functional>
 
 //=============================================================================
 
@@ -260,6 +261,28 @@ void TLevelSet::moveLevelToFolder(const TFilePath &fp, TXshLevel *level) {
 //-----------------------------------------------------------------------------
 
 void TLevelSet::saveFolder(TOStream &os, TFilePath folder) {
+  // Ztoryc: saving a sub-xsheet as a scene (m_saveSet = its levels) wrote ALL
+  // the parent scene's folders and only the sub-xsheet's levels, so every
+  // folder of the parent's cast came along — empty.  A shot exported from a
+  // storyboard listed every character of the film in its Cast (sh360 had
+  // LUPO, CAVALLO… with nothing in them; Franco, 2026-10-12).  With a save set,
+  // a folder that would hold no saved level is left out; the default (root)
+  // folder always stays, and a normal save keeps the user's empty folders.
+  if (!m_saveSet.empty() && folder != getDefaultFolder()) {
+    std::function<bool(const TFilePath &)> holdsSaved =
+        [&](const TFilePath &f) {
+          std::vector<TXshLevel *> lv;
+          listLevels(lv, f);
+          for (TXshLevel *l : lv)
+            if (m_saveSet.count(l)) return true;
+          std::vector<TFilePath> sub;
+          listFolders(sub, f);
+          for (const TFilePath &s : sub)
+            if (holdsSaved(s)) return true;
+          return false;
+        };
+    if (!holdsSaved(folder)) return;
+  }
   std::map<std::string, std::string> attr;
   attr["name"]                                   = folder.getName();
   if (folder == getDefaultFolder()) attr["type"] = "default";

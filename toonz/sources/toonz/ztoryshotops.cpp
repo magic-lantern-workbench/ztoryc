@@ -14,6 +14,8 @@
 #include "toonz/txshleveltypes.h"
 #include "toonz/txshchildlevel.h"
 #include "toonz/levelset.h"
+
+#include <functional>
 #include "toonz/sceneproperties.h"
 #include "toonz/tstageobject.h"
 #include "toonz/tstageobjecttree.h"
@@ -629,6 +631,34 @@ int columnAfterLastShot(TXsheet *mainXsh) {
   for (int c = mainXsh->getColumnCount() - 1; c >= 0; c--)
     if (!ZtoryModel::shotLevelNameAt(mainXsh, c).isEmpty()) return c + 1;
   return 0;
+}
+
+int removeEmptyCastFolders(ToonzScene *scene) {
+  TLevelSet *ls = scene ? scene->getLevelSet() : nullptr;
+  if (!ls) return 0;
+  int removed = 0;
+  // Bottom-up: a folder whose only content is empty folders is empty too.
+  std::function<bool(const TFilePath &)> prune = [&](const TFilePath &f) {
+    std::vector<TFilePath> sub;
+    ls->listFolders(sub, f);
+    bool keep = false;
+    for (const TFilePath &s : sub)
+      if (prune(s)) keep = true;
+    std::vector<TXshLevel *> lv;
+    ls->listLevels(lv, f);
+    if (!lv.empty()) keep = true;
+    if (!keep && f != ls->getDefaultFolder()) {
+      ls->removeFolder(f);
+      removed++;
+    }
+    return keep;
+  };
+  // Only inside the Cast (default) folder: the root level holds Tahoma's own
+  // folders (Audio), which stay even when empty.
+  std::vector<TFilePath> inCast;
+  ls->listFolders(inCast, ls->getDefaultFolder());
+  for (const TFilePath &f : inCast) prune(f);
+  return removed;
 }
 
 TXshChildLevel *insertNewShot(int insertCol, int duration) {
