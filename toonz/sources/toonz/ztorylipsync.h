@@ -170,6 +170,7 @@ private:
   bool      m_running = false;
   Request   m_req;
   QString   m_jsonPath;
+  QString   m_whisperWav;  // the 16 kHz copy whisper-cli reads; ours to delete
   class QThread *m_voskThread = nullptr;
 };
 

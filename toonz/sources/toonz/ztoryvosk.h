@@ -77,4 +77,11 @@ QString languageDisplayName(const QString &code);
 QVector<TimedWord> align(const QString &wavPath, const QString &lang,
                          const QStringList &scriptWords, QString *error);
 
+// Writes \p srcWav as 16 kHz mono 16-bit to \p dstWav — the same conversion
+// align() makes in memory.  Whisper needs it too: the whisper-cli we bundle
+// reads WAV only at 16 kHz and, given anything else, writes nothing and still
+// exits 0 (Franco, 2026-10-12, sh320: "Whisper produced no output file").
+bool writeAs16kMono(const QString &srcWav, const QString &dstWav,
+                    QString *error);
+
 }  // namespace ZtoryVosk

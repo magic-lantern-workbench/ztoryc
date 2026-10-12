@@ -184,8 +184,8 @@ QString ztoryExtractShotAudio(const ZtoryShotContext &ctx) {
   } catch (...) {
     return QString();
   }
-  // whisper.cpp ricampiona da solo: verificato su 44.1 kHz stereo, quindi non
-  // serve passare da ffmpeg.
+  // Si salva al formato della scena: Whisper e Vosk se lo convertono a 16 kHz
+  // mono (writeAs16kMono / loadAs16kMono), Rhubarb e l'energia lo leggono cosi'.
   return out.getQString();
 }
 
@@ -389,6 +389,19 @@ bool ZtoryLipSync::startWhisper() {
       dir + "/" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
   m_jsonPath = base + ".json";
 
+  // whisper-cli reads WAV only at 16 kHz: the shot audio comes out of the
+  // xsheet at the scene's rate (48 kHz, 24 bit), and handed that it printed
+  // "must be 16 kHz", wrote no JSON and exited 0.  The comment that used to be
+  // in ztoryExtractShotAudio said whisper resampled by itself; this build does
+  // not.  The original wav stays as it is: frameEnergy() reads it.
+  m_whisperWav = base + "_16k.wav";
+  QString convErr;
+  if (!ZtoryVosk::writeAs16kMono(m_req.wavPath, m_whisperWav, &convErr)) {
+    m_whisperWav.clear();
+    emit finished(false, {}, convErr);
+    return false;
+  }
+
   QStringList args;
   args << "-m" << ThirdParty::getWhisperModel();
   // -ml 1 con -sow = un segmento per PAROLA. Senza, i segmenti sono frasi e i
@@ -404,7 +417,7 @@ bool ZtoryLipSync::startWhisper() {
   // l'audio piu' corto. Nella colonna si vedeva una parola lunga cinquanta
   // fotogrammi, quattro sparite e l'ultima al fotogramma 751 di uno shot da 81.
   args << "-np";
-  args << m_req.wavPath;
+  args << m_whisperWav;
 
   if (!m_proc) {
     m_proc = new QProcess(this);
@@ -619,9 +632,20 @@ void ZtoryLipSync::onProcessDone(int exitCode) {
     return;
   }
 
+  if (!m_whisperWav.isEmpty()) {
+    QFile::remove(m_whisperWav);
+    m_whisperWav.clear();
+  }
   QFile f(m_jsonPath);
   if (!f.open(QIODevice::ReadOnly)) {
-    emit finished(false, {}, tr("Whisper produced no output file."));
+    // whisper-cli can fail and still exit 0 (an audio file it cannot read):
+    // the reason is on stderr, and without it the user gets a dead end.
+    const QString err =
+        QString::fromUtf8(m_proc->readAllStandardError()).trimmed();
+    emit finished(false, {},
+                  err.isEmpty() ? tr("Whisper produced no output file.")
+                                : tr("Whisper produced no output file:\n%1")
+                                      .arg(err.right(400)));
     return;
   }
   QString err;
@@ -817,12 +841,38 @@ void spreadVisemes(const QVector<ZtoryPhonemes::Viseme> &visemes,
       firstFrame + int(std::ceil(w.endMs * fps / 1000.0)) - lead - 1);
   const int available = endFrame - startFrame + 1;
 
+  // Two equal mouths side by side are ONE cell on screen: merged (weights
+  // summed) before they are counted against the room, and again after every
+  // pass, because dropping the consonant between two vowels makes them
+  // neighbours.  Without it «negativissima» (14 frames, room for 7) counted
+  // the e of «vi» and the e of «ssi» as two mouths, and the 8th to go was
+  // the final A (Franco, 2026-10-12, sh320).
+  auto mergeNeighbours = [](QVector<ZtoryPhonemes::Viseme> &v) {
+    for (int i = v.size() - 1; i > 0; i--)
+      if (v[i].shape == v[i - 1].shape) {
+        v[i - 1].weight += v[i].weight;
+        v.remove(i);
+      }
+  };
   QVector<ZtoryPhonemes::Viseme> kept = visemes;
+  mergeNeighbours(kept);
   const int room = std::max(1, available / kMinFrames);
-  if (kept.size() > room)
-    for (int worst = 3; worst >= 0 && kept.size() > room; worst--)
-      for (int i = kept.size() - 1; i >= 0 && kept.size() > room; i--)
-        if (visibilityRank(kept[i].shape) == worst) kept.remove(i);
+  // The LAST mouth of the word is spared while another of the same rank can
+  // go: the mouth rests on it until the next word, so it is the one seen
+  // longest — and the scan runs from the end, so it used to be the first lost.
+  for (int worst = 3; worst >= 0 && kept.size() > room; worst--) {
+    for (int i = kept.size() - 1; i >= 0 && kept.size() > room; i--) {
+      if (visibilityRank(kept[i].shape) != worst) continue;
+      if (i == kept.size() - 1 && kept.size() > 1) {
+        bool another = false;
+        for (int j = 0; j < i && !another; j++)
+          another = visibilityRank(kept[j].shape) == worst;
+        if (another) continue;
+      }
+      kept.remove(i);
+    }
+    mergeNeighbours(kept);
+  }
   if (kept.isEmpty()) return;
 
   const int n = kept.size();

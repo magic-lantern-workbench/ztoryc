@@ -22,6 +22,9 @@
 #include <QMutex>
 #include <QMutexLocker>
 
+#include <algorithm>
+#include <cmath>
+
 namespace {
 
 //-----------------------------------------------------------------------------
@@ -310,6 +313,40 @@ QString describe(const TSoundTrackP &st) {
       .arg(f.m_bitPerSample);
 }
 
+// A script word the model does not know leaves the grammar and comes back as
+// "[unk]" — and Kaldi gives "[unk]" only the part of the word it could not
+// fit elsewhere.  «negativissima» (sh320, Franco 2026-10-12) was spoken from
+// frame 35 and came back as [unk] from 48: «negati» fell in a rest.  The start
+// goes back while the audio keeps sounding, never before the previous word's
+// end; a real pause stays a pause, because silence stops the walk.
+void extendUnknownToOnset(QVector<TimedWord> &words, const short *samples,
+                          int total) {
+  const int win = 320;  // 20 ms at 16 kHz
+  const int nWin = total / win;
+  if (nWin <= 0) return;
+  QVector<double> rms(nWin);
+  double peak = 0;
+  for (int k = 0; k < nWin; k++) {
+    double acc = 0;
+    for (int s = 0; s < win; s++) {
+      const double v = samples[k * win + s];
+      acc += v * v;
+    }
+    rms[k] = std::sqrt(acc / win);
+    peak   = std::max(peak, rms[k]);
+  }
+  if (peak <= 0) return;
+  const double speech = peak * 0.05;  // -26 dB from the peak
+  for (int i = 0; i < words.size(); i++) {
+    if (words[i].word != "[unk]") continue;
+    const int floorMs = i > 0 ? words[i - 1].endMs : 0;
+    int k = words[i].startMs / 20 - 1;
+    while (k >= 0 && k < nWin && k * 20 >= floorMs && rms[k] >= speech) k--;
+    const int onsetMs = std::max(floorMs, (k + 1) * 20);
+    if (onsetMs < words[i].startMs) words[i].startMs = onsetMs;
+  }
+}
+
 TSoundTrackP loadAs16kMono(const QString &wavPath, QString *error) {
   TSoundTrackP st;
   if (!TSoundTrackReader::load(TFilePath(wavPath), st) || !st) {
@@ -570,8 +607,23 @@ QVector<TimedWord> align(const QString &wavPath, const QString &lang,
     if (tw.word.isEmpty()) continue;
     out.push_back(tw);
   }
+  extendUnknownToOnset(out, samples, total);
   if (out.isEmpty() && error) *error = QObject::tr("No words recognised.");
   return out;
+}
+
+//-----------------------------------------------------------------------------
+
+bool writeAs16kMono(const QString &srcWav, const QString &dstWav,
+                    QString *error) {
+  TSoundTrackP st = loadAs16kMono(srcWav, error);
+  if (!st) return false;
+  try {
+    if (TSoundTrackWriter::save(TFilePath(dstWav), st)) return true;
+  } catch (...) {
+  }
+  if (error) *error = QObject::tr("Cannot write %1").arg(dstWav);
+  return false;
 }
 
 }  // namespace ZtoryVosk
