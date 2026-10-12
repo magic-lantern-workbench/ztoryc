@@ -1547,13 +1547,27 @@ void StartupPopup::onCreateButton() {
     numCfg.seqNumber        = 1;
     numCfg.resetOnSeqChange = m_resetOnSeqChangeCB->isChecked();
     ZtoryModel::instance()->setNumberingConfig(numCfg);
-    ZtoryModel::instance()->setProduction(m_productionFld->text().trimmed());
-    if (m_codeFld)   ZtoryModel::instance()->setCode(m_codeFld->text().trimmed());
-    if (m_seasonFld) ZtoryModel::instance()->setSeason(m_seasonFld->text().trimmed());
-    if (m_patternFld)
-      ZtoryModel::instance()->setNamingPattern(m_patternFld->text().trimmed());
-    ZtoryModel::instance()->setTitle(m_titleFld->text().trimmed());
-    ZtoryModel::instance()->setEpisode(m_episodeFld->text().trimmed());
+    // These are the PROJECT's data (production.ztrack), not the scene's, and
+    // the fields start empty: written as they were, a new storyboard left
+    // blank emptied the production, code, episode, title and naming pattern
+    // of a project that had them (found on a copy of Messina, 2026-10-12;
+    // the code was the same in 0.16.2).  A field left empty — or the pattern
+    // left at its default — keeps what the project already has.
+    {
+      ZtoryModel *zm = ZtoryModel::instance();
+      auto typed = [](QLineEdit *f) {
+        return f ? f->text().trimmed() : QString();
+      };
+      if (!typed(m_productionFld).isEmpty()) zm->setProduction(typed(m_productionFld));
+      if (!typed(m_codeFld).isEmpty()) zm->setCode(typed(m_codeFld));
+      if (!typed(m_seasonFld).isEmpty()) zm->setSeason(typed(m_seasonFld));
+      const QString pattern = typed(m_patternFld);
+      if (!pattern.isEmpty() &&
+          (pattern != zm->defaultNamingPattern() || zm->namingPattern().isEmpty()))
+        zm->setNamingPattern(pattern);
+      if (!typed(m_titleFld).isEmpty()) zm->setTitle(typed(m_titleFld));
+      if (!typed(m_episodeFld).isEmpty()) zm->setEpisode(typed(m_episodeFld));
+    }
     if (m_techniqueFld && !m_techniqueFld->currentText().isEmpty())
       ZtoryModel::instance()->setDefaultTechnique(m_techniqueFld->currentText());
 
