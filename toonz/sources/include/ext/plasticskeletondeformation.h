@@ -631,6 +631,9 @@ public:
   void setSolvedSkeleton(int skeletonId, double frame,
                          const PlasticSkeleton &skeleton);
   void clearSolvedSkeleton();
+  //! Ztoryc: drops only \p frame's results — a solve starting over for its
+  //! frame must not throw away the other frames a render is about to draw.
+  void clearSolvedSkeleton(double frame);
 
   // Interface methods using a deformed copy of the original skeleton (which is
   // owned by this class)

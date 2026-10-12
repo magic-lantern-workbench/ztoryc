@@ -1738,9 +1738,12 @@ void TStageObject::solvePlasticCharacter(double t, const TAffine &baseLocal) {
     walk.push_back(this);
     for (size_t i = 0; i < walk.size(); ++i) {
       TStageObject *o = walk[i];
+      // Only THIS frame's result (see the per-frame cache in
+      // plasticskeletondeformation.cpp): clearing every frame here undid the
+      // solves of the frames a render had built and not yet drawn.
       if (const PlasticSkeletonDeformationP &d =
               o->getPlasticSkeletonDeformation())
-        d->clearSolvedSkeleton();
+        d->clearSolvedSkeleton(o->paramsTime(t));
       if (o != this) o->invalidate();
       for (TStageObject *ch : o->m_children)
         if (ch->getId().isColumn()) walk.push_back(ch);
@@ -1877,7 +1880,7 @@ void TStageObject::solvePlasticCharacter(double t, const TAffine &baseLocal) {
   }
 
   if (pins.empty()) {
-    for (const Col &c : cols) c.def->clearSolvedSkeleton();
+    for (const Col &c : cols) c.def->clearSolvedSkeleton(c.sdFr);
     return;
   }
 

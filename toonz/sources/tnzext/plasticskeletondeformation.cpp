@@ -24,6 +24,9 @@
 #include <memory>
 #include <set>
 #include <map>
+#include <mutex>
+#include <cstdio>   // SOLVEDIAG (ZTORYC_PLASTIC_DIAG)
+#include <cstdlib>
 #include <vector>
 #include <algorithm>
 
@@ -307,11 +310,17 @@ public:
   //! stamping one invalidates the other's record.
   static bool overlaps(const PoseAction &a, const PoseAction &b);
 
-  // STEP C.2b: result of the character-level solve for this column. Transient.
-  PlasticSkeleton m_solvedSkeleton;
-  double m_solvedFrame = -1.0e30;
-  int m_solvedSkelId   = -1;
-  bool m_hasSolved     = false;
+  // STEP C.2b: results of the character-level solve for this column, one per
+  // (skeleton, frame). Transient. It was a single slot: a render builds the fx
+  // trees of every frame of its range BEFORE drawing them, each build solves
+  // its frame, and the last one overwrote the others — drawn later, they found
+  // another frame in the slot and fell back to the per-column plant, the
+  // "second solver" this cache exists to avoid (sh330, Franco 2026-10-12: in
+  // the render the horse walked on the spot while its rider rode on; measured
+  // with ZTORYC_PLASTIC_DIAG, 21 misses instead of 0 on the frame drawn first).
+  // The render threads read it while the main thread fills it: hence the lock.
+  std::map<std::pair<int, double>, PlasticSkeleton> m_solved;
+  mutable std::mutex m_solvedMutex;
 
   std::set<TParamObserver *>
       m_observers;  //!< Set of the deformation's observers
@@ -621,9 +630,10 @@ void PlasticSkeletonDeformation::Imp::onChange(const TParamChange &change) {
   // Note the cache cannot be validated against the params (it is a whole
   // character's worth of them, on several columns) — dropping it on any change
   // and letting the next placement re-solve is both cheaper and safer.
-  m_hasSolved    = false;
-  m_solvedFrame  = -1.0e30;
-  m_solvedSkelId = -1;
+  {
+    std::lock_guard<std::mutex> lock(m_solvedMutex);
+    m_solved.clear();
+  }
 
   // Since the deformation was changed, any associated deformer
   // must be invalidated (at the animation-deform level only)
@@ -966,7 +976,7 @@ static TDoubleKeyframe constantSkeletonIdKey(double frame, int id) {
   return kf;
 }
 
-// Found on CS2606 sh230 (Franco, 2026-10-04): keys 19 -> 2 and 59 -> 1 with a
+// Found on a real sh230 (Franco, 2026-10-04): keys 19 -> 2 and 59 -> 1 with a
 // Linear segment between; the whole walk on 20-58 ran on skeleton 1 only
 // because 1.98 truncates to 1. Deleting the key at 59 put the walk's pose on
 // skeleton 2 and the character twisted.
@@ -1471,10 +1481,21 @@ void PlasticSkeletonDeformation::storeDeformedSkeleton(
   // A character-level solve has already planted this column as part of one
   // unified joint tree: that answer wins outright. Planting again here is what
   // used to give a stitched rig two solvers pulling in different directions.
-  if (m_imp->m_hasSolved && m_imp->m_solvedSkelId == skelId &&
-      m_imp->m_solvedFrame == frame) {
-    skeleton = m_imp->m_solvedSkeleton;
-    return;
+  static const bool diag = ::getenv("ZTORYC_PLASTIC_DIAG") != nullptr;
+  {
+    std::lock_guard<std::mutex> lock(m_imp->m_solvedMutex);
+    auto it = m_imp->m_solved.find(std::make_pair(skelId, frame));
+    if (it != m_imp->m_solved.end()) {
+      if (diag)
+        fprintf(stderr, "SOLVEDIAG read sd=%p frame=%g HIT\n", (void *)this,
+                frame);
+      skeleton = it->second;
+      return;
+    }
+    if (diag)
+      fprintf(stderr, "SOLVEDIAG read sd=%p frame=%g MISS (%d frames solved, pins=%d)\n",
+              (void *)this, frame, (int)m_imp->m_solved.size(),
+              (int)m_imp->m_pinsEnabled);
   }
 
   // Copy the un-deformed skeleton to the output one
@@ -1839,18 +1860,27 @@ void PlasticSkeletonDeformation::clearSecondaryPinTargets() {
 
 void PlasticSkeletonDeformation::setSolvedSkeleton(
     int skeletonId, double frame, const PlasticSkeleton &skeleton) {
-  m_imp->m_solvedSkeleton = skeleton;
-  m_imp->m_solvedFrame    = frame;
-  m_imp->m_solvedSkelId   = skeletonId;
-  m_imp->m_hasSolved      = true;
+  if (::getenv("ZTORYC_PLASTIC_DIAG"))
+    fprintf(stderr, "SOLVEDIAG set  sd=%p frame=%g\n", (void *)this, frame);
+  std::lock_guard<std::mutex> lock(m_imp->m_solvedMutex);
+  // A long render keeps one entry per frame of its range; the bound only
+  // protects against a session that never changes a param (any change empties
+  // the whole cache, Imp::onChange).
+  if (m_imp->m_solved.size() > 4096) m_imp->m_solved.clear();
+  m_imp->m_solved[std::make_pair(skeletonId, frame)] = skeleton;
 }
 
 //------------------------------------------------------------------
 
 void PlasticSkeletonDeformation::clearSolvedSkeleton() {
-  m_imp->m_hasSolved    = false;
-  m_imp->m_solvedFrame  = -1.0e30;
-  m_imp->m_solvedSkelId = -1;
+  std::lock_guard<std::mutex> lock(m_imp->m_solvedMutex);
+  m_imp->m_solved.clear();
+}
+
+void PlasticSkeletonDeformation::clearSolvedSkeleton(double frame) {
+  std::lock_guard<std::mutex> lock(m_imp->m_solvedMutex);
+  for (auto it = m_imp->m_solved.begin(); it != m_imp->m_solved.end();)
+    it = (it->first.second == frame) ? m_imp->m_solved.erase(it) : std::next(it);
 }
 
 //------------------------------------------------------------------
