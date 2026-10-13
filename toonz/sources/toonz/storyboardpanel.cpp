@@ -9112,8 +9112,12 @@ void StoryboardPanel::onExportAnimatic() {
       QMessageBox::information(
           this, tr("Export editing timeline"),
           tr("Timeline written:\n%1\n\nImport it into your editing "
-             "software. The per-shot clips are referenced by name.")
+             "software. The per-shot clips are referenced by their full "
+             "path: if you move the folder, relink them there.")
               .arg(written.join("\n")));
+    else
+      DVGui::warning(tr("The editing timeline could not be written in:\n%1")
+                         .arg(outDir));
   }
 
   // Upload the freshly rendered per-shot clips to Kitsu (same matching as the
