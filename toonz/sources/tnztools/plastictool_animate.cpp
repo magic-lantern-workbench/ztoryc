@@ -654,6 +654,14 @@ void PlasticTool::leftButtonDrag_animate(const TPointD &pos,
     // a nasty Function Editor dependency,
     // it's better to call the following directly
     m_deformedSkeleton.invalidate();
+    // The controller's pivot rides on the deformed root, which this step may
+    // have moved (posing about a pin swings the body, root included). The
+    // tool matrix holds the controller, so refresh it now, as scaleDrag does:
+    // left stale until the release, the NEXT mouse event was mapped through
+    // the old pivot — harmless at scale 1, but flipped the error doubled and
+    // grew with every step, the pose ran away and the pin looked torn off
+    // (Franco, 2026-10-13).
+    updateMatrix();
     invalidate();
 
     // A child column (following its parent via a hook) needs a full xsheet
