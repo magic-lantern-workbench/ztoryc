@@ -729,6 +729,31 @@ PlasticToolOptionsBox::PlasticToolOptionsBox(QWidget *parent, TTool *tool,
     if (maintainLabel) animateLayout->insertWidget(insAt, maintainLabel);
   }
 
+  // Ztoryc: Flip H / Flip V, as in the Animate tool's bar and with its icons:
+  // the sign of the current scale turns, the other axis keeps its value
+  // (Franco, 2026-10-13).  Same path as a typed value (key at this frame, one
+  // undo, the global key), with «Maintain» set aside for the flip: Aspect
+  // Ratio would flip the other axis too, Mass would turn it negative.
+  auto addFlip = [&](ToolOptionParamRelayField *field, const char *icon,
+                     const QString &tip) {
+    auto *bt = new QPushButton(this);
+    bt->setFixedSize(QSize(20, 20));
+    bt->setIcon(createQIcon(icon));
+    bt->setIconSize(QSize(20, 20));
+    bt->setToolTip(tip);
+    animateLayout->insertWidget(animateLayout->indexOf(field) + 1, bt);
+    connect(bt, &QPushButton::clicked, this, [field]() {
+      if (!field->isEnabled()) return;
+      const int keep = l_plasticTool.m_scaleConstraint.getIndex();
+      l_plasticTool.m_scaleConstraint.setIndex(0);
+      field->setValue(-field->getValue());
+      emit field->valueChanged();
+      l_plasticTool.m_scaleConstraint.setIndex(keep);
+    });
+  };
+  addFlip(m_scaleXField, "fliphoriz", tr("Flip Character Horizontally"));
+  addFlip(m_scaleYField, "flipvert", tr("Flip Character Vertically"));
+
   ret = ret && connect(distanceLabel, SIGNAL(onMousePress(QMouseEvent *)),
                        m_distanceField, SLOT(receiveMousePress(QMouseEvent *)));
   ret = ret && connect(distanceLabel, SIGNAL(onMouseMove(QMouseEvent *)),

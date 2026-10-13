@@ -1526,16 +1526,29 @@ void ArrowToolOptionsBox::onCurrentAxisChanged(int axisId) {
 
 //-----------------------------------------------------------------------------
 
+// Ztoryc: a flip turns ONE axis and leaves the other as it is, whatever
+// «Maintain» says — as in Photoshop, Harmony and Moho.  The buttons used to
+// type -100 into the field, which applied the constraint: with Aspect Ratio a
+// horizontal flip flipped vertically too, i.e. a 180° turn (Franco,
+// 2026-10-13).  The constraint is set aside for the flip and given back.
 void ArrowToolOptionsBox::onFlipHorizontal() {
+  m_scaleHField->onScaleTypeChanged(0);
+  m_scaleVField->onScaleTypeChanged(0);
   m_scaleHField->setValue(m_scaleHField->getValue() * -1);
   emit m_scaleHField->measuredValueChanged(m_scaleHField->getMeasuredValue());
+  m_scaleHField->onScaleTypeChanged(m_maintainCombo->currentIndex());
+  m_scaleVField->onScaleTypeChanged(m_maintainCombo->currentIndex());
 }
 
 //-----------------------------------------------------------------------------
 
 void ArrowToolOptionsBox::onFlipVertical() {
+  m_scaleHField->onScaleTypeChanged(0);
+  m_scaleVField->onScaleTypeChanged(0);
   m_scaleVField->setValue(m_scaleVField->getValue() * -1);
   emit m_scaleVField->measuredValueChanged(m_scaleVField->getMeasuredValue());
+  m_scaleHField->onScaleTypeChanged(m_maintainCombo->currentIndex());
+  m_scaleVField->onScaleTypeChanged(m_maintainCombo->currentIndex());
 }
 
 //-----------------------------------------------------------------------------

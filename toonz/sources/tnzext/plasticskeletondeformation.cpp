@@ -1835,9 +1835,15 @@ TAffine PlasticSkeletonDeformation::getSquashControllerAffine(
       fabs(tx) <= 1e-9 && fabs(ty) <= 1e-9)
     return TAffine();
 
-  // Degenerate/negative scales would collapse or flip the mesh: clamp
-  sx = std::max(sx, 0.01);
-  sy = std::max(sy, 0.01);
+  // Ztoryc: a negative scale MIRRORS the character, as the Animate tool's
+  // does — Flip H / Flip V in the Plastic bar (Franco, 2026-10-13: «-100 con
+  // maintain none» squeezed it to 1% instead, the clamp ate the sign).  Only a
+  // scale near zero stays forbidden: it would collapse the mesh.
+  auto keepOff0 = [](double s) {
+    return s < 0 ? std::min(s, -0.01) : std::max(s, 0.01);
+  };
+  sx = keepOff0(sx);
+  sy = keepOff0(sy);
 
   // Pivot = DEFORMED root position + keyframeable offset: it follows the
   // character (the stage-object center can't — the advancement lives in
