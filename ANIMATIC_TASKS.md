@@ -191,17 +191,15 @@ Dopo la 0.17: tocca Board, viewer e room.
 
 ### 🆕 2026-10-12 — aperti dalla sessione (rilascio 0.17 non ancora fatto)
 
-- **Rilascio 0.17 (minor)**: review fatte (`reviews/2026-10-12_*` su v0.16.2..d5278ef50, e
+- **Rilascio 0.17 (minor)** — Franco il 13/10: «qualche ora di test e poi rilasciamo». Review fatte (`reviews/2026-10-12_*` su v0.16.2..d5278ef50, e
   `2026-10-13_*` sui 9 commit dopo). Restano: bump a 0.17.0, note bilingui (EN poi IT), i tre
   workflow. Franco ha detto che non c'e' fretta. Nelle note: il `.ztoryc` col ⌘S; il tipo di scena
   (popup + Workflow > Scene Type…); la riga «Scene:» alla creazione; bocche per personaggio e
   riconosciute dai disegni; render di piu' fotogrammi con personaggi agganciati; Sync with Play Range;
   pose non piu' perse duplicando colonne Plastic; lip sync (Whisper, Vosk, lettere saltate); cartelle
-  vuote nel Cast.
+  vuote nel Cast; Flip H / Flip V nel Plastic e flip di Animate su un asse; il tracker segue il
+  cambio di progetto (uno storyboard fuori dalla cartella del suo progetto non pubblica piu').
 - **Dalla review di chiusura (`reviews/2026-10-13_reviewer.md`), nessun bloccante:**
-  - I-1, consigliato PRIMA della CI: `saveProjectDb` (`ztorymodel.cpp:1468`) rifiuta in silenzio un
-    salvataggio con la memoria di un altro tracker (cambio progetto, poi una modifica prima del
-    caricamento). Almeno un avviso, o ricaricare il DB corrente. Domanda a Franco: avviso a video o log?
   - I-2: altre chiamate a `vertexDeformation(skelId, v)` senza controllo nel Plastic tool; piu' robusto
     azzerare la selezione dei vertici al cambio di colonna. Aspetta il responso di `plastic_watch.log`.
   - I-4: oltre 4096 voci la cache dei pin si svuota tutta (render ZtoRig > ~3 min). Sfratto parziale.

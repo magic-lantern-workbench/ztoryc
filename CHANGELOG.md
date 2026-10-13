@@ -1,3 +1,22 @@
+## [2026-10-13] — flip nel Plastic, il tracker segue il cambio di progetto
+
+### Added
+- **Flip H / Flip V nella barra del Plastic** (`780b2a6cb`): accanto a Scale H e Scale V, con le icone
+  di Animate; girano il segno della scala corrente, l'altro asse resta. Il controller accetta le scale
+  negative (prima -100 diventava 1% e il personaggio una striscia).
+
+### Fixed
+- **Flip di Animate** con «Maintain: A/R» girava anche l'altro asse (180°): ora un asse solo, come in
+  Photoshop, Harmony e Moho (`780b2a6cb`, candidato upstream).
+- **Cambio di progetto** (`238184e77`, I-1 della review): la memoria restava col tracker del progetto
+  di prima e la modifica successiva veniva rifiutata in silenzio. Verificato su copie
+  (`ZTORYC_SCENETEST=switchsave:`); ora il tracker segue il cambio, un rifiuto si dice a video, e il
+  Board pubblica solo le scene dentro la cartella del progetto corrente.
+
+### Notes
+- Review inline dei due commit in coda a `reviews/2026-10-13_*`: nessun bloccante.
+- Prossimo passo (Franco): qualche ora di prove, poi il rilascio della 0.17.
+
 ## [2026-10-12] — review della 0.17 coi subagent; render dei personaggi agganciati; lip sync, bocche e pose che si ritrovano
 
 ### Fixed

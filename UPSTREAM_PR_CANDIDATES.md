@@ -499,6 +499,18 @@ not portable.
 
 ---
 
+#### ✨ New (2026-10-13)
+
+- ❓ **Animate tool: Flip H / Flip V obey «Maintain»** — `tnztools/tooloptions.cpp`,
+  `ArrowToolOptionsBox::onFlipHorizontal()` / `onFlipVertical()`. The buttons type
+  `-value` into the Scale field and emit `measuredValueChanged`, so the field's
+  scale constraint applies: with «Maintain: A/R» a horizontal flip also flips
+  vertically (a 180° turn), with «Mass» the other axis is recomputed. In
+  Photoshop, Harmony and Moho a flip is its own command, independent of the
+  proportion lock. Fix: set both fields' scale type to None for the flip and
+  restore it from the combo. Ztoryc `780b2a6cb`.
+  *(Code identical upstream; trivially reproducible.)*
+
 #### ✨ New (2026-10-12)
 
 - ❓ **Saving a sub-xsheet as a scene copies every Cast folder of the parent,

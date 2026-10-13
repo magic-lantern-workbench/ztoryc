@@ -3241,6 +3241,16 @@ importata e verificata, sync ok. File corretto di Messina in `03_storyboard/anim
 
 ---
 
+## Chiusi il 2026-10-13
+
+### ✅ Flip H / Flip V nel Plastic; flip di Animate su un asse solo (`780b2a6cb`)
+Il controller ora accetta le scale negative. Collaudato da Franco (viewer, render, personaggio
+agganciato, maniglie, undo).
+
+### ✅ I-1 della review: il tracker segue il cambio di progetto (`238184e77`)
+Verificato su copie con `ZTORYC_SCENETEST=switchsave:`: prima il salvataggio veniva rifiutato in
+silenzio, ora la memoria segue e un rifiuto si dice a video.
+
 ## Chiusi il 2026-10-12
 
 ### ✅ Review di rilascio 0.17 (subagent) e le sue correzioni
