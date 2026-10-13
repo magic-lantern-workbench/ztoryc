@@ -338,6 +338,11 @@ void PlasticTool::leftButtonDown_animate(const TPointD &pos,
   if (device != CtrlNone) {
     SkVD *vd = rootVd_animate();
     TPointD gizmoC;
+    // The gizmo is about to change the controller: convert old pins first
+    // (see upgradeLegacyPins_animate). No undo of its own — the conversion
+    // does not change the picture, and an undone controller leaves it
+    // harmless: same controller, same spot.
+    if (vd) upgradeLegacyPins_animate();
     if (vd && squashPivot_animate(gizmoC)) {
       auto oldVal = [&](SkVD::Params p, double def) {
         return vd->m_params[p] ? vd->m_params[p]->getValue(::frame()) : def;
@@ -3275,7 +3280,73 @@ bool PlasticTool::onPropertyAboutToChange(std::string propertyName) {
       propertyName != "scaleYRelay")
     return false;
   beginFieldEdit_animate();
+  // Scale typed or flipped: old pins first learn their screen spot. After the
+  // snapshot, so the field edit's undo takes the conversion back too.
+  if (propertyName == "scaleXRelay" || propertyName == "scaleYRelay")
+    upgradeLegacyPins_animate();
   return true;
+}
+
+// Pins made before PINIX existed hold their LOCAL target only, which is right
+// on screen while the controller is neutral and slides the foot as soon as the
+// character is flipped, rotated or scaled (Franco, 2026-10-13: an old pin
+// slipped sideways, a new one held). Converted right before the controller
+// changes — never on load, so a scene that only gets opened is not touched:
+// at each target key, the image spot is where the vertex IS on screen at that
+// frame, read from the current (legacy) evaluation, so the conversion changes
+// nothing visible; from then on the plant holds that spot (plantPins).
+// Stage-owned pins (PINW) are planted elsewhere and left alone.
+void PlasticTool::upgradeLegacyPins_animate() {
+  if (!m_sd) return;
+  struct Capture {
+    SkVD *vd;
+    double frame;
+    TPointD image;
+  };
+  std::vector<Capture> caps;
+
+  // Read EVERYTHING first: a converted pin changes how its neighbours plant
+  // (the primary decides the shift), so writing as we go would read a mix.
+  SkD::vd_iterator vdt, vdEnd;
+  m_sd->vertexDeformations(vdt, vdEnd);
+  for (; vdt != vdEnd; ++vdt) {
+    SkVD *vd = (*vdt).second;
+    TDoubleParam *pin = vd->m_params[SkVD::PIN].getPointer();
+    TDoubleParam *tx  = vd->m_params[SkVD::PINTX].getPointer();
+    TDoubleParam *ix  = vd->m_params[SkVD::PINIX].getPointer();
+    TDoubleParam *iy  = vd->m_params[SkVD::PINIY].getPointer();
+    TDoubleParam *wx  = vd->m_params[SkVD::PINWX].getPointer();
+    if (!pin || !tx || !ix || !iy || tx->getKeyframeCount() == 0) continue;
+    if (ix->getKeyframeCount() > 0 || iy->getKeyframeCount() > 0) continue;
+    if (wx && wx->getKeyframeCount() > 0) continue;  // stage-owned
+
+    const int hook = m_sd->hookNumber(*(*vdt).first);
+    for (int k = 0; k < tx->getKeyframeCount(); ++k) {
+      const double f = tx->getKeyframe(k).m_frame;
+      if (pin->getValue(f) < 0.5) continue;  // a stale target, pin off here
+      const int skId = m_sd->skeletonId(f);
+      const int v    = m_sd->vertexIndex(hook, skId);
+      if (v < 0) continue;
+      PlasticSkeleton deformed;
+      m_sd->storeDeformedSkeleton(skId, f, deformed);
+      if (deformed.empty()) continue;
+      caps.push_back({vd, f,
+                      m_sd->getSquashControllerAffine(skId, f) *
+                          deformed.vertex(v).P()});
+    }
+  }
+  if (caps.empty()) return;
+
+  const bool wasSuspended    = l_suspendParamsObservation;
+  l_suspendParamsObservation = true;
+  for (const Capture &c : caps)
+    for (int p : {(int)SkVD::PINIX, (int)SkVD::PINIY}) {
+      TDoubleKeyframe tk(c.frame, p == SkVD::PINIX ? c.image.x : c.image.y);
+      tk.m_type = tk.m_prevType = TDoubleKeyframe::Constant;
+      c.vd->m_params[p]->setKeyframe(tk);
+    }
+  l_suspendParamsObservation = wasSuspended;
+  m_deformedSkeleton.invalidate();
 }
 
 void PlasticTool::beginFieldEdit_animate() {

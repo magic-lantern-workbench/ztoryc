@@ -479,6 +479,7 @@ protected:
   //! The curves a toolbar field edit can touch, copied before it writes, and
   //! the single undo built from them once it is done.
   void beginFieldEdit_animate();
+  void upgradeLegacyPins_animate();
   void commitFieldEdit_animate();
   std::vector<std::pair<TDoubleParamP, TDoubleParamP>> m_fieldBefore;
   bool m_fieldEditOpen = false;
