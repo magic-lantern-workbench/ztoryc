@@ -8062,7 +8062,8 @@ struct FcpxAudio {
 
 // Write an FCPXML 1.9 timeline: per-shot clips on the spine (cumulative offsets)
 // plus each audio clip as a connected clip on its own lane — a DaVinci Resolve /
-// Premiere / FCP importable edit of the animatic. Times are <frames>/<fps>s.
+// Final Cut Pro importable edit of the animatic. NOT Premiere: it reads the
+// older Final Cut 7 XML (xmeml), not FCPXML. Times are <frames>/<fps>s.
 bool writeAnimaticFcpxml(const QString &path, const QString &projectName, int fps,
                          int width, int height,
                          const std::vector<FcpxClip> &clips,
@@ -8314,7 +8315,7 @@ void StoryboardPanel::onExportAnimatic() {
       tr("Also export editing timeline (.fcpxml)"), &dlg);
   fcpxmlCheck->setToolTip(
       tr("Write an FCPXML edit that places the per-shot clips on a timeline,\n"
-         "importable into DaVinci Resolve, Premiere Pro or Final Cut Pro.\n"
+         "importable into DaVinci Resolve or Final Cut Pro.\n"
          "Requires 'One clip per shot' (the timeline references those clips)."));
   // Only meaningful with per-shot clips: enable it only when that mode is active.
   fcpxmlCheck->setEnabled(false);
@@ -8874,9 +8875,8 @@ void StoryboardPanel::onExportAnimatic() {
     if (writeAnimaticFcpxml(fcpxmlPath, sceneName, fps, w, h, clips, audioClips))
       QMessageBox::information(
           this, tr("Export editing timeline"),
-          tr("Timeline written:\n%1\n\nImport it into your NLE (DaVinci Resolve, "
-             "Premiere Pro or Final Cut Pro). The per-shot clips are referenced "
-             "by name.")
+          tr("Timeline written:\n%1\n\nImport it into DaVinci Resolve or "
+             "Final Cut Pro. The per-shot clips are referenced by name.")
               .arg(fcpxmlPath));
   }
 
