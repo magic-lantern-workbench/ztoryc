@@ -1828,6 +1828,16 @@ void TStageObject::solvePlasticCharacter(double t, const TAffine &baseLocal) {
           // Rest positions go through the same mapping as the live ones, so the
           // angles the limits are measured against stay comparable.
           j.rest = c.toScene * j.rest;
+          // A flipped character (negative scale on the column or on the
+          // Plastic controller) is mirrored in scene space: the solver's
+          // signed angles flip sign there, while the limits are authored in
+          // skeleton space. Mirror the limits too, or an elbow that may bend
+          // only one way is forced the wrong way and the pin cannot hold.
+          if (c.toScene.det() < 0) {
+            const double lo = j.minAngle, hi = j.maxAngle;
+            j.minAngle      = -hi;
+            j.maxAngle      = -lo;
+          }
           joints.push_back(j);
           pos.push_back(c.toScene * posed.vertex(vids[k]).P());
         }

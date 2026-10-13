@@ -816,12 +816,37 @@ void PlasticTool::pivotDrag_animate(const TPointD &pos) {
   double frame         = ::frame();
   const TPointD offset = target - deformedSkeleton().vertex(rootIdx).P();
 
+  // Moving the centre of a scale/rotation moves the image by (I - L) * delta,
+  // L = the controller's linear part. Invisible at scale 1, it doubles the
+  // move once the character is flipped (Franco, 2026-10-13: «se sposto il
+  // pivot si sposta tutto il personaggio»). Compensate on the controller's
+  // translation, as the Animate tool's centre drag keeps the object still.
+  const TPointD oldOffset(vd->m_params[SkVD::PIVOTX]->getValue(frame),
+                          vd->m_params[SkVD::PIVOTY]->getValue(frame));
+  const TPointD delta = offset - oldOffset;
+  const TAffine ctrl  = m_sd->getSquashControllerAffine(::skeletonId(), frame);
+  const TPointD drift(delta.x - (ctrl.a11 * delta.x + ctrl.a12 * delta.y),
+                      delta.y - (ctrl.a21 * delta.x + ctrl.a22 * delta.y));
+  const bool compensate =
+      norm2(drift) > 1e-12 && vd->m_params[SkVD::TRANSX] &&
+      vd->m_params[SkVD::TRANSY];
+
   l_suspendParamsObservation = true;
   ::setKeyframe(vd->m_params[SkVD::PIVOTX], frame);
   ::setKeyframe(vd->m_params[SkVD::PIVOTY], frame);
   vd->m_params[SkVD::PIVOTX]->setValue(frame, offset.x);
   vd->m_params[SkVD::PIVOTY]->setValue(frame, offset.y);
+  if (compensate) {
+    TDoubleParam *tx = vd->m_params[SkVD::TRANSX].getPointer();
+    TDoubleParam *ty = vd->m_params[SkVD::TRANSY].getPointer();
+    const double ox = tx->getValue(frame), oy = ty->getValue(frame);
+    ::setKeyframe(vd->m_params[SkVD::TRANSX], frame);
+    ::setKeyframe(vd->m_params[SkVD::TRANSY], frame);
+    tx->setValue(frame, ox - drift.x);
+    ty->setValue(frame, oy - drift.y);
+  }
   l_suspendParamsObservation = false;
+  m_deformedSkeleton.invalidate();
 
   invalidate();
 }
@@ -1671,8 +1696,18 @@ std::map<int, TPointD> pinTargetsAtFrame(
     const SkDP &sd, int skelId, double frame, const std::vector<int> &pins,
     const std::map<int, TPointD> &fallback) {
   std::map<int, TPointD> targets;
+  // An image-space pin (PINIX keyed) targets its screen spot: back through the
+  // current controller into tool-local space. The eval refines it with the
+  // root's motion (plantPins); between two drag events this is close enough.
+  const TAffine ctrlInv = sd->getSquashControllerAffine(skelId, frame).inv();
   for (int p : pins) {
     SkVD *vd = sd->vertexDeformation(skelId, p);
+    if (vd && vd->m_params[SkVD::PINIX] && vd->m_params[SkVD::PINIY] &&
+        vd->m_params[SkVD::PINIX]->getKeyframeCount() > 0) {
+      targets[p] = ctrlInv * TPointD(vd->m_params[SkVD::PINIX]->getValue(frame),
+                                     vd->m_params[SkVD::PINIY]->getValue(frame));
+      continue;
+    }
     if (vd && vd->m_params[SkVD::PINTX] && vd->m_params[SkVD::PINTY] &&
         !(vd->m_params[SkVD::PINTX]->isDefault() &&
           vd->m_params[SkVD::PINTY]->isDefault()))
@@ -2310,7 +2345,8 @@ void PlasticTool::bakePinsToFK_animate() {
     SkVD *vd = m_sd->vertexDeformation(skelId, vt.m_idx);
     if (!vd) continue;
     for (int p : {(int)SkVD::PIN, (int)SkVD::PINTX, (int)SkVD::PINTY,
-                  (int)SkVD::PINWX, (int)SkVD::PINWY})
+                  (int)SkVD::PINWX, (int)SkVD::PINWY, (int)SkVD::PINIX,
+                  (int)SkVD::PINIY})
       if (vd->m_params[p]) vd->m_params[p]->clearKeyframes();
   }
 
@@ -2784,10 +2820,14 @@ void PlasticTool::togglePinAtCurrentFrame() {
   // spot instead of the current one — which is exactly what shifted everything.
   bool capture =
       !pinned && vd->m_params[SkVD::PINTX] && vd->m_params[SkVD::PINTY];
-  TPointD target;
+  TPointD target, image;
   if (capture) {
     m_deformedSkeleton.invalidate();
     target = deformedSkeleton().vertex(v).P();
+    // And where it is on screen (after the controller): the plant holds THAT
+    // spot, so a rotated, scaled or flipped character keeps its foot planted
+    // while the leg bends — see SkVD::PINIX.
+    image = m_sd->getSquashControllerAffine(::skeletonId(), frame) * target;
   }
 
   // When unpinning, the eval-time correction (shift + limb CCD) that was
@@ -2824,6 +2864,12 @@ void PlasticTool::togglePinAtCurrentFrame() {
       tk.m_type = tk.m_prevType = TDoubleKeyframe::Constant;
       vd->m_params[c]->setKeyframe(tk);
     }
+    if (vd->m_params[SkVD::PINIX] && vd->m_params[SkVD::PINIY])
+      for (int c : {SkVD::PINIX, SkVD::PINIY}) {
+        TDoubleKeyframe tk(frame, c == SkVD::PINIX ? image.x : image.y);
+        tk.m_type = tk.m_prevType = TDoubleKeyframe::Constant;
+        vd->m_params[c]->setKeyframe(tk);
+      }
   }
 
   // Bake the previously planted pose into the ANGLE params (compare against
@@ -3808,6 +3854,14 @@ PlasticTool::buildUnifiedGraph_animate(double frame) {
           !vd->m_params[SkVD::PINTX]->isDefault())
         tLocal = TPointD(vd->m_params[SkVD::PINTX]->getValue(cc.paramFrame),
                          vd->m_params[SkVD::PINTY]->getValue(cc.paramFrame));
+      // Image-space pin: its spot is already after the controller, so only
+      // the column placement is left (cc.world = column * controller).
+      if (vd->m_params[SkVD::PINIX] && vd->m_params[SkVD::PINIY] &&
+          vd->m_params[SkVD::PINIX]->getKeyframeCount() > 0)
+        tLocal = cc.def->getSquashControllerAffine(cc.skelId, cc.paramFrame)
+                     .inv() *
+                 TPointD(vd->m_params[SkVD::PINIX]->getValue(cc.paramFrame),
+                         vd->m_params[SkVD::PINIY]->getValue(cc.paramFrame));
       g.pinTarget[n] = cc.world * tLocal;
     }
 

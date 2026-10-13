@@ -294,6 +294,7 @@ bool TKeyframeData::getKeyframes(std::set<Position> &positions,
 //-----------------------------------------------------------------------------
 
 void TKeyframeData::getKeyframes(std::set<Position> &positions) const {
+  if (positions.empty()) return;  // Ztoryc: no anchor to read (see pasteKeyframesWithShift)
   int r0 = positions.begin()->first;
   int c0 = positions.begin()->second;
   positions.clear();

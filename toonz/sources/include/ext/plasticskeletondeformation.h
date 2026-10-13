@@ -191,8 +191,23 @@ public:
                 //!< change during the animation), otherwise the static
                 //!< PlasticSkeletonVertex limit is used. Default 0, unused
                 //!< until keyed → old scenes and un-keyed joints unaffected.
+    PINIX,      //!< Where a local pin's vertex was in the IMAGE when pinned:
+    PINIY,      //!< after the squash & stretch controller, before the column
+                //!< placement. The controller's pivot follows the deformed
+                //!< root, so a local (PINTX) target holds on screen only
+                //!< while the controller is neutral — rotated, scaled or
+                //!< flipped, bending the pinned leg slid the foot (twice the
+                //!< root's motion when flipped, Franco 2026-10-13). When keyed,
+                //!< the plant solves for the image spot instead. Unkeyed in
+                //!< scenes made before: those keep the PINTX behaviour.
     PARAMS_COUNT
   };
+
+  //! The pin family: PIN, its targets (local, scene, image). Their keys are
+  //! step-interpolated, and their presence is a semantic switch, not pose data.
+  static bool isPinParam(int p) {
+    return (p >= PIN && p <= PINWY) || p == PINIX || p == PINIY;
+  }
 
   struct Keyframe {
     TDoubleKeyframe m_keyframes[PARAMS_COUNT];

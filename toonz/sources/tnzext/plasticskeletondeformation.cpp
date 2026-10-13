@@ -52,13 +52,13 @@ static const char *parNames[SkVD::PARAMS_COUNT] = {
     "PinTY",  "PinWX",    "PinWY",  "RootX",    "RootY",
     "ScaleX", "ScaleY",   "PivotX", "PivotY",   "TransX",
     "TransY", "Rotation", "ShearX", "ShearY",   "MinAngle",
-    "MaxAngle"};
+    "MaxAngle", "PinIX", "PinIY"};
 static const char *parMeasures[SkVD::PARAMS_COUNT] = {
     "angle",    "fxLength", "",         "",         "fxLength",
     "fxLength", "fxLength", "fxLength", "fxLength", "fxLength",
     "scale",    "scale",    "fxLength", "fxLength", "fxLength",
     "fxLength", "angle",    "shear",    "shear",    "angle",
-    "angle"};
+    "angle",    "fxLength", "fxLength"};
 
 //------------------------------------------------------------------
 
@@ -169,7 +169,8 @@ bool SkVD::setKeyframe(const SkVD::Keyframe &values) {
 // foot drifted over the whole last stretch of the walk (Franco, 2026-10-03).
 // Every path that writes whole keys (paste, load) comes through here.
 void SkVD::makePinCurvesStep() {
-  for (int p = PIN; p <= PINWY; ++p) {
+  for (int p = 0; p < PARAMS_COUNT; ++p) {
+    if (!isPinParam(p)) continue;
     TDoubleParam *param = m_params[p].getPointer();
     if (!param) continue;
     for (int k = 0; k < param->getKeyframeCount(); ++k) {
@@ -1565,6 +1566,12 @@ double PlasticSkeletonDeformation::pinResidualForPose(
 
 //------------------------------------------------------------------
 
+namespace {
+bool controllerIsNeutral(const SkVD &vd, double frame);
+TAffine controllerAffineAbout(const SkVD &vd, double frame,
+                              const TPointD &root);
+}  // namespace
+
 void PlasticSkeletonDeformation::plantPins(int skelId, double frame,
                                            PlasticSkeleton &skeleton,
                                            double *worstResidual2) const {
@@ -1645,6 +1652,8 @@ void PlasticSkeletonDeformation::plantPins(int skelId, double frame,
     int idx;
     TPointD target;
     double since;
+    bool hasImage = false;  // PINIX/PINIY keyed: plant on the image spot
+    TPointD image;
   };
   std::vector<ActivePin> pins;
 
@@ -1735,11 +1744,65 @@ void PlasticSkeletonDeformation::plantPins(int skelId, double frame,
                    vd.m_params[SkVD::PINTY]->getValue(frame));
     target -= controllerTrans(frame) -
               controllerTrans(targetKeyFrame(*vd.m_params[SkVD::PINTX]));
-    pins.push_back(
-        {(int)vt.m_idx, target,
-         locals::activationFrame(*vd.m_params[SkVD::PIN], frame)});
+    ActivePin ap{(int)vt.m_idx, target,
+                 locals::activationFrame(*vd.m_params[SkVD::PIN], frame)};
+    if (vd.m_params[SkVD::PINIX] && vd.m_params[SkVD::PINIY] &&
+        (vd.m_params[SkVD::PINIX]->getKeyframeCount() > 0 ||
+         vd.m_params[SkVD::PINIY]->getKeyframeCount() > 0)) {
+      ap.hasImage = true;
+      ap.image    = TPointD(vd.m_params[SkVD::PINIX]->getValue(frame),
+                            vd.m_params[SkVD::PINIY]->getValue(frame));
+    }
+    pins.push_back(ap);
   }
   if (pins.empty()) return;
+
+  // Image-space pins (PINIX/PINIY, see the header). The controller A turns
+  // the skeleton into the image about the planted root, which the plant
+  // itself moves — so a local target holds on screen only while A is
+  // neutral. Rotated, scaled or flipped, a pinned foot slid whenever the leg
+  // bent (Franco, 2026-10-13). Solve for the local target that lands on the
+  // image spot instead:
+  //   * the primary plant shifts the whole skeleton by d, and a rigid shift
+  //     moves the image by exactly d (the pivot rides along), so
+  //     d = image - A_fk(foot_fk), A_fk = A about the FK root;
+  //   * after it the controller is A_fk shifted by d, so any pin's local
+  //     target is A_fk^-1(image - d) + d — for the primary that is
+  //     foot_fk + d again, the same equation.
+  // A neutral controller at capture and now gives back exactly the PINTX
+  // target: old and new pins agree whenever there is nothing to correct.
+  {
+    bool anyImage = false;
+    for (const ActivePin &ap : pins) anyImage |= ap.hasImage;
+    // Also with a neutral controller: a pin captured while the character was
+    // flipped must stay on its image spot when the flip is keyed away.
+    if (anyImage) {
+      TPointD rootFK;
+      for (auto vt = verts.begin(); vt != verts.end(); ++vt)
+        if (vt->parent() < 0) {
+          rootFK = vt->P();
+          break;
+        }
+      const TAffine A =
+          rootVd ? controllerAffineAbout(*rootVd, frame, rootFK) : TAffine();
+      if (fabs(A.det()) > 1e-12) {
+        const TAffine Ainv = A.inv();
+        // Same primary as PlasticPinSolver::plant: the oldest pin, first in
+        // list order on a tie; none when the stage owns the translation.
+        TPointD d;
+        if (stagePinned.empty()) {
+          const ActivePin *primary = &pins[0];
+          for (const ActivePin &ap : pins)
+            if (ap.since < primary->since) primary = &ap;
+          const TPointD footFK = skeleton.vertex(primary->idx).P();
+          d = primary->hasImage ? primary->image - A * footFK
+                                : primary->target - footFK;
+        }
+        for (ActivePin &ap : pins)
+          if (ap.hasImage) ap.target = Ainv * (ap.image - d) + d;
+      }
+    }
+  }
 
   // Delegate to the shared solver. Same algorithm as before — it was lifted out
   // of here verbatim — but now the multi-column character can run the identical
@@ -1799,6 +1862,58 @@ void PlasticSkeletonDeformation::plantPins(int skelId, double frame,
 
 //------------------------------------------------------------------
 
+namespace {
+
+// The controller about a given ROOT position: translation, then rotation,
+// shear and scale about root + keyframeable pivot offset. Identity when the
+// params are neutral. Shared by getSquashControllerAffine (root = deformed,
+// planted root) and the image-space pin plant (root = the FK root, before the
+// plant moves it).
+bool controllerIsNeutral(const SkVD &vd, double frame) {
+  auto val = [&vd, frame](SkVD::Params p, double def) {
+    return vd.m_params[p] ? vd.m_params[p]->getValue(frame) : def;
+  };
+  return fabs(val(SkVD::SCALEX, 1.0) - 1.0) <= 1e-9 &&
+         fabs(val(SkVD::SCALEY, 1.0) - 1.0) <= 1e-9 &&
+         fabs(val(SkVD::ROT, 0.0)) <= 1e-9 &&
+         fabs(val(SkVD::SHEARX, 0.0)) <= 1e-9 &&
+         fabs(val(SkVD::SHEARY, 0.0)) <= 1e-9 &&
+         fabs(val(SkVD::TRANSX, 0.0)) <= 1e-9 &&
+         fabs(val(SkVD::TRANSY, 0.0)) <= 1e-9;
+}
+
+TAffine controllerAffineAbout(const SkVD &vd, double frame,
+                              const TPointD &root) {
+  auto val = [&vd, frame](SkVD::Params p, double def) {
+    return vd.m_params[p] ? vd.m_params[p]->getValue(frame) : def;
+  };
+
+  if (controllerIsNeutral(vd, frame)) return TAffine();
+
+  double sx  = val(SkVD::SCALEX, 1.0), sy = val(SkVD::SCALEY, 1.0);
+  double rot = val(SkVD::ROT, 0.0);
+  double shx = val(SkVD::SHEARX, 0.0), shy = val(SkVD::SHEARY, 0.0);
+  double tx  = val(SkVD::TRANSX, 0.0), ty = val(SkVD::TRANSY, 0.0);
+
+  // A negative scale MIRRORS the character, as the Animate tool's does —
+  // Flip H / Flip V in the Plastic bar. Only a scale near zero stays
+  // forbidden: it would collapse the mesh.
+  auto keepOff0 = [](double s) {
+    return s < 0 ? std::min(s, -0.01) : std::max(s, 0.01);
+  };
+  sx = keepOff0(sx);
+  sy = keepOff0(sy);
+
+  TPointD C = root;
+  C.x += val(SkVD::PIVOTX, 0.0);
+  C.y += val(SkVD::PIVOTY, 0.0);
+
+  return TTranslation(tx, ty) * TTranslation(C) * TRotation(rot) *
+         TShear(shx, shy) * TScale(sx, sy) * TTranslation(-C);
+}
+
+}  // namespace
+
 TAffine PlasticSkeletonDeformation::getSquashControllerAffine(
     int skelId, double frame) const {
   const PlasticSkeletonP &skel = skeleton(skelId);
@@ -1821,29 +1936,7 @@ TAffine PlasticSkeletonDeformation::getSquashControllerAffine(
   // ZtoRig: the controller channels are pose params like any other, so an
   // action that squashes or rotates the whole character has already been
   // stamped into them — read the raw value.
-  auto val = [&vd, frame](SkVD::Params p, double def) {
-    return vd.m_params[p] ? vd.m_params[p]->getValue(frame) : def;
-  };
-
-  double sx  = val(SkVD::SCALEX, 1.0), sy = val(SkVD::SCALEY, 1.0);
-  double rot = val(SkVD::ROT, 0.0);
-  double shx = val(SkVD::SHEARX, 0.0), shy = val(SkVD::SHEARY, 0.0);
-  double tx  = val(SkVD::TRANSX, 0.0), ty = val(SkVD::TRANSY, 0.0);
-
-  if (fabs(sx - 1.0) <= 1e-9 && fabs(sy - 1.0) <= 1e-9 &&
-      fabs(rot) <= 1e-9 && fabs(shx) <= 1e-9 && fabs(shy) <= 1e-9 &&
-      fabs(tx) <= 1e-9 && fabs(ty) <= 1e-9)
-    return TAffine();
-
-  // Ztoryc: a negative scale MIRRORS the character, as the Animate tool's
-  // does — Flip H / Flip V in the Plastic bar (Franco, 2026-10-13: «-100 con
-  // maintain none» squeezed it to 1% instead, the clamp ate the sign).  Only a
-  // scale near zero stays forbidden: it would collapse the mesh.
-  auto keepOff0 = [](double s) {
-    return s < 0 ? std::min(s, -0.01) : std::max(s, 0.01);
-  };
-  sx = keepOff0(sx);
-  sy = keepOff0(sy);
+  if (controllerIsNeutral(vd, frame)) return TAffine();
 
   // Pivot = DEFORMED root position + keyframeable offset: it follows the
   // character (the stage-object center can't — the advancement lives in
@@ -1852,14 +1945,7 @@ TAffine PlasticSkeletonDeformation::getSquashControllerAffine(
   storeDeformedSkeleton(skelId, frame, deformed);
   if (deformed.empty()) return TAffine();
 
-  TPointD C = deformed.vertex(rootIdx).P();
-  C.x += val(SkVD::PIVOTX, 0.0);
-  C.y += val(SkVD::PIVOTY, 0.0);
-
-  // Same composition order as the Toonz stage placement: translation, then
-  // rotation, shear and scale about the pivot
-  return TTranslation(tx, ty) * TTranslation(C) * TRotation(rot) *
-         TShear(shx, shy) * TScale(sx, sy) * TTranslation(-C);
+  return controllerAffineAbout(vd, frame, deformed.vertex(rootIdx).P());
 }
 
 //------------------------------------------------------------------

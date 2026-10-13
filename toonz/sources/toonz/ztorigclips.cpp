@@ -420,7 +420,7 @@ struct InsertOptions {
 };
 
 namespace {
-bool isPinParam(int p) { return p >= SkVD::PIN && p <= SkVD::PINWY; }
+bool isPinParam(int p) { return SkVD::isPinParam(p); }
 }  // namespace
 
 // Every animated curve of the character's xsheet: the columns' movement, the

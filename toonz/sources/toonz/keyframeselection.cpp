@@ -1146,6 +1146,13 @@ void TKeyframeSelection::shiftKeyframes(int direction) {
 void TKeyframeSelection::pasteKeyframesWithShift(int r0, int r1, int c0,
                                                  int c1) {
   unselectLockedColumn();
+  // Ztoryc: Paste stays enabled on an EMPTY key selection (a click on a cell
+  // without keys empties it but keeps it current), and unselectLockedColumn
+  // can empty it too. Below, getKeyframes reads the anchor from
+  // positions.begin(): on an empty set that is garbage, and setKeyframes then
+  // asked for a column ~87000, recursing in getStageObject until the stack
+  // overflowed (crash of 2026-10-13). Nothing selected = nothing to paste.
+  if (m_positions.empty()) return;
 
   // Retrieve keyframes to paste
   QClipboard *clipboard = QApplication::clipboard();
