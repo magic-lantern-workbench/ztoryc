@@ -176,6 +176,9 @@ static std::vector<int> ztoryShotColumns(
   for (int col = 0; col < xsh->getColumnCount(); col++) {
     TXshColumn *column = xsh->getColumn(col);
     if (!column || column->isEmpty()) continue;
+    // A sound column never holds a sub-scene: skip it instead of reading every
+    // cell, now that this runs on every xsheet change (onXsheetChanged).
+    if (column->getSoundColumn()) continue;
     int r0 = 0, r1 = 0;
     column->getRange(r0, r1);
     for (int r = r0; r <= r1; r++) {
@@ -8395,7 +8398,8 @@ private:
       const bool transIn  = i > 0 && tl.trans[i - 1] > 0;
       const bool transOut = i + 1 < clips.size() && tl.trans[i] > 0;
       const int inW       = transIn ? in - tl.headCut[i] : in;
-      const int outW      = in + visible + (transOut ? tl.tailCut[i] : 0);
+      const int outW      = std::min(
+          c.frames, in + visible + (transOut ? tl.tailCut[i] : 0));
       m_x.writeStartElement("clipitem");
       m_x.writeAttribute("id", QString("clipitem-v%1").arg(i + 1));
       text("name", c.name);
@@ -8991,9 +8995,16 @@ void StoryboardPanel::onExportAnimatic() {
         }
         return false;
       };
+      // A Copy shares the sub-scene with another shot: skip the columns that
+      // belong to the other shots, or the twin's column would be taken.
+      auto ownedByOther = [&](int c) {
+        for (int k = 0; k < (int)m_shots.size(); k++)
+          if (k != si && m_shots[k].data->xsheetColumn == c) return true;
+        return false;
+      };
       if (!shows(col))
         for (int c = 0; c < xsh->getColumnCount(); c++)
-          if (shows(c)) {
+          if (shows(c) && !ownedByOther(c)) {
             col = c;
             break;
           }
