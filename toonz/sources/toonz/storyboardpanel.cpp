@@ -4829,6 +4829,14 @@ void StoryboardPanel::onXsheetChanged() {
   TXsheet *xsh = scene->getChildStack()->getTopXsheet();
   if (!xsh) return;
 
+  // A column added among the shot columns (recording audio in the animatic
+  // puts the sound column right there) moves every shot after it: re-anchor
+  // the indices before anything reads them — the durations below, and the
+  // exports, the lip sync and the PDF that read them later (Franco,
+  // 2026-10-13: the per-shot export picked the recording and the wrong
+  // shots). A no-op when the board and the scene do not match one to one.
+  reanchorColumnsFromScene();
+
   // Camera shape changed (e.g. Camera Settings → square): relayout + re-render
   // all previews at the new aspect.  Cheap aspect check avoids doing this on the
   // many xsheet changes that don't touch the camera.
@@ -8060,6 +8068,52 @@ struct FcpxAudio {
   int offset; int frames; int srcStart; int srcLen; int lane;
 };
 
+// The animatic's edit, shared by the FCPXML and the Final Cut 7 XML writers so
+// the two exports can never disagree (they were two copies of this).
+// trans[i]     = dissolve frames between clip i and i+1, clamped to both clips;
+// compStart[i] = where clip i's rendered media starts on the timeline (the
+//                shots overlap by the dissolves, as in the main xsheet);
+// headCut/tailCut = the cut sits at the middle of each dissolve: the clip
+//                after enters headCut frames into its media, the clip before
+//                stops tailCut frames before its end (those frames are the
+//                handles the dissolve feeds on).
+struct AnimaticTimeline {
+  std::vector<int> trans, compStart, headCut, tailCut;
+  int total          = 0;
+  bool anyTransition = false;
+
+  int visible(size_t i, const std::vector<FcpxClip> &clips) const {
+    return std::max(1, clips[i].frames - headCut[i] - tailCut[i]);
+  }
+  int cutStart(size_t i) const { return compStart[i] + headCut[i]; }
+};
+
+AnimaticTimeline computeAnimaticTimeline(const std::vector<FcpxClip> &clips) {
+  AnimaticTimeline t;
+  const size_t n = clips.size();
+  t.trans.assign(n, 0);
+  t.compStart.assign(n, 0);
+  t.headCut.assign(n, 0);
+  t.tailCut.assign(n, 0);
+  for (size_t i = 0; i + 1 < n; i++) {
+    t.trans[i] = qBound(0, clips[i].transitionAfter,
+                        qMin(clips[i].frames, clips[i + 1].frames));
+    if (t.trans[i] > 0) t.anyTransition = true;
+  }
+  int acc = 0;
+  for (size_t i = 0; i < n; i++) {
+    t.compStart[i] = acc;
+    acc += clips[i].frames - (i + 1 < n ? t.trans[i] : 0);
+  }
+  for (size_t i = 0; i + 1 < n; i++) {
+    if (t.trans[i] <= 0) continue;
+    t.headCut[i + 1] = t.trans[i] / 2;
+    t.tailCut[i]     = t.trans[i] - t.trans[i] / 2;
+  }
+  t.total = n ? t.compStart.back() + clips.back().frames : 0;
+  return t;
+}
+
 // Write an FCPXML 1.9 timeline: per-shot clips on the spine (cumulative offsets)
 // plus each audio clip as a connected clip on its own lane — a DaVinci Resolve /
 // Final Cut Pro importable edit of the animatic. NOT Premiere: it reads the
@@ -8074,28 +8128,13 @@ bool writeAnimaticFcpxml(const QString &path, const QString &projectName, int fp
   if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
   auto dur = [fps](int frames) { return QString("%1/%2s").arg(frames).arg(fps); };
 
-  // Cross-dissolve overlaps, clamped so an overlap never exceeds either
-  // neighbouring clip. trans[i] = frames clip i overlaps clip i+1.
-  std::vector<int> trans(clips.size(), 0);
-  bool anyTransition = false;
-  for (size_t i = 0; i + 1 < clips.size(); i++) {
-    int t = qBound(0, clips[i].transitionAfter,
-                   qMin(clips[i].frames, clips[i + 1].frames));
-    trans[i] = t;
-    if (t > 0) anyTransition = true;
-  }
-  // Timeline start of each clip, with the dissolves overlapped — the same
-  // timeline as the main xsheet, where a shot column already starts inside the
-  // previous one's dissolve window.
-  std::vector<int> compStart(clips.size(), 0);
-  {
-    int acc = 0;
-    for (size_t i = 0; i < clips.size(); i++) {
-      compStart[i] = acc;
-      acc += clips[i].frames - (i + 1 < clips.size() ? trans[i] : 0);
-    }
-  }
-  int total = clips.empty() ? 0 : compStart.back() + clips.back().frames;
+  const AnimaticTimeline tl          = computeAnimaticTimeline(clips);
+  const std::vector<int> &trans      = tl.trans;
+  const std::vector<int> &compStart  = tl.compStart;
+  const std::vector<int> &headCut    = tl.headCut;
+  const std::vector<int> &tailCut    = tl.tailCut;
+  const bool anyTransition           = tl.anyTransition;
+  const int total                    = tl.total;
 
   QXmlStreamWriter x(&f);
   x.setAutoFormatting(true);
@@ -8173,12 +8212,7 @@ bool writeAnimaticFcpxml(const QString &path, const QString &projectName, int fp
   // dissolve: the clip before ends there (its rendered tail is the handle),
   // the clip after starts there, entered `head` frames into its media (its
   // rendered head is the handle). The dissolve stays exactly where it was.
-  std::vector<int> headCut(clips.size(), 0), tailCut(clips.size(), 0);
-  for (size_t i = 0; i + 1 < clips.size(); i++) {
-    if (trans[i] <= 0) continue;
-    headCut[i + 1] = trans[i] / 2;
-    tailCut[i]     = trans[i] - trans[i] / 2;
-  }
+  // (headCut / tailCut: computeAnimaticTimeline.)
   vid = 0;
   for (size_t i = 0; i < clips.size(); i++) {
     const auto &c = clips[i];
@@ -8236,210 +8270,244 @@ bool writeAnimaticFcpxml(const QString &path, const QString &projectName, int fp
 }
 
 // BETA — Final Cut 7 XML (xmeml v5), the edit format Premiere Pro imports
-// (it does not read FCPXML). Same data and the same timeline as
-// writeAnimaticFcpxml: per-shot clips back to back, each dissolve centred on
-// the cut and fed by the handles the per-shot render already carries (head of
-// the clip after, tail of the clip before), audio clips on their own tracks.
-// Not yet opened in Premiere (we have none): checked in DaVinci, which reads
-// this format too. Frames everywhere, timebase = fps.
+// (it does not read FCPXML). The same edit as writeAnimaticFcpxml
+// (computeAnimaticTimeline): per-shot clips back to back, each dissolve
+// centred on the cut with -1 on the clip edges that touch it, as Final Cut 7
+// and Premiere export it. Checked in DaVinci (which reads this format too);
+// not yet opened in Premiere itself.
+class XmemlWriter {
+public:
+  XmemlWriter(QIODevice *dev, int fps, int width, int height)
+      : m_x(dev), m_fps(fps), m_w(width), m_h(height) {
+    m_x.setAutoFormatting(true);
+  }
+
+  void write(const QString &name, const std::vector<FcpxClip> &clips,
+             const std::vector<FcpxAudio> &audio) {
+    const AnimaticTimeline tl = computeAnimaticTimeline(clips);
+    m_x.writeStartDocument();
+    m_x.writeDTD("<!DOCTYPE xmeml>");
+    m_x.writeStartElement("xmeml");
+    m_x.writeAttribute("version", "5");
+    m_x.writeStartElement("sequence");
+    m_x.writeAttribute("id", "sequence-1");
+    text("name", name);
+    num("duration", tl.total);
+    rate();
+    m_x.writeStartElement("timecode");
+    rate();
+    text("string", "00:00:00:00");
+    num("frame", 0);
+    text("displayformat", "NDF");
+    m_x.writeEndElement();  // timecode
+    m_x.writeStartElement("media");
+    writeVideo(clips, tl);
+    writeAudio(audio);
+    m_x.writeEndElement();  // media
+    m_x.writeEndElement();  // sequence
+    m_x.writeEndElement();  // xmeml
+    m_x.writeEndDocument();
+  }
+
+private:
+  QXmlStreamWriter m_x;
+  int m_fps, m_w, m_h;
+  QMap<QString, QString> m_fileIds;  // path -> file id, defined once
+
+  void text(const char *tag, const QString &v) { m_x.writeTextElement(tag, v); }
+  void num(const char *tag, int v) { text(tag, QString::number(v)); }
+  void rate() {
+    m_x.writeStartElement("rate");
+    num("timebase", m_fps);
+    text("ntsc", "FALSE");
+    m_x.writeEndElement();
+  }
+  // Premiere wants file://localhost/<encoded absolute path>.
+  static QString pathUrl(const QString &file) {
+    return QString("file://localhost") +
+           QUrl::fromLocalFile(file).path(QUrl::FullyEncoded);
+  }
+
+  // A media file is described the first time and referenced by id after:
+  // `<file id="file-3"/>`, as Final Cut 7 and Premiere write it.
+  void file(const QString &path, int frames, bool video) {
+    auto it = m_fileIds.find(path);
+    if (it != m_fileIds.end()) {
+      m_x.writeEmptyElement("file");
+      m_x.writeAttribute("id", it.value());
+      return;
+    }
+    const QString id = QString("file-%1").arg(m_fileIds.size() + 1);
+    m_fileIds.insert(path, id);
+    m_x.writeStartElement("file");
+    m_x.writeAttribute("id", id);
+    text("name", QFileInfo(path).fileName());
+    text("pathurl", pathUrl(path));
+    rate();
+    num("duration", frames);
+    m_x.writeStartElement("media");
+    if (video) {
+      m_x.writeStartElement("video");
+      m_x.writeStartElement("samplecharacteristics");
+      rate();
+      num("width", m_w);
+      num("height", m_h);
+      m_x.writeEndElement();  // samplecharacteristics
+      m_x.writeEndElement();  // video
+    } else {
+      m_x.writeStartElement("audio");
+      m_x.writeStartElement("samplecharacteristics");
+      num("depth", 16);
+      num("samplerate", 48000);
+      m_x.writeEndElement();  // samplecharacteristics
+      num("channelcount", 2);
+      m_x.writeEndElement();  // audio
+    }
+    m_x.writeEndElement();  // media
+    m_x.writeEndElement();  // file
+  }
+
+  void writeVideo(const std::vector<FcpxClip> &clips,
+                  const AnimaticTimeline &tl) {
+    m_x.writeStartElement("video");
+    m_x.writeStartElement("format");
+    m_x.writeStartElement("samplecharacteristics");
+    rate();
+    num("width", m_w);
+    num("height", m_h);
+    text("pixelaspectratio", "square");
+    text("fielddominance", "none");
+    m_x.writeEndElement();  // samplecharacteristics
+    m_x.writeEndElement();  // format
+    m_x.writeStartElement("track");
+    for (size_t i = 0; i < clips.size(); i++) {
+      const FcpxClip &c = clips[i];
+      const int in = tl.headCut[i], visible = tl.visible(i, clips);
+      const int start = tl.cutStart(i);
+      // A side that touches a transition is -1: «the transition decides this
+      // edge». Explicit numbers there made DaVinci read a plain cut and a
+      // 0-frame dissolve (Franco, 2026-10-13). And with -1 the clip spans the
+      // whole transition, so in/out take in its frames too: in = the media at
+      // the transition START, out = at the transition END. With in/out on the
+      // cut instead, every clip after a dissolve ran its handle-count of frames
+      // ahead and the last one ran out of media early — seen on the burnt-in
+      // timecode (Franco, 2026-10-13).
+      const bool transIn  = i > 0 && tl.trans[i - 1] > 0;
+      const bool transOut = i + 1 < clips.size() && tl.trans[i] > 0;
+      const int inW       = transIn ? in - tl.headCut[i] : in;
+      const int outW      = in + visible + (transOut ? tl.tailCut[i] : 0);
+      m_x.writeStartElement("clipitem");
+      m_x.writeAttribute("id", QString("clipitem-v%1").arg(i + 1));
+      text("name", c.name);
+      text("enabled", "TRUE");
+      num("duration", c.frames);
+      rate();
+      num("start", transIn ? -1 : start);
+      num("end", transOut ? -1 : start + visible);
+      num("in", inW);
+      num("out", outW);
+      file(c.file, c.frames, true);
+      m_x.writeEndElement();  // clipitem
+      if (transOut) {  // cross dissolve centred on the cut
+        const int cut = tl.cutStart(i + 1);
+        m_x.writeStartElement("transitionitem");
+        num("start", cut - tl.headCut[i + 1]);
+        num("end", cut + tl.tailCut[i]);
+        text("alignment", "center");
+        rate();
+        m_x.writeStartElement("effect");
+        text("name", "Cross Dissolve");
+        text("effectid", "Cross Dissolve");
+        text("effectcategory", "Dissolve");
+        text("effecttype", "transition");
+        text("mediatype", "video");
+        m_x.writeEndElement();  // effect
+        m_x.writeEndElement();  // transitionitem
+      }
+    }
+    m_x.writeEndElement();  // track
+    m_x.writeEndElement();  // video
+  }
+
+  // Each animatic sound column (lane -1, -2, ...) is a STEREO pair the way
+  // Premiere writes one: the file split onto two linked mono tracks, left on
+  // trackindex 1 and right on 2, marked premiereTrackType="Stereo" and
+  // «exploded» 0/1 of 2. A single stereo clipitem could come in as mono.
+  void writeAudio(const std::vector<FcpxAudio> &audio) {
+    m_x.writeStartElement("audio");
+    num("numOutputChannels", 2);
+    m_x.writeStartElement("format");
+    m_x.writeStartElement("samplecharacteristics");
+    num("depth", 16);
+    num("samplerate", 48000);
+    m_x.writeEndElement();  // samplecharacteristics
+    m_x.writeEndElement();  // format
+    int minLane = 0;
+    for (const FcpxAudio &a : audio) minLane = std::min(minLane, a.lane);
+    int pair = 0, aid = 0;  // pair = 0-based stereo pair (sound column)
+    for (int lane = -1; lane >= minLane; --lane) {
+      std::vector<const FcpxAudio *> items;
+      for (const FcpxAudio &a : audio)
+        if (a.lane == lane) items.push_back(&a);
+      if (items.empty()) continue;
+      const int firstId = aid + 1;
+      for (int ch = 0; ch < 2; ++ch) {  // 0 = left, 1 = right
+        m_x.writeStartElement("track");
+        m_x.writeAttribute("currentExplodedTrackIndex", QString::number(ch));
+        m_x.writeAttribute("totalExplodedTrackCount", "2");
+        m_x.writeAttribute("premiereTrackType", "Stereo");
+        for (size_t k = 0; k < items.size(); ++k)
+          audioItem(*items[k], firstId + (int)k, ch, pair, (int)k);
+        num("outputchannelindex", ch + 1);
+        m_x.writeEndElement();  // track
+      }
+      aid += (int)items.size();
+      ++pair;
+    }
+    m_x.writeEndElement();  // audio
+  }
+
+  void audioItem(const FcpxAudio &a, int id, int ch, int pair, int index) {
+    const int srcLen = a.srcLen > 0 ? a.srcLen : a.srcStart + a.frames;
+    auto clipId = [](int id, int ch) {
+      return QString("clipitem-a%1%2").arg(id).arg(ch ? "R" : "L");
+    };
+    m_x.writeStartElement("clipitem");
+    m_x.writeAttribute("id", clipId(id, ch));
+    text("name", a.name);
+    text("enabled", "TRUE");
+    num("duration", srcLen);
+    rate();
+    num("start", a.offset);
+    num("end", a.offset + a.frames);
+    num("in", a.srcStart);
+    num("out", a.srcStart + a.frames);
+    file(a.file, srcLen, false);
+    m_x.writeStartElement("sourcetrack");
+    text("mediatype", "audio");
+    num("trackindex", ch + 1);
+    m_x.writeEndElement();  // sourcetrack
+    for (int lc = 0; lc < 2; ++lc) {  // the two halves stay together
+      m_x.writeStartElement("link");
+      text("linkclipref", clipId(id, lc));
+      text("mediatype", "audio");
+      num("trackindex", 2 * pair + lc + 1);
+      num("clipindex", index + 1);
+      m_x.writeEndElement();  // link
+    }
+    m_x.writeEndElement();  // clipitem
+  }
+};
+
 bool writeAnimaticXmeml(const QString &path, const QString &projectName,
                         int fps, int width, int height,
                         const std::vector<FcpxClip> &clips,
                         const std::vector<FcpxAudio> &audio) {
-  if (fps <= 0) fps = 25;
   if (clips.empty()) return false;
   QFile f(path);
   if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
-
-  // Same overlaps and cut points as the FCPXML writer.
-  std::vector<int> trans(clips.size(), 0);
-  for (size_t i = 0; i + 1 < clips.size(); i++)
-    trans[i] = qBound(0, clips[i].transitionAfter,
-                      qMin(clips[i].frames, clips[i + 1].frames));
-  std::vector<int> compStart(clips.size(), 0);
-  {
-    int acc = 0;
-    for (size_t i = 0; i < clips.size(); i++) {
-      compStart[i] = acc;
-      acc += clips[i].frames - (i + 1 < clips.size() ? trans[i] : 0);
-    }
-  }
-  std::vector<int> headCut(clips.size(), 0), tailCut(clips.size(), 0);
-  for (size_t i = 0; i + 1 < clips.size(); i++) {
-    if (trans[i] <= 0) continue;
-    headCut[i + 1] = trans[i] / 2;
-    tailCut[i]     = trans[i] - trans[i] / 2;
-  }
-  const int total = compStart.back() + clips.back().frames;
-
-  // Premiere wants file://localhost/<encoded absolute path>.
-  auto pathUrl = [](const QString &file) {
-    return QString("file://localhost") +
-           QUrl::fromLocalFile(file).path(QUrl::FullyEncoded);
-  };
-  QXmlStreamWriter x(&f);
-  x.setAutoFormatting(true);
-  auto text = [&x](const char *tag, const QString &v) {
-    x.writeTextElement(tag, v);
-  };
-  auto num = [&text](const char *tag, int v) { text(tag, QString::number(v)); };
-  auto rate = [&](void) {
-    x.writeStartElement("rate");
-    num("timebase", fps);
-    text("ntsc", "FALSE");
-    x.writeEndElement();
-  };
-
-  x.writeStartDocument();
-  x.writeDTD("<!DOCTYPE xmeml>");
-  x.writeStartElement("xmeml");
-  x.writeAttribute("version", "5");
-  x.writeStartElement("sequence");
-  x.writeAttribute("id", "sequence-1");
-  text("name", projectName + " animatic");
-  num("duration", total);
-  rate();
-  x.writeStartElement("timecode");
-  rate();
-  text("string", "00:00:00:00");
-  num("frame", 0);
-  text("displayformat", "NDF");
-  x.writeEndElement();  // timecode
-
-  x.writeStartElement("media");
-  // ---- video: one track, the shots back to back --------------------------
-  x.writeStartElement("video");
-  x.writeStartElement("format");
-  x.writeStartElement("samplecharacteristics");
-  rate();
-  num("width", width);
-  num("height", height);
-  text("pixelaspectratio", "square");
-  text("fielddominance", "none");
-  x.writeEndElement();  // samplecharacteristics
-  x.writeEndElement();  // format
-  x.writeStartElement("track");
-  for (size_t i = 0; i < clips.size(); i++) {
-    const FcpxClip &c = clips[i];
-    const int in      = headCut[i];
-    const int visible = std::max(1, c.frames - headCut[i] - tailCut[i]);
-    const int start   = compStart[i] + headCut[i];
-    x.writeStartElement("clipitem");
-    x.writeAttribute("id", QString("clipitem-v%1").arg(i + 1));
-    text("name", c.name);
-    text("enabled", "TRUE");
-    num("duration", c.frames);
-    rate();
-    // A side that touches a transition is written as -1: «the transition
-    // decides this edge», as Final Cut 7 and Premiere export it. Explicit
-    // numbers there made DaVinci read a plain cut and a 0-frame dissolve
-    // (Franco, 2026-10-13). in/out stay on the cut point; the dissolve feeds
-    // on the handles past it.
-    const bool transIn  = i > 0 && trans[i - 1] > 0;
-    const bool transOut = i + 1 < clips.size() && trans[i] > 0;
-    num("start", transIn ? -1 : start);
-    num("end", transOut ? -1 : start + visible);
-    num("in", in);
-    num("out", in + visible);
-    x.writeStartElement("file");
-    x.writeAttribute("id", QString("file-v%1").arg(i + 1));
-    text("name", QFileInfo(c.file).fileName());
-    text("pathurl", pathUrl(c.file));
-    rate();
-    num("duration", c.frames);
-    x.writeStartElement("media");
-    x.writeStartElement("video");
-    x.writeStartElement("samplecharacteristics");
-    rate();
-    num("width", width);
-    num("height", height);
-    x.writeEndElement();  // samplecharacteristics
-    x.writeEndElement();  // video
-    x.writeEndElement();  // media
-    x.writeEndElement();  // file
-    x.writeEndElement();  // clipitem
-
-    // Cross dissolve centred on the cut between this clip and the next.
-    if (i + 1 < clips.size() && trans[i] > 0) {
-      const int cut = compStart[i + 1] + headCut[i + 1];
-      x.writeStartElement("transitionitem");
-      num("start", cut - headCut[i + 1]);
-      num("end", cut + tailCut[i]);
-      text("alignment", "center");
-      rate();
-      x.writeStartElement("effect");
-      text("name", "Cross Dissolve");
-      text("effectid", "Cross Dissolve");
-      text("effectcategory", "Dissolve");
-      text("effecttype", "transition");
-      text("mediatype", "video");
-      x.writeEndElement();  // effect
-      x.writeEndElement();  // transitionitem
-    }
-  }
-  x.writeEndElement();  // track
-  x.writeEndElement();  // video
-
-  // ---- audio: one track per animatic sound column (lane -1, -2, ...) -------
-  x.writeStartElement("audio");
-  num("numOutputChannels", 2);
-  x.writeStartElement("format");
-  x.writeStartElement("samplecharacteristics");
-  num("depth", 16);
-  num("samplerate", 48000);
-  x.writeEndElement();  // samplecharacteristics
-  x.writeEndElement();  // format
-  int minLane = 0;
-  for (const FcpxAudio &a : audio) minLane = std::min(minLane, a.lane);
-  int aid = 0;
-  for (int lane = -1; lane >= minLane; --lane) {
-    bool any = false;
-    for (const FcpxAudio &a : audio) any |= (a.lane == lane);
-    if (!any) continue;
-    x.writeStartElement("track");
-    for (const FcpxAudio &a : audio) {
-      if (a.lane != lane) continue;
-      ++aid;
-      const int srcLen = a.srcLen > 0 ? a.srcLen : a.srcStart + a.frames;
-      x.writeStartElement("clipitem");
-      x.writeAttribute("id", QString("clipitem-a%1").arg(aid));
-      text("name", a.name);
-      text("enabled", "TRUE");
-      num("duration", srcLen);
-      rate();
-      num("start", a.offset);
-      num("end", a.offset + a.frames);
-      num("in", a.srcStart);
-      num("out", a.srcStart + a.frames);
-      x.writeStartElement("file");
-      x.writeAttribute("id", QString("file-a%1").arg(aid));
-      text("name", QFileInfo(a.file).fileName());
-      text("pathurl", pathUrl(a.file));
-      rate();
-      num("duration", srcLen);
-      x.writeStartElement("media");
-      x.writeStartElement("audio");
-      x.writeStartElement("samplecharacteristics");
-      num("depth", 16);
-      num("samplerate", 48000);
-      x.writeEndElement();  // samplecharacteristics
-      num("channelcount", 2);
-      x.writeEndElement();  // audio
-      x.writeEndElement();  // media
-      x.writeEndElement();  // file
-      x.writeStartElement("sourcetrack");
-      text("mediatype", "audio");
-      num("trackindex", 1);
-      x.writeEndElement();  // sourcetrack
-      x.writeEndElement();  // clipitem
-    }
-    x.writeEndElement();  // track
-  }
-  x.writeEndElement();  // audio
-  x.writeEndElement();  // media
-  x.writeEndElement();  // sequence
-  x.writeEndElement();  // xmeml
-  x.writeEndDocument();
+  XmemlWriter(&f, fps > 0 ? fps : 25, width, height)
+      .write(projectName + " animatic", clips, audio);
   return true;
 }
 }  // namespace
@@ -8454,6 +8522,14 @@ void StoryboardPanel::onExportAnimatic() {
   ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
   if (!scene) return;
   TOutputProperties *prop = scene->getProperties()->getOutputProperties();
+
+  // The shots' column indices can be stale: recording audio in the animatic
+  // inserts a sound column among the shot columns, and every shot after it
+  // moved one place. The export read the old indices — sh030 came out as the
+  // 73-frame recording, sh040 as sh020 (Franco, 2026-10-13). Re-anchor first;
+  // shotFrameRange below also checks each column against the shot's own
+  // sub-scene.
+  reanchorColumnsFromScene();
 
   // ── Build default output dir/name from scene ───────────────────���───────
   TFilePath sp       = scene->getScenePath();
@@ -8520,7 +8596,9 @@ void StoryboardPanel::onExportAnimatic() {
 
   // DaVinci / NLE handoff: also write an FCPXML edit referencing the per-shot clips.
   auto *fcpxmlCheck = new QCheckBox(
-      tr("Also export editing timeline (.fcpxml)"), &dlg);
+      tr("Also export editing timeline .fcpxml (DaVinci Resolve, Final Cut "
+         "Pro)"),
+      &dlg);
   fcpxmlCheck->setToolTip(
       tr("Write an FCPXML edit that places the per-shot clips on a timeline,\n"
          "importable into DaVinci Resolve or Final Cut Pro.\n"
@@ -8536,7 +8614,9 @@ void StoryboardPanel::onExportAnimatic() {
   // Premiere Pro handoff (BETA): the same edit as Final Cut 7 XML, the format
   // Premiere imports. Same requirement as the FCPXML one.
   auto *premiereCheck = new QCheckBox(
-      tr("Also export Premiere Pro timeline (Final Cut 7 XML) - beta"), &dlg);
+      tr("Also export editing timeline _premiere.xml (Premiere Pro - beta, "
+         "DaVinci Resolve)"),
+      &dlg);
   premiereCheck->setToolTip(
       tr("Write the same edit as a Final Cut 7 XML file (.xml), the format\n"
          "Premiere Pro imports (File > Import). Beta: not yet tested in\n"
@@ -8898,6 +8978,26 @@ void StoryboardPanel::onExportAnimatic() {
   auto shotFrameRange = [&](int si) -> std::pair<int,int> {
     TXsheet *xsh = scene->getChildStack()->getTopXsheet();
     int col = m_shots[si].data->xsheetColumn;
+    // Trust the index only if that column really shows this shot's sub-scene;
+    // otherwise look the sub-scene up (see reanchorColumnsFromScene above).
+    if (TXshChildLevel *cl = m_shots[si].childLevel) {
+      auto shows = [&](int c) {
+        if (c < 0 || c >= xsh->getColumnCount()) return false;
+        int a, b;
+        if (!xsh->getCellRange(c, a, b)) return false;
+        for (int r = a; r <= b; r++) {
+          const TXshCell &cell = xsh->getCell(r, c);
+          if (!cell.isEmpty()) return cell.getChildLevel() == cl;
+        }
+        return false;
+      };
+      if (!shows(col))
+        for (int c = 0; c < xsh->getColumnCount(); c++)
+          if (shows(c)) {
+            col = c;
+            break;
+          }
+    }
     int r0 = 0, r1 = 0;
     for (int r = 0; r < xsh->getFrameCount(); r++) {
       if (isRealCell(xsh->getCell(r, col))) { r0 = r; break; }
@@ -9106,7 +9206,8 @@ void StoryboardPanel::onExportAnimatic() {
       QString xmlPath =
           QDir(outDir).filePath(nameEdit->text() + "_premiere.xml");
       if (writeAnimaticXmeml(xmlPath, sceneName, fps, w, h, clips, audioClips))
-        written << tr("%1  (Premiere Pro - beta)").arg(xmlPath);
+        written << tr("%1  (Premiere Pro - beta, DaVinci Resolve)")
+                       .arg(xmlPath);
     }
     if (!written.isEmpty())
       QMessageBox::information(
