@@ -8272,7 +8272,7 @@ bool writeAnimaticFcpxml(const QString &path, const QString &projectName, int fp
   return true;
 }
 
-// BETA — Final Cut 7 XML (xmeml v5), the edit format Premiere Pro imports
+// Final Cut 7 XML (xmeml v5), the edit format Premiere Pro imports
 // (it does not read FCPXML). The same edit as writeAnimaticFcpxml
 // (computeAnimaticTimeline): per-shot clips back to back, each dissolve
 // centred on the cut with -1 on the clip edges that touch it, as Final Cut 7
@@ -8615,16 +8615,16 @@ void StoryboardPanel::onExportAnimatic() {
   });
   mainLay->addWidget(fcpxmlCheck);
 
-  // Premiere Pro handoff (BETA): the same edit as Final Cut 7 XML, the format
+  // Premiere Pro handoff: the same edit as Final Cut 7 XML, the format
   // Premiere imports. Same requirement as the FCPXML one.
   auto *premiereCheck = new QCheckBox(
-      tr("Also export editing timeline _premiere.xml (Premiere Pro - beta, "
-         "DaVinci Resolve)"),
+      tr("Also export editing timeline _premiere.xml (Premiere Pro, DaVinci "
+         "Resolve)"),
       &dlg);
   premiereCheck->setToolTip(
       tr("Write the same edit as a Final Cut 7 XML file (.xml), the format\n"
-         "Premiere Pro imports (File > Import). Beta: not yet tested in\n"
-         "Premiere Pro. Requires 'One clip per shot'."));
+         "Premiere Pro imports (File > Import).\n"
+         "Requires 'One clip per shot'."));
   premiereCheck->setEnabled(false);
   connect(radioEach, &QRadioButton::toggled, premiereCheck,
           [premiereCheck](bool on) {
@@ -9217,7 +9217,7 @@ void StoryboardPanel::onExportAnimatic() {
       QString xmlPath =
           QDir(outDir).filePath(nameEdit->text() + "_premiere.xml");
       if (writeAnimaticXmeml(xmlPath, sceneName, fps, w, h, clips, audioClips))
-        written << tr("%1  (Premiere Pro - beta, DaVinci Resolve)")
+        written << tr("%1  (Premiere Pro, DaVinci Resolve)")
                        .arg(xmlPath);
     }
     if (!written.isEmpty())
