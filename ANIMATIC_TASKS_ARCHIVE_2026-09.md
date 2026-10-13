@@ -3009,3 +3009,316 @@ Trovato da `ztoryc-reviewer` nel test degli agenti sul commit `ad3184c65`
 3. `ztoryanimatic.cpp:6828` ignora il ritorno di `shotTrueSpan` (se `false`, durata 0 o
    negativa): effetto lieve, ma gli altri chiamanti lo controllano.
 
+---
+
+### ✅ FATTO E COLLAUDATO 2026-09-27 — Automazione degli status, push sicuro, Sync a tre vie, PSD da riggare, WFA con anteprima (commit `1f51dd295`)
+
+Collaudato da Franco su CS26 episodio CS2606: PSD «ottimo», WFA con immagine su Kitsu, push
+automatico «funziona benissimo», Sync e conflitto gestiti bene. Review: reviews/2026-09-26b..d,
+2026-09-27_sync, 2026-09-27b_aperti, 2026-09-27c_sync-refactor. Voce originale, com'era:
+
+### 🆕 2026-09-26 — Automazione degli status e push automatico (analisi fatta, decisioni di Franco)
+
+> 🔝 **IN CIMA ALL'ORDINE DI LAVORO** (Franco, 2026-09-26). Collaudo direttamente su **CARTOON
+> SCHOOL 2026, episodio CS2606**, mentre Franco ci lavora: la produzione va ben oltre la data di
+> fine segnata su Kitsu (29/09). Puppetoonz riprende sul prossimo episodio.
+
+**Com'e' oggi** (letto sul codice il 26/09): sei status, abbinati a Kitsu per short_name e poi
+per flag (`kitsuclient.cpp:167`, gia' corretto). Transizioni automatiche sparse in CINQUE punti:
+invio al Board (`storyboardpanel.cpp:7405`), pull → successivo Ready SOLO per gli shot
+(`ztoryproductionpanel.cpp:497`), apertura shot → WIP con DUE regole divergenti (audit del 26/09
+§6), scena personaggio → Rigging WIP (`startuppopup.cpp:1333`, cerca il nome "Rigging" scritto nel
+codice), upload anteprime → WFA. Il push e' MANUALE e scrive il locale su Kitsu quando differisce
+(`kitsuclient.cpp:970`), senza controllare se Kitsu e' cambiato nel frattempo.
+
+**Le cinque specie di transizione**: A dipendenza (Done → successivo Ready) automatica ·
+B gesto inequivocabile (creo la scena → WIP) automatica · C dichiarazione («ho finito» → WFA)
+proposta + conferma · D giudizio (WFA → Done/Retake) MAI automatica, su Kitsu · E da Done MAI.
+
+**Decisioni di Franco (2026-09-26):**
+- **WIP automatico per CHIUNQUE crei la scena** (non solo per chi e' assegnato al task).
+- **In prospettiva: al «Connect to Kitsu» l'utente vede SOLO i task assegnati a lui.** Il filtro
+  sta nella visibilita', non nella regola del WIP.
+- **Il WFA porta con se' l'anteprima**: il popup alla chiusura (solo se il task e' in WIP)
+  propone «passa a WFA e carica l'anteprima».
+- WFA → Done/Retake resta manuale (revisione su Kitsu).
+- Push automatico a ogni cambio di status, con un'opzione per spegnerlo.
+- Proposta di Franco sul personaggio: Color Done → Rigging Ready; link al file del personaggio
+  sull'asset; creando la scena del personaggio si carica il file collegato; Ready → WIP (c'e'
+  gia'); alla chiusura popup WFA con anteprima.
+
+**Dipendenze (specie A): in Ztoryc E allineate su Kitsu** (Franco, 2026-09-26). Verificato: Zou
+1.0.24 locale ha le *status automations* (`/api/data/status-automations` risponde 401, non 404);
+l'MCP Kitsu NON sa crearle → le inserisce Franco dall'interfaccia (Claude non accede con le sue
+credenziali). Regole proposte: asset rough→clean→color→Rigging (Done → successivo Ready);
+shot SOLO Storyboard→Layout, perche' il resto della catena dipende dalla tecnica (un'automazione
+Kitsu verso un task che lo shot non ha interrompe la catena) e lo fa Ztoryc. Attenzione: su Kitsu
+«Approved» ha `is_done=false`, Ztoryc lo legge come Done → le regole scattano su **Done**.
+Prova direttamente su CS26, episodio CS2606 (decisione di Franco: ci lavora e collauda).
+Lato Ztoryc manca «Done → successivo Ready» per gli ASSET (c'e' solo per gli shot, al pull).
+
+**Decisioni di Franco, seconda tornata (2026-09-26):**
+- **Modeling resta nella catena del Character**: e' la preparazione del disegno per l'import (oggi in
+  Krita/Affinity, domani Puppetoonz). Catena: Color Done → Modeling Ready; Modeling Done → Rigging Ready.
+  Automazioni Kitsu da inserire: rough→clean, clean→color, color→Modeling, Modeling→Rigging (asset);
+  Storyboard→Layout (shot).
+- **Nuova funzione**: oltre alla scena `.tnz` (gia' collegata e importata dall'export dei layout), sul
+  personaggio si collega anche il **PSD da riggare**; alla creazione della scena character viene
+  importato automaticamente. Percorso RELATIVO al progetto.
+- **Nomi dei task insensibili alle maiuscole**, e ripulire i doppioni `modeling`/`rigging` trovati su
+  tutti i personaggi di CS2606 (residui di pull, quasi tutti TODO).
+- Push automatico **spento all'inizio**, si accende a mano.
+- Shot: WIP **all'apertura** (lo shot nasce gia' dal Board).
+- Passo 1 (modulo `ztorytaskflow`, un solo punto per le regole) FATTO il 26/09, da collaudare.
+
+**Dalla review «debito» del 26/09** (`reviews/2026-09-26b_debt-status.md`) — da fare PRIMA o
+DENTRO il passo 2 (push sicuro):
+- il push confronta gli ID Kitsu, non gli status: «approved» su Kitsu e Done in locale viene
+  riscritto a «done», «neutral» riportato a Todo → confrontare `toZtoryStatus(id)` con `from`;
+- `buildAssetTasksFromModel` spinge TUTTA la catena (Todo dove manca): un locale vecchio riporta
+  indietro Kitsu. `KitsuTaskPush` non ha il campo `from`;
+- `KitsuClient` non regge operazioni in contemporanea (push/pull/upload azzerano stato condiviso):
+  serve una coda, una operazione per volta, PRIMA di agganciare `taskTransitioned`;
+- i cambi in blocco del tracker bloccano i segnali (`QSignalBlocker`): il push automatico non puo'
+  dipendere solo dal segnale → coda di transizioni in ZtoryTaskFlow;
+- il WFA scritto dopo l'upload non si annulla se l'upload fallisce;
+- i pull scrivono direttamente in `ps.tasks`/`a.tasks` (non aggiornano `m_shots`); il ramo legacy
+  senza DB (`setShotTaskStatus`) non passa da TaskFlow; il costruttore del tracker e' di 430 righe
+  con la logica dei pull dentro lambda dell'interfaccia; la fusione dei nomi non copre gli status
+  nel `.ztoryc` della scena (due fonti per gli status degli shot: `m_shots` e `m_projectShots`).
+
+**Stato al 26/09 sera:** passo 1 (ZtoryTaskFlow, undo completo, nomi insensibili alle maiuscole) e
+passo 2 (push sicuro, coda propria, interruttore spento di default nel gruppo Kitsu del tracker)
+FATTI e rivisti; il push automatico e' **collaudato da Franco il 27/09** («funziona benissimo») (`reviews/2026-09-26b_*`, `2026-09-26c_*`). PSD da riggare FATTO e **collaudato da Franco** su CS2606 («ottimo», 26/09). Il resto da
+collaudare su CS2606. Aperti dalla review: lista/riprova dei cambi non inviati e rinnovo del token;
+«Character» scritto a mano nel tracker; il push completo manuale fa vincere Ztoryc (tooltip); nelle
+note di rilascio: una versione vecchia perde `rigPsd` risalvando il `.ztrack`.
+
+**Popup WFA con anteprima (26/09 sera):** FATTO, rivisto (`reviews/2026-09-26d_wfa-popup.md`) e
+**collaudato da Franco il 27/09**: su Kitsu il Rigging passa a WFA con l'immagine nel commento (quindi
+`uploadReviewPreview` funziona anche sui task degli asset). Alla chiusura di una scena personaggio con il Rigging in WIP (nuova scena, altra scena,
+Quit, cambio progetto: tutto passa da `IoCmd::saveSceneIfNeeded`) chiede se mandarlo in
+approvazione; il fotogramma corrente va in `<progetto>/previews/`, poi su Kitsu nel commento che
+mette WFA (`uploadReviewPreview`). Senza Kitsu nel progetto: WFA locale, anteprima su disco. Con Kitsu
+ma senza login o personaggio non su Kitsu: resta WIP e lo dice. Aperti: «Rigging» scritto a mano;
+`uplLoadTaskTypes` doppione solo-Shot; `previewsUploaded` senza token.
+
+**Sync a tre vie, pulsante unico (27/09):** FATTO, rivisto (`reviews/2026-09-27_sync.md`) e
+**collaudato da Franco il 27/09 dopo il riordino in `ztorykitsusync`** (conflitto gestito bene: vince
+Kitsu, riepilogo arancione). Nato da un incidente vero: un push manuale ha riportato a WFA dei Done messi dal
+supervisore su Kitsu. Ogni task ha una «base» (status di Kitsu all'ultimo sync, attributo `synced`
+nel .ztrack); «⇄ Sync with Kitsu» (idea di Franco: un solo tasto) = push shot, push asset (solo i
+cambi di Ztoryc, solo se Kitsu ha ancora la base) → pull asset, pull status shot con fusione
+(conflitto = vince Kitsu). I vecchi Push/Pull sono nascosti. Aperti in `reviews/2026-09-27_sync.md`
+(il piu' importante: `/assets/create-tasks` tocca gli asset di tutti gli episodi).
+
+**Aperti chiusi il 27/09:** vedi `reviews/2026-09-27b_aperti.md` (asset di tutti gli episodi, nomi
+scritti a mano, palette, parser, avvisi del Sync, task ricreati). Restano solo voci di lavoro:
+~~orchestratore `KitsuSync` + via i pulsanti nascosti~~ FATTO il 27/09 (`ztorykitsusync`, review in
+`reviews/2026-09-27c_sync-refactor.md`: equivalente), «Rigging» come ruolo,
+tipi di task asset mancanti nel progetto, ramo legacy senza DB, funzioni lunghe, note di rilascio.
+
+**Ordine di lavoro proposto (non cambiarlo senza Franco):**
+1. UN solo punto per le regole di transizione (oggi cinque, due contraddittori).
+2. **Push sicuro PRIMA del push automatico**: solo il task cambiato, e solo se su Kitsu e' ancora
+   nello status di partenza; altrimenti pull e avviso. Senza questo un push automatico
+   cancellerebbe in silenzio un Retake messo dal supervisore. Offline: coda.
+3. Le automazioni una alla volta, ognuna con interruttore: Rigging (il caso piu' pulito), poi il
+   popup WFA con anteprima, poi gli shot.
+- Vincoli: task type per ORDINE della catena (tipo di asset / tecnica), mai per nome scritto nel
+  codice; il link al file del personaggio RELATIVO al progetto (il percorso assoluto nel
+  `.ztoryc` e' gia' un difetto, audit R8); «chiudere» = aprire un'altra scena, nuova scena o
+  uscire; chiedere il WFA solo se la scena e' stata modificata nella sessione.
+
+### ✅ CORRETTO 2026-09-27 — Fill Up (M4) leggeva il ⌘ della scorciatoia utente (commit `a731855a7`)
+
+Dalla review del 25/09: con una scorciatoia con ⌘ sul Fill verso il basso, premerla riempiva verso
+l'alto. Ora il ⌘ conta solo se i modificatori non sono quelli di una scorciatoia del comando stesso.
+
+
+
+---
+
+### ✅ FATTO E COLLAUDATO 2026-09-27 — casting/anteprime Kitsu, shot autonomo, librerie del personaggio
+
+Commit `fa6bf998e` (crash listener TProperty + psd), `268d5fd13` (Plastic: Global Key ALL in IK,
+Keep Distance, undo; Animate tool undo della chiave Plastic), `e306a47bb` (il resto). Collaudati da
+Franco su CS2606: casting con cancellazioni, Sync al login, anteprime e copertine (anche dei CH
+riggati), export di sh040 autonomo (audio compreso), Assign Mouth Drawings 301/303, pubblicazione
+di bocche e pose, ingresso automatico della posa «saluti» nella scena di Sofia, crash della colonna
+mesh sparito, Insert Clip (spinta, undo, solo chiavi che estende il disegno), Keep Distance,
+Global Key ALL e il suo undo nel Plastic e nell'Animate tool.
+Review 2026-09-27d: 2 bloccanti e 7 consigliati corretti prima del commit; il punto 8 resta aperto.
+
+### ♻️ IL RITORNO IN LIBRERIA — le pose create animando (Franco, 2026-08-16)
+
+> *«Creo il personaggio e lo importo come sottoscena per animarlo nei vari shot,
+> animandolo però creo nuove pose e animazioni che potrebbero tornarmi utili, la
+> sua libreria si arricchisce: come aggiorniamo il file sorgente?»*
+
+🎯 **LA PARTE DIFFICILE E' GIA' RISOLTA, e non l'avevamo notato.** Da
+`include/ext/plasticskeletondeformation.h:289`:
+> «Deltas are stored **BY VERTEX NAME**, like keyframes are, and never by vertex
+> index: that is what lets an action be **copied to a skeleton whose internal
+> vertex numbering differs**.»
+
+Cioe' una `PoseAction` e' **portabile per costruzione**: si trapianta da una
+copia del personaggio a un'altra. E' esattamente il caso del ritorno in
+libreria, ed e' il problema che di solito costa caro. Manca solo il TRASPORTO.
+
+C'e' anche gia' il controllo di compatibilita': `m_skelIds` dice su quali
+scheletri una posa e' lecita (riga 330). Una posa registrata sul frontale
+replicata sul profilo «lands somewhere nobody authored» — quindi il travaso non
+puo' essere cieco.
+
+**Come farlo, quando si riapre:**
+- ⚠️ **Esplicito e a senso unico, MAI automatico.** Il personaggio nello shot e'
+  una COPIA (l'import copia i file, verificato: 23 MB di PSD per shot), quindi
+  e' un fork. Una sincronizzazione automatica propagherebbe anche gli errori e
+  le pose sbagliate a tutta la produzione.
+- Due comandi simmetrici: **«pubblica in libreria»** dallo shot (scegli quali
+  azioni, finiscono nel personaggio) e **«prendi dalla libreria»** nello shot.
+  E' il modello dei template di Harmony, ed e' come ragiona un animatore:
+  «questa me la salvo».
+- Le pose vanno nel sidecar `role="character"` (vedi la sezione sopra), non
+  dentro la scena: cosi' si leggono senza aprire il personaggio.
+- **I CICLI di animazione sono un'altra cosa**, piu' grossa: non un insieme di
+  valori ma curve nel tempo su piu' parametri. Da progettare a parte — una posa
+  e' uno stato, un ciclo e' una clip. Non trattarli come lo stesso oggetto.
+✅ **DECISO da Franco (2026-08-16) — divergenza strutturale**: *«il salvataggio
+sul character sorgente viene RIFIUTATO se non e' compatibile; se e' diverso
+strutturalmente potremmo esportarlo come una v2 dello stesso personaggio»*.
+Buona regola: trasforma un caso d'errore in un atto deliberato, invece di
+lasciare all'utente una fusione a meta'.
+
+Il controllo di compatibilita' ha una definizione CONCRETA, e la si ha gratis
+perche' i delta sono per nome di vertice:
+- lo scheletro di destinazione contiene **tutti** i nomi citati dalla posa →
+  compatibile, si accetta (se ne ha altri in piu' restano fermi: la posa e'
+  PART, tocca solo i suoi);
+- ne manca anche uno → **rifiuto**, e si propone la **v2 del personaggio**.
+
+**Il flusso, come lo ha descritto Franco:** animi nello shot → comando
+«pubblica in libreria» → scegli quali azioni registrate → controllo → finiscono
+nella libreria del personaggio sorgente, disponibili da li' in poi in ogni shot.
+
+---
+
+
+
+---
+
+### ✅ FATTO E COLLAUDATO 2026-10-02 — FCPXML con dissolvenze fuori sync in Resolve
+Commit `6505afcae` (clip consecutivi, taglio a meta' dissolvenza) e `f6dcefd83` (audio non piu'
+spostato una seconda volta). Collaudato da Franco in Resolve su Messina il 2026-10-02: timeline
+importata e verificata, sync ok. File corretto di Messina in `03_storyboard/animatic_v2/`
+(originale conservato come `..._sh700_ORIGINALE.fcpxml`).
+
+
+---
+
+## Chiuse il 2026-10-04 (dalla sessione del 3-4/10, rilascio 0.16.0)
+
+- ✅ **Render sbagliato sh110 — CAUSA TROVATA E CORRETTA** (2026-09-29, collaudato
+  da Franco sul Mac). Non era OpenGL ne' il Plastic: `TLevelColumnFx::getAlias`
+  usava `path.withFrame(fid)`, che con la regola dei nomi Standard riduce
+  `ch_sofia#corpo#group.psd` a `ch.1.psd` → tutti gli strati PSD di un
+  personaggio con lo stesso alias → la cache delle immagini del render
+  (`LevelFxBuilder`) li scambiava, solo in sequenza. Commit `d2bc410c`, su master. Misurato con le righe
+  `LEVELRENDER`/`PLASTICRENDER` (`ZTORYC_PLASTIC_DIAG=1`), metodo: stesso
+  fotogramma da solo (buono) e dentro una sequenza (cattivo).
+  ~~**Aperto:** perche' Windows (0.10 e 0.15) rendeva bene la stessa scena, dallo
+  stesso progetto su Drive.~~ **Chiarito da Franco il 2026-10-04:** non dipendeva da Mac o
+  Windows ma dalla **memoria** — paradossalmente sulle macchine meno potenti succedeva di meno.
+  Torna con il meccanismo: con meno RAM la cache delle immagini del render si svuota piu' spesso,
+  quindi riusa meno volte l'immagine sbagliata dietro lo stesso alias. Niente da indagare oltre:
+  la causa (l'alias) e' corretta. Le due modifiche OpenGL fatte lungo la strada sono state tolte.
+
+- ✅ **Slide di un blocco di celle** (Shift+Option, piu' colonne) — `974355793`, collaudato 2026-10-03.
+- ✅ **Global Key nei campi dell'Animate tool e nella maniglia del controller** — `b2fe7dde5`, collaudato 2026-10-03/04.
+- ✅ **Curva dello scheletro Plastic a scatto; la chiave globale chiava lo scheletro** — `05164ec0f`, collaudato 2026-10-04 (sh230).
+- ✅ **Pin sopra il controller, sgancio esatto, onion skin del pupazzo, scheletro al cambio modalita'** — `9606578e9`, collaudato 2026-10-04 (sh230).
+
+---
+
+## Chiusi il 2026-10-12
+
+### ✅ Review di rilascio 0.17 (subagent) e le sue correzioni
+Report in `~/ZtorYc/reviews/2026-10-12_*`. B1 (Scene Type su scena di un altro progetto → tracker
+sbagliato) e I1-I4 in `953c65029`, collaudati da Franco su copia; i dodici minori (M1-M12) in
+`953c65029` (M7) e `53f5aa489`. Verifica di licenze: OK CON NOTE (nomi reali → resi generici in
+`53f5aa489`, CHANGELOG/ANIMATIC_TASKS esclusi per scelta di Franco).
+
+### ✅ Lip sync — Whisper a 16 kHz, parole sconosciute a Vosk, lettere saltate (`d5278ef50`)
+«Whisper produced no output file» su sh320 (il whisper-cli imballato legge solo WAV a 16 kHz); «negati»
+in rest (parola fuori vocabolario → [unk] tardivo); la A finale di «negativissima» sparita. Collaudato.
+
+### ✅ Creare uno storyboard svuotava i dati del progetto (`468ac2181`)
+Produzione, codice, episodio, titolo, schema dei nomi scritti vuoti nel tracker. Gia' cosi' nella
+0.16.2. Collaudato su copia.
+
+### ✅ Render: cavallo sul posto mentre il principe avanza, sh330 (`3c5682bad`)
+Cache della risoluzione dei pin a casella unica, sovrascritta dagli alberi di tutti i fotogrammi.
+Ora un risultato per fotogramma. Verificato con tcomposer (byte identici) e da Franco nell'app.
+
+### ✅ Render Settings: Out a 102 con Out a 175 e «Sync with Play Range» spuntata (`1ed7acfce`)
+Collaudato da Franco su sh330. Candidato upstream (la spunta non scriveva l'intervallo).
+
+### ✅ Cartelle vuote dello storyboard nel Cast degli shot (`686d3bcf2`)
+Il salvataggio di una sotto-scena copiava tutte le cartelle della madre; pulizia all'apertura delle
+scene shot. Collaudato su sh360. Candidato upstream.
+
+### ✅ Bocche: personaggio riconosciuto dai disegni, lista «chi — colonna» (`94d5a0414`)
+sh370: dopo una nidificazione tolta, un set su nove; la lista diceva «LUPO» e «SH030». Collaudato.
+
+### ✅ Pose ZtoRig perse duplicando una colonna Plastic; personaggio dalle mesh (`064935010`)
+sh370: 0 pose su 9 sulla mesh di SOFIA dopo Explode. Il costruttore di copia della deformazione ora
+copia pose, correttive, SO, IK. Recupero con Update from Library: collaudato.
+
+## Chiusi il 2026-10-11
+
+### ✅ Copia unica dei dati degli shot — SU MASTER (`7f1a6d6ad`, 2026-10-11)
+Collaudato prima del merge: scene shot e personaggio su copie di Messina e Arquata (modo
+`ZTORYC_SCENETEST`), Production Tracker (tecnica/task, salva, riapri) e Send to Board su navtrk, rete di
+sicurezza identica. L'incidente del 7/10 e' chiuso (`4aafacd3a`). Restano solo quattro prove a mano (voce
+«aperti dalla sessione» del 2026-10-11).
+
+### 🟡 2026-10-07 — Copia unica dei dati degli shot: ramo `feature/shot-document` FATTO, da portare su master (P1)
+
+I passi 0-6 di `docs/SHOT_DOCUMENT_PLAN.md` sono scritti e committati sul ramo (da `031fbd53b` a oltre
+`b76718ab3`, pushato su origin come ramo, **non** su master). Rete di sicurezza identica a ogni passo; prove a
+mano passate (vedi CHANGELOG 2026-10-06/07). **Cambia il comportamento**: il `.ztoryc` si scrive solo col ⌘S
+(le modifiche mettono l'asterisco alla scena) → nel rilascio va scritto nelle note, e la versione sarà minor.
+- 🚨 **2026-10-07 la build del ramo ha svuotato il production.ztrack di Messina** (shot aperto in Cutout, passo
+  3d); recuperato da Drive il 2026-10-10, corretto in `4aafacd3a` (il modello legge da sé solo le storyboard +
+  firewall sui contenuti in `saveProjectDb`). Due crash quel giorno (17:08 sh240, 18:25 sh250) attribuiti allo
+  stesso stato ma NON provati. **Prima del merge**: una sessione di lavoro vera su COPIE di scene shot e
+  personaggio (Messina, Arquata) con la build corretta, senza crash e con i tracker intatti.
+- **Decisione di Franco**: quando portarlo su master (merge del ramo) e in quale rilascio.
+- **Prove a mano che restano**: Add accanto a una colonna audio; luce dal Navigator; Send to Board; technique e
+  task dal Production Tracker + salva + riapri; Save As di una scena storyboard; una scena VERA (copia) con il
+  tracker acceso, prima del merge.
+- Review inline del 2026-10-07: `~/ZtorYc/reviews/2026-10-07_reviewer.md` (nessun bloccante aperto).
+
+
+### ✅ Raggruppamento per personaggio nelle bocche — RIAPERTO da Franco e FATTO il 2026-10-11 (`01cda2297`)
+Era fra i SOSPESI (decisione del 2026-08-28, testo sotto). Il 2026-10-11 Franco l'ha chiesto lui: «se ci
+sono piu' sottoscene con piu' personaggi mi ritrovo a dover scegliere tra troppi livelli». Fatto: tendina
+«Character» in ZtoRig ▸ Mouths e in Assign Mouth Drawings, anche per i personaggi fatti direttamente nella
+scena. Il collegamento sotto-scena ↔ `characterUuid` all'import resta un lavoro a se' (non serve piu' per
+la tendina: il personaggio si riconosce dal nome della sotto-scena padre).
+
+- **La tendina delle bocche mostra i livelli di tutti i personaggi — SI LASCIA
+  COSI'** (Franco, 2026-08-28, dopo aver visto i set di SOFIA mentre lavorava
+  sul lupo): *«quando le mappo lo faccio nella scena del singolo character
+  quindi non dovrebbe essere una situazione che si verifica troppo spesso e
+  visto che i set hanno anche il nome del personaggio potremmo lasciarlo
+  cosi'»*. Cioe': la mescolanza c'e', ma si vede solo in una scena con piu'
+  personaggi mappati insieme, che non e' come si lavora. **Non riproporre il
+  raggruppamento per personaggio nella tendina.**
+  Quello che invece E' stato corretto (commit `df4df3a1a`): una sotto-scena non
+  eredita piu' la mappa di un omonimo, e c'e' la casella «only mouth levels».
+  Resta aperto, ma come lavoro a se' e non come difetto: **collegare la
+  sotto-scena al `characterUuid` registrandolo all'import** — oggi non si puo'
+  dedurre, `TXshChildLevel` ha solo nome e icona e i `<target>` del `.zmouth`
+  sono soli numeri di fotogramma.

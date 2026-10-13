@@ -499,6 +499,60 @@ not portable.
 
 ---
 
+#### ✨ New (2026-10-12)
+
+- ❓ **Saving a sub-xsheet as a scene copies every Cast folder of the parent,
+  empty** — `toonzlib/levelset.cpp`, `TLevelSet::saveFolder()`. With a save set
+  (the sub-xsheet's levels, `ToonzScene::save(fp, subxsh)`), the levels are
+  filtered but the folders are not: every folder of the parent scene's Cast is
+  written, most of them with no level in them. On a film-length scene with one
+  folder per character, every saved sub-xsheet lists all the characters in its
+  Cast. Fix: with a save set, skip a non-default folder that would hold no saved
+  level at any depth; a normal save still keeps empty folders the user made.
+  Ztoryc `686d3bcf2`. *(Code identical upstream; trivially reproducible:
+  put a level in a Cast folder, save another sub-xsheet as scene, look at its
+  Cast.)*
+
+- ❓ **«Sync with Play Range» does not reach the render range** —
+  `toonz/outputsettingspopup.cpp`, `OutputSettingsPopup::onSyncWithPlayRangeChanged()`
+  (`upstream/master:334`). Ticking the box copies the play range into the
+  Start/End **fields** with `setValue()`, which does not emit
+  `editingFinished`: the output properties keep the old range, and the render
+  uses it. Two related gaps: the flag is a global preference
+  (`SyncOutputWithPlayRange`) that reaches the scene's output properties only
+  when the popup is opened (`updateField`), so `XsheetGUI::setPlayRange()`
+  does not sync before that; and on opening, a range already saved in the
+  scene is shown instead of the play range even with the box ticked. Seen on
+  Ztoryc (Out marker at 175, popup and render at 102). Fix: write
+  `getProperties()->setRange()` on tick, pull the play range on open when
+  synced, and let `setPlayRange()` honour the global preference too
+  (`XsheetGUI::isOutputSyncedWithPlayRange()`). Ztoryc `1ed7acfce`.
+  *(The tick part reads identical upstream; not yet reproduced on stock.)*
+
+
+- ⚠️ **Plastic tool options box reads a vertex of the wrong skeleton on a column
+  switch** — `tnztools/plastictool.cpp`, `PlasticToolOptionsBox::updateControls()`
+  and `canSetInterpolation()` (`upstream/master:642` and `:730`):
+  `sd->vertexDeformation(skelId, m_svSel)`. `PlasticSkeletonDeformation::
+  vertexDeformation(int, int)` (`tnzext/plasticskeletondeformation.cpp:853`)
+  does `skeleton(skelId)->vertex(v)` with no check, and the options box runs it
+  from `xshLevelSwitched` — i.e. while the current column is switching, when
+  `::skeletonId()` already answers for the new column and the selection still
+  belongs to the old one. Three SIGSEGV on Ztoryc on 2026-10-12, all in
+  `updateControls()` right after `TApp::onColumnIndexSwitched()`, from three
+  triggers: a column header click, a click on a connected column's skeleton
+  (Ztoryc-only feature), and the undo of a Plastic animation
+  (`AnimateValuesUndo::undo` → `TemporaryActivation`, which exists upstream).
+  Fix: look the vertex up only if the skeleton exists and the index is a valid
+  node (`vertices().nodesCount()` / `isValid(v)`), else no deformation for that
+  instant. Ztoryc `40c2d5c7b` (`selectedVertexDeformation`). *(Cause from the
+  three crash logs, **not caught under lldb**; the fix writes
+  `crash/plastic_watch.log` when it triggers, which will confirm it. Upstream
+  trigger to try: Plastic Animate, select a vertex, then undo an animation
+  change made on another column with a skeleton.)*
+
+---
+
 ### 2.2 — Features that can go upstream as they are
 
 - 🟡 **Alt (⌥) + middle-drag = the Rotate tool, held** — `toonz/sceneviewerevents.cpp`

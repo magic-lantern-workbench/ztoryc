@@ -1,3 +1,47 @@
+## [2026-10-12] — review della 0.17 coi subagent; render dei personaggi agganciati; lip sync, bocche e pose che si ritrovano
+
+### Fixed
+- **Lip sync** (`d5278ef50`): «Whisper produced no output file» — il whisper-cli imballato legge solo
+  WAV a 16 kHz, ora riceve una copia convertita; una parola fuori dal vocabolario di Vosk
+  («negativissima») cominciava tardi e «negati» cadeva in rest; due bocche uguali vicine contavano
+  doppio e lo sfoltimento toglieva la vocale finale.
+- **Render di piu' fotogrammi** (`3c5682bad`): in sh330 il cavallo camminava sul posto mentre il
+  principe in sella avanzava. La risoluzione dei pin fra colonne aveva una cache a casella unica,
+  sovrascritta dagli alberi di tutti i fotogrammi costruiti prima di disegnarli. Ora una voce per
+  fotogramma, con lucchetto. Riprodotto e misurato con tcomposer (byte identici ai render singoli).
+- **Render Settings** (`1ed7acfce`): con «Sync with Play Range» l'intervallo di render restava quello
+  salvato (102 invece di 175). Segue il play range all'apertura, quando cambia e spuntando la casella.
+- **Creare uno storyboard svuotava i dati del progetto** nel tracker (produzione, codice, episodio,
+  titolo, schema) se i campi restavano vuoti — gia' cosi' nella 0.16.2 (`468ac2181`).
+- **Cast degli shot**: le cartelle dello storyboard copiate vuote dall'export; pulizia all'apertura
+  delle scene shot (`686d3bcf2`).
+- **Bocche** (`94d5a0414`): la lista dice chi e in quale colonna («LUPO — column SH020»); la libreria
+  si riconosce dai disegni quando i nomi delle sotto-scene non bastano (tolta una nidificazione, SOFIA
+  aveva un set invece di nove).
+- **Pose ZtoRig** (`064935010`): duplicare una colonna Plastic (Explode, Collapse) perdeva pose,
+  correttive, proprietari SO e IK; il personaggio si riconosce anche dalle mesh.
+- **Crash del Plastic al cambio di colonna** (`40c2d5c7b`): guardia in `updateControls`; causa dai tre
+  registri, da confermare con `crash/plastic_watch.log`.
+
+### Review
+- Subagent `ztoryc-reviewer` e `license-guard` su v0.16.2..d5278ef50 (`reviews/2026-10-12_*`): un
+  bloccante (B1, Scene Type su scena di un altro progetto → tracker sbagliato) e quattro importanti,
+  corretti in `953c65029` e collaudati da Franco su copia; i dodici minori in `53f5aa489` (QSaveFile,
+  autosave senza domande, firewall, Add + ⌘Z, modi di prova in `ztorytestmode.cpp`…).
+- Nomi dei progetti reali tolti da suggerimenti, commenti e docs (`53f5aa489`); CHANGELOG e
+  ANIMATIC_TASKS restano come sono (decisione di Franco).
+- Review di chiusura sui 9 commit successivi: `reviews/2026-10-13_*`.
+
+### Upstream candidates
+- `PlasticToolOptionsBox::updateControls` legge un vertice dello scheletro sbagliato al cambio di colonna.
+- «Sync with Play Range» non scrive l'intervallo di render (`outputsettingspopup.cpp`).
+- Il salvataggio di una sotto-scena copia tutte le cartelle del Cast della madre (`TLevelSet::saveFolder`).
+
+### Notes
+- Push con `SKIP_LICENSE_SCAN=1` col si' di Franco (falso positivo «otx» su `keyframeselection.cpp`).
+- Proposta «far capire che si e' DENTRO uno shot» con mockup: in ANIMATIC_TASKS, Franco ci ragiona.
+- Rilascio 0.17 non ancora fatto: restano bump, note, CI.
+
 ## [2026-10-11] — copia unica degli shot su master; tipo di scena; bocche per personaggio; due crash della palette
 
 ### Added

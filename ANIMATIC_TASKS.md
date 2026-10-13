@@ -163,28 +163,72 @@ degli status).
 
 ## 🎬 Ztoryc — storyboard, animatic, thumbs
 
-### 🆕 2026-10-11 — aperti dalla sessione (rilascio 0.17 il 12/10)
+### 🆕 2026-10-12 — Far capire che si e' DENTRO uno shot (da ragionare, Franco fa delle prove)
 
-- **Rilascio 0.17 (minor) il 2026-10-12**: si parte dalla review con i subagent (`ztoryc-reviewer` +
-  `license-guard`) su TUTTI i commit dalla 0.16.2 — eccezione alla pausa dei subagent decisa da Franco.
-  Nelle note: il `.ztoryc` si scrive col ⌘S; la domanda sul tipo di scena (popup + Workflow > Scene
-  Type…); la riga «Scene:» alla creazione; nelle bocche prima il personaggio, poi i suoi set.
-- **Prove a mano che restano** del rifacimento shot (`docs/SHOT_DOCUMENT_PLAN.md`): Add accanto a una
-  colonna audio; Delete dal Board stando dentro uno shot; Cut → Paste di uno shot con un disegno fatto
-  dentro; Copy/Cut/Paste incrociati Board ↔ Animatic.
-- **Crash della palette su sh280 (Messina) — causa ignota.** `PageViewer::paintEvent` su una pagina di
-  palette liberata, dopo il caricamento, non riprodotto (copia con i disegni, vero con lldb). Prevenuto da
-  `e32b865c3` (il viewer tiene la palette); se capita il caso, `crash/palette_watch.log` scrive quale
-  palette. Il gemello in `IoCmd::newScene` (`FullColorPalette::clear()` senza stacco) non e' mai stato
-  visto crashare.
-- **Piccoli, da osservare**: ogni apertura riscrive `production.ztrack` con gli `<alias>` in ordine diverso
-  (QHash: stesso contenuto, file riscritto — rumore su Drive); nella tendina «Character» delle bocche
-  compaiono anche le sotto-scene di sfondo (prezzo dell'includere i personaggi fatti nella scena);
-  il Save As di una scena SHOT non crea il `.ztoryc` della scena nuova (gia' cosi' su master prima del
-  rifacimento: da decidere se serve).
-- **Copie di prova** in `reference/test_projects/`: `messina_full` (99 scene, disegni di sh100/sh260/sh280
-  e dello storyboard, Kitsu tolto), `messina_copy` e `navcrash_test` con `scenes/scenes.xml` aggiunto.
-  Gli script in `scenetest/` impostano la copia come progetto corrente prima di lanciare.
+Il problema (Franco): l'utente spesso non capisce se e' dentro lo shot o no,
+soprattutto se mentre e' nello shot passa al Board invece che all'xsheet. Oggi
+l'unico segnale sono le breadcrumb dell'xsheet («Main › sh330»); nel Board non
+c'e' niente. (Il pannello «Back to storyboard», `ztorybackpanel`, citato in
+AGENTS.md non esiste piu': riga da correggere.)
+
+Proposta discussa il 12/10, con mockup (un solo segnale, lo stesso colore dello
+shot selezionato, ovunque si guardi):
+1. **fascia sopra il viewer, in tutte le room**: «Inside shot sh330 · frames
+   1–175 · Back to storyboard»; sparisce a livello storyboard. L'unico pezzo che
+   funziona anche nel Board.
+2. **nel Board**, la card dello shot in cui si e' dentro con contorno spesso e
+   pastiglia «inside»; le altre attenuate.
+3. **nella timeline / StoryStrip**, il blocco corrente colorato, gli altri spenti.
+4. il nome dello shot nel titolo della finestra («Ztoryc — sh330 (shot)»).
+Scartato: cambiare il colore di tutta l'interfaccia (stanca, litiga coi disegni).
+
+Da decidere (Franco):
+- attenuare le altre card aiuta o disturba quando si guarda lo storyboard?
+- il pulsante per uscire nella fascia: quale uscita, o solo l'indicazione?
+- nel Board, clic su un altro shot mentre si e' dentro sh330: cosa deve fare?
+Collegato a «🚪 TOGLIERE L'OBBLIGO DI USCIRE DALLO SHOT» (piu' sotto).
+Dopo la 0.17: tocca Board, viewer e room.
+
+### 🆕 2026-10-12 — aperti dalla sessione (rilascio 0.17 non ancora fatto)
+
+- **Rilascio 0.17 (minor)**: review fatte (`reviews/2026-10-12_*` su v0.16.2..d5278ef50, e
+  `2026-10-13_*` sui 9 commit dopo). Restano: bump a 0.17.0, note bilingui (EN poi IT), i tre
+  workflow. Franco ha detto che non c'e' fretta. Nelle note: il `.ztoryc` col ⌘S; il tipo di scena
+  (popup + Workflow > Scene Type…); la riga «Scene:» alla creazione; bocche per personaggio e
+  riconosciute dai disegni; render di piu' fotogrammi con personaggi agganciati; Sync with Play Range;
+  pose non piu' perse duplicando colonne Plastic; lip sync (Whisper, Vosk, lettere saltate); cartelle
+  vuote nel Cast.
+- **Dalla review di chiusura (`reviews/2026-10-13_reviewer.md`), nessun bloccante:**
+  - I-1, consigliato PRIMA della CI: `saveProjectDb` (`ztorymodel.cpp:1468`) rifiuta in silenzio un
+    salvataggio con la memoria di un altro tracker (cambio progetto, poi una modifica prima del
+    caricamento). Almeno un avviso, o ricaricare il DB corrente. Domanda a Franco: avviso a video o log?
+  - I-2: altre chiamate a `vertexDeformation(skelId, v)` senza controllo nel Plastic tool; piu' robusto
+    azzerare la selezione dei vertici al cambio di colonna. Aspetta il responso di `plastic_watch.log`.
+  - I-4: oltre 4096 voci la cache dei pin si svuota tutta (render ZtoRig > ~3 min). Sfratto parziale.
+  - M-a: «riprendere lo storyboard di prima» puo' offrire il `.bak` di una scena diversa con lo stesso
+    nome (quello del rinomino alla creazione): dargli un suffisso diverso.
+- **Crash del Plastic in `updateControls` — guardia `40c2d5c7b`, causa da confermare.** Tre crash il
+  12/10 su sh330 al cambio di colonna (clic sull'intestazione, clic sullo scheletro di una colonna
+  collegata, undo di un'animazione Plastic). Causa ricavata dai registri, NON presa con lldb: quando
+  la guardia scatta scrive `crash/plastic_watch.log`. Se compare una riga dove prima crashava, causa
+  confermata. Candidato upstream.
+- **Crash della palette su sh280 — causa ignota** (invariato): `e32b865c3` lo previene,
+  `crash/palette_watch.log` dice quale palette se ricapita.
+- **Prove a mano che restano** del rifacimento shot: Add accanto a una colonna audio; Delete dal Board
+  stando dentro uno shot; Cut → Paste di uno shot con un disegno fatto dentro; Copy/Cut/Paste
+  incrociati Board ↔ Animatic. In piu' (dalla review): Add + ⌘Z non lascia la sotto-scena nel cast (M8).
+- **Una finestra per ogni file mancante** all'apertura (comportamento di Tahoma): sulla copia di
+  Messina centinaia di «It is not possible to load», uno alla volta. Proposta: un messaggio solo con
+  l'elenco. Non per la 0.17.
+- **Le due pose di riposo** (prof_rest, front_rest) di SOFIA stanno nella scena del personaggio ma non
+  nel `.zrig` pubblicato: Update from Library non le porta. Da capire se e' giusto cosi'.
+- **AGENTS.md cita `ztorybackpanel`** («Back to storyboard»), che non esiste piu': riga da correggere.
+- **Piccoli, da osservare** (invariati): alias del tracker riscritti in ordine diverso a ogni apertura;
+  sotto-scene di sfondo nella lista dei personaggi delle bocche; Save As di una scena SHOT senza `.ztoryc`.
+- **Copie di prova** in `reference/test_projects/`: `messina_full` ora anche con `extras/sh330` e
+  `extras/sh310` (3 GB, copiati il 12/10) e `scenes/sh330_render.tnz`; salvataggio del tracker in
+  `scenetest/bak_review017/`; `scenetest/tcapp/` e' una COPIA dell'app (385 MB) per provare le
+  librerie con tcomposer senza toccare il bundle vero — si puo' cancellare.
 
 ### 🆕 2026-09-26 — il `.ztoryc`: estrazione, prove, versione del formato (P1 prima del congelamento)
 
