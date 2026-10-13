@@ -184,6 +184,25 @@ void SkVD::makePinCurvesStep() {
 
 //------------------------------------------------------------------
 
+bool SkVD::imagePinTarget(double frame, TPointD &image) const {
+  const TDoubleParam *tx = m_params[PINTX].getPointer();
+  const TDoubleParam *ix = m_params[PINIX].getPointer();
+  const TDoubleParam *iy = m_params[PINIY].getPointer();
+  if (!tx || !ix || !iy || ix->getKeyframeCount() == 0 ||
+      tx->getKeyframeCount() == 0)
+    return false;
+  double keyFrame = frame;  // the PINTX key in effect (the curves are step)
+  if (!tx->isKeyframe(frame)) {
+    const int k = tx->getPrevKeyframe(frame);
+    keyFrame    = tx->getKeyframe(k >= 0 ? k : 0).m_frame;
+  }
+  if (!ix->isKeyframe(keyFrame) || !iy->isKeyframe(keyFrame)) return false;
+  image = TPointD(ix->getValue(frame), iy->getValue(frame));
+  return true;
+}
+
+//------------------------------------------------------------------
+
 bool SkVD::setKeyframe(const SkVD::Keyframe &values, double frame,
                        double easeIn, double easeOut) {
   bool keyWasSet = false;
@@ -1746,13 +1765,7 @@ void PlasticSkeletonDeformation::plantPins(int skelId, double frame,
               controllerTrans(targetKeyFrame(*vd.m_params[SkVD::PINTX]));
     ActivePin ap{(int)vt.m_idx, target,
                  locals::activationFrame(*vd.m_params[SkVD::PIN], frame)};
-    if (vd.m_params[SkVD::PINIX] && vd.m_params[SkVD::PINIY] &&
-        (vd.m_params[SkVD::PINIX]->getKeyframeCount() > 0 ||
-         vd.m_params[SkVD::PINIY]->getKeyframeCount() > 0)) {
-      ap.hasImage = true;
-      ap.image    = TPointD(vd.m_params[SkVD::PINIX]->getValue(frame),
-                            vd.m_params[SkVD::PINIY]->getValue(frame));
-    }
+    ap.hasImage = vd.imagePinTarget(frame, ap.image);
     pins.push_back(ap);
   }
   if (pins.empty()) return;

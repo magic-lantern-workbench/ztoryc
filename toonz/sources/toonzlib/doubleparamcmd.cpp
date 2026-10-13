@@ -473,7 +473,8 @@ bool KeyframeSetter::isStepOnlyCurve(const TDoubleParam *curve) {
   // the planted point would slide between two keys.
   const std::string &name = curve->getName();
   return name == "Pin" || name == "PinTX" || name == "PinTY" ||
-         name == "PinWX" || name == "PinWY";
+         name == "PinWX" || name == "PinWY" || name == "PinIX" ||
+         name == "PinIY";
 }
 
 void KeyframeSetter::setAutoBezier(TDoubleParam *curve,

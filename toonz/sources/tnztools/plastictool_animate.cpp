@@ -1712,13 +1712,18 @@ std::map<int, TPointD> pinTargetsAtFrame(
   // An image-space pin (PINIX keyed) targets its screen spot: back through the
   // current controller into tool-local space. The eval refines it with the
   // root's motion (plantPins); between two drag events this is close enough.
-  const TAffine ctrlInv = sd->getSquashControllerAffine(skelId, frame).inv();
+  // Computed only if needed: getSquashControllerAffine runs a full solve.
+  bool haveCtrl = false;
+  TAffine ctrlInv;
   for (int p : pins) {
     SkVD *vd = sd->vertexDeformation(skelId, p);
-    if (vd && vd->m_params[SkVD::PINIX] && vd->m_params[SkVD::PINIY] &&
-        vd->m_params[SkVD::PINIX]->getKeyframeCount() > 0) {
-      targets[p] = ctrlInv * TPointD(vd->m_params[SkVD::PINIX]->getValue(frame),
-                                     vd->m_params[SkVD::PINIY]->getValue(frame));
+    TPointD image;
+    if (vd && vd->imagePinTarget(frame, image)) {
+      if (!haveCtrl) {
+        ctrlInv  = sd->getSquashControllerAffine(skelId, frame).inv();
+        haveCtrl = true;
+      }
+      targets[p] = ctrlInv * image;
       continue;
     }
     if (vd && vd->m_params[SkVD::PINTX] && vd->m_params[SkVD::PINTY] &&
@@ -2708,6 +2713,10 @@ void PlasticTool::recapturePinTargets_animate() {
 
 void PlasticTool::togglePinAtCurrentFrame() {
   if (!m_sd || !m_svSel.hasSingleObject()) return;
+  // Old pins of this character learn their screen spot first, so the new
+  // image key does not sit next to target keys that have none (see
+  // SkVD::imagePinTarget and upgradeLegacyPins_animate).
+  upgradeLegacyPins_animate();
   // Pins are read by the evaluation at paramsTime (identity, except past the
   // last stage key with Cycle on), so their keys must be WRITTEN there too — a
   // pin keyed at the raw frame past the cycle point would never be read back.
@@ -3291,7 +3300,8 @@ bool PlasticTool::onPropertyAboutToChange(std::string propertyName) {
 // on screen while the controller is neutral and slides the foot as soon as the
 // character is flipped, rotated or scaled (Franco, 2026-10-13: an old pin
 // slipped sideways, a new one held). Converted right before the controller
-// changes — never on load, so a scene that only gets opened is not touched:
+// changes or a pin is made — never on load, so a scene that only gets opened
+// is not touched:
 // at each target key, the image spot is where the vertex IS on screen at that
 // frame, read from the current (legacy) evaluation, so the conversion changes
 // nothing visible; from then on the plant holds that spot (plantPins).
@@ -3316,13 +3326,18 @@ void PlasticTool::upgradeLegacyPins_animate() {
     TDoubleParam *ix  = vd->m_params[SkVD::PINIX].getPointer();
     TDoubleParam *iy  = vd->m_params[SkVD::PINIY].getPointer();
     TDoubleParam *wx  = vd->m_params[SkVD::PINWX].getPointer();
+    TDoubleParam *wy  = vd->m_params[SkVD::PINWY].getPointer();
     if (!pin || !tx || !ix || !iy || tx->getKeyframeCount() == 0) continue;
-    if (ix->getKeyframeCount() > 0 || iy->getKeyframeCount() > 0) continue;
-    if (wx && wx->getKeyframeCount() > 0) continue;  // stage-owned
+    if ((wx && wx->getKeyframeCount() > 0) ||
+        (wy && wy->getKeyframeCount() > 0))
+      continue;  // stage-owned
 
     const int hook = m_sd->hookNumber(*(*vdt).first);
     for (int k = 0; k < tx->getKeyframeCount(); ++k) {
       const double f = tx->getKeyframe(k).m_frame;
+      // Per key, not per curve: a pasted clip or a pin re-made later leaves
+      // some target keys with an image spot and some without.
+      if (ix->isKeyframe(f) && iy->isKeyframe(f)) continue;
       if (pin->getValue(f) < 0.5) continue;  // a stale target, pin off here
       const int skId = m_sd->skeletonId(f);
       const int v    = m_sd->vertexIndex(hook, skId);
@@ -3919,7 +3934,9 @@ PlasticTool::buildUnifiedGraph_animate(double frame) {
   for (const auto &kv : g.parent) g.children[kv.second].push_back(kv.first);
 
   // Pins + their world targets (PINTX/PINTY when set, else current position).
-  for (const CrossCol &cc : cols)
+  for (const CrossCol &cc : cols) {
+    bool haveCtrl = false;  // one controller solve per column, and only if used
+    TAffine ctrlInv;
     for (auto vt = cc.deformed.vertices().begin();
          vt != cc.deformed.vertices().end(); ++vt) {
       SkVD *vd = cc.def->vertexDeformation(cc.skelId, vt.m_idx);
@@ -3935,14 +3952,18 @@ PlasticTool::buildUnifiedGraph_animate(double frame) {
                          vd->m_params[SkVD::PINTY]->getValue(cc.paramFrame));
       // Image-space pin: its spot is already after the controller, so only
       // the column placement is left (cc.world = column * controller).
-      if (vd->m_params[SkVD::PINIX] && vd->m_params[SkVD::PINIY] &&
-          vd->m_params[SkVD::PINIX]->getKeyframeCount() > 0)
-        tLocal = cc.def->getSquashControllerAffine(cc.skelId, cc.paramFrame)
-                     .inv() *
-                 TPointD(vd->m_params[SkVD::PINIX]->getValue(cc.paramFrame),
-                         vd->m_params[SkVD::PINIY]->getValue(cc.paramFrame));
+      TPointD image;
+      if (vd->imagePinTarget(cc.paramFrame, image)) {
+        if (!haveCtrl) {
+          ctrlInv = cc.def->getSquashControllerAffine(cc.skelId, cc.paramFrame)
+                        .inv();
+          haveCtrl = true;
+        }
+        tLocal = ctrlInv * image;
+      }
       g.pinTarget[n] = cc.world * tLocal;
     }
+  }
 
   return g;
 }

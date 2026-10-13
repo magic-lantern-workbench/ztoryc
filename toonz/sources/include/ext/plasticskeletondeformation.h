@@ -209,6 +209,12 @@ public:
     return (p >= PIN && p <= PINWY) || p == PINIX || p == PINIY;
   }
 
+  //! The image-space target of this pin at \p frame, if it has one THERE:
+  //! PINIX/PINIY keyed exactly at the PINTX key in effect. Any PINIX key is
+  //! not enough — the curves are step, so a pin re-made at frame 80 on a foot
+  //! with old keys at 1-50 would hold its frame-80 spot back over 1-50 too.
+  bool imagePinTarget(double frame, TPointD &image) const;
+
   struct Keyframe {
     TDoubleKeyframe m_keyframes[PARAMS_COUNT];
   };
