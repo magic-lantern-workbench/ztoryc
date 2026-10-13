@@ -190,6 +190,26 @@ static void ztoryArmSceneTest() {
                 qPrintable(t.fromCharacter), (int)t.map.sets.size(),
                 qPrintable(names.join(",")));
       }
+      // «switchsave:<other project .xml>»: the review's I-1 (2026-10-13).
+      // The project is switched as «Set as current project» does, with no
+      // scene of it opened, then an edit is saved as the Production panel
+      // would.  Does the memory follow the switch, or is the save refused?
+      if (action.startsWith("switchsave:")) {
+        fprintf(stderr, "[ZTORY] scenetest: before switch: db=%s title='%s'\n",
+                qPrintable(m->projectDbPath()), qPrintable(m->title()));
+        TProjectManager::instance()->setCurrentProjectPath(
+            TFilePath(action.mid(11).toStdWString()));
+        QTimer::singleShot(1500, qApp, [m]() {
+          fprintf(stderr, "[ZTORY] scenetest: after switch: db=%s title='%s'\n",
+                  qPrintable(m->projectDbPath()), qPrintable(m->title()));
+          m->setTitle(m->title() + " [switchsave]");
+          m->saveProjectDb();
+          fprintf(stderr, "[ZTORY] scenetest: switchsave done\n");
+          fflush(stderr);
+          QTimer::singleShot(1000, qApp, []() { _exit(0); });
+        });
+        return;
+      }
       if (action == "probe") {  // look only: nothing is written
         fprintf(stderr, "[ZTORY] scenetest: probe done\n");
         fflush(stderr);

@@ -3318,7 +3318,16 @@ void StoryboardPanel::saveZtoryc() {
     ZtoryModel::instance()->setShotDataLoadedFor(path);
   }
   // Publish structural metadata to the project DB (unless user opted out).
-  if (!autosave && !ZtoryModel::instance()->shotDocumentState().trackerOff) {
+  // Only into the tracker of the project the scene is in: with the model now
+  // following a project switch (followCurrentProject), a storyboard of the
+  // previous project still open would otherwise publish its shots into the
+  // new project's tracker (review 0.17, I-1).
+  const bool ownProject = ZtorySceneClass::isInCurrentProject(path);
+  if (!ownProject)
+    qWarning("[ZTORY] saveZtoryc: %s is not in the current project, not published",
+             path.toUtf8().constData());
+  if (!autosave && ownProject &&
+      !ZtoryModel::instance()->shotDocumentState().trackerOff) {
     QString sourceFile = QFileInfo(path).fileName();
     if (!sourceFile.isEmpty()) {
       // Prima di pubblicare, non dopo: pubblicare e POI dire che c'e' un

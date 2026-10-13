@@ -617,6 +617,10 @@ public:
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+bool ZtorySceneClass::isInCurrentProject(const QString &path) {
+  return inCurrentProject(path);
+}
+
 QString ZtorySceneClass::sidecarFor(const QString &tnzPath) {
   QString p = tnzPath;
   p.replace(QRegularExpression("\\.tnz$"), ".ztoryc");

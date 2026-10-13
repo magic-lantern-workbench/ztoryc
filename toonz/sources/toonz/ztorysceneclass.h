@@ -23,6 +23,9 @@ namespace ZtorySceneClass {
 
 // The sidecar next to a scene (.tnz → .ztoryc).
 QString sidecarFor(const QString &tnzPath);
+// Whether a scene (or its sidecar) lives in the folder of the current
+// project, whose Production Tracker is the one a save writes to.
+bool isInCurrentProject(const QString &path);
 
 // role="plain": a scene of the project that is not a storyboard.  \p workflow
 // is the room set it opens in ("Tradigital", "Cutout", "StopMotion"; the

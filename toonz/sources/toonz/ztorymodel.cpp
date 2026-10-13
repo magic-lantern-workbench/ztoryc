@@ -159,7 +159,25 @@ QColor ZtoryModel::taskStatusColor(TaskStatus s) {
   }
 }
 
+namespace {
+// The project can change with no scene of it opened (Set as current project,
+// the project browser): memory kept the previous project's tracker, and the
+// next edit — refused by saveProjectDb, rightly — vanished with no word.
+// Measured on copies on 2026-10-13 (ZTORYC_SCENETEST=switchsave).  Deferred:
+// the switch also happens in the middle of loading a scene.
+struct ProjectSwitchFollower final : public TProjectManager::Listener {
+  void onProjectSwitched() override {
+    QTimer::singleShot(0, qApp, []() {
+      ZtoryModel::instance()->followCurrentProject();
+    });
+  }
+  void onProjectChanged() override {}
+};
+}  // namespace
+
 ZtoryModel::ZtoryModel() : m_fps(24) {
+  static ProjectSwitchFollower follower;
+  TProjectManager::instance()->addListener(&follower);
   m_follow = QSettings().value("Ztoryc/followBoardTimeline", false).toBool();
   m_animaticSidePanels = QStringList{ "Storyboard" };
   m_shotSidePanels     = QStringList{ "Xsheet", "ZtoryScriptPanel" };
@@ -1468,6 +1486,21 @@ void ZtoryModel::saveProjectDb() {
   if (!m_dbBasePath.isEmpty() && key != m_dbBasePath && QFile::exists(path)) {
     qWarning("[ZTORY] saveProjectDb BLOCKED: memory holds %s, not %s",
              m_dbBasePath.toUtf8().constData(), path.toUtf8().constData());
+    // Said, not only logged: the edit is lost, and the user must know to
+    // redo it (review 0.17, I-1).  Memory follows the current project first;
+    // deferred, because the caller of this save may still hold indices.
+    static bool pending = false;
+    if (!pending) {
+      pending = true;
+      QTimer::singleShot(0, qApp, []() {
+        pending = false;
+        ZtoryModel::instance()->followCurrentProject();
+        DVGui::warning(QObject::tr(
+            "A change to the Production Tracker was NOT saved: the tracker in "
+            "memory belonged to another project.\n\nThe current project's "
+            "tracker is loaded now: please redo the change."));
+      });
+    }
     return;
   }
   // One instance at a time between reading the file and writing it back.
@@ -1772,6 +1805,22 @@ void ZtoryModel::reloadProjectDbIfChangedOnDisk() {
   // works on `merged`, in memory.
   lock.unlock();
   readProjectDbBytes(path, merged);
+  emit productionReloaded();
+  emit assetsChanged();
+  emit taskStatusChanged();
+}
+
+void ZtoryModel::followCurrentProject() {
+  const TFilePath fp = projectDbFilePath();
+  if (fp == TFilePath()) return;
+  const QString path = QString::fromStdWString(fp.getWideString());
+  if (!m_dbBasePath.isEmpty() &&
+      ZtoryLocks::canonicalPath(path) == m_dbBasePath)
+    return;  // memory already holds this project's tracker
+  if (QFile::exists(path))
+    loadProjectDbFromPath(path);
+  else
+    resetProjectLevelDefaults();
   emit productionReloaded();
   emit assetsChanged();
   emit taskStatusChanged();

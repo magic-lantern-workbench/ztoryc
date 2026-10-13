@@ -1098,6 +1098,10 @@ public:
   // First save with no Board: the workflow gives the role (ztorysceneclass.h).
   void declareNewSceneByWorkflow();
   // No Board: the opened scene's project data (a shot: its back-link's).
+  // The tracker of the CURRENT project in memory, when the project changed
+  // and memory still holds another one's (review 0.17, I-1).  Reads the file
+  // if it exists, else only clears: a switch must not create files.
+  void followCurrentProject();
   void reloadProjectDataForScene(const QString &shotBackLink);
   void noteSceneClassDeclined(const QString &tnzPath) { m_sceneClassDeclined.insert(tnzPath); }
   bool sceneClassDeclined(const QString &tnzPath) const {
