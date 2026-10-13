@@ -189,16 +189,54 @@ Da decidere (Franco):
 Collegato a «🚪 TOGLIERE L'OBBLIGO DI USCIRE DALLO SHOT» (piu' sotto).
 Dopo la 0.17: tocca Board, viewer e room.
 
-### 🆕 2026-10-12 — aperti dalla sessione (rilascio 0.17 non ancora fatto)
+### 🆕 Aperti dopo la 0.17 (sessioni del 12-13/10)
 
-- **Rilascio 0.17 (minor)** — Franco il 13/10: «qualche ora di test e poi rilasciamo». Review fatte (`reviews/2026-10-12_*` su v0.16.2..d5278ef50, e
-  `2026-10-13_*` sui 9 commit dopo). Restano: bump a 0.17.0, note bilingui (EN poi IT), i tre
-  workflow. Franco ha detto che non c'e' fretta. Nelle note: il `.ztoryc` col ⌘S; il tipo di scena
-  (popup + Workflow > Scene Type…); la riga «Scene:» alla creazione; bocche per personaggio e
-  riconosciute dai disegni; render di piu' fotogrammi con personaggi agganciati; Sync with Play Range;
-  pose non piu' perse duplicando colonne Plastic; lip sync (Whisper, Vosk, lettere saltate); cartelle
-  vuote nel Cast; Flip H / Flip V nel Plastic e flip di Animate su un asse; il tracker segue il
-  cambio di progetto (uno storyboard fuori dalla cartella del suo progetto non pubblica piu').
+- **Export per Premiere: manca il collaudo su Premiere vero.** Uscito nella 0.17 (`a8146e3cf`..`0687bf83c`,
+  storia nell'archivio del 13/10). Da chiedere a chi ha Premiere (SlamRockwell / il suo montatore), con
+  una build `preview.yml` se servono correzioni: dissolvenze (bordi a -1 + in/out sulla dissolvenza),
+  audio letto come coppia stereo e non mono, 48 kHz assunti.
+- **Export per shot: la dissolvenza e' stampata nei fotogrammi in piu' — 0.17.1 (SlamRockwell, 13/10).**
+  Il render di ogni shot copre l'intervallo del main con la sovrapposizione: verificato su sh020
+  (`demo_ztoryc2909`), fotogramma 0 = ancora sh010, 11 = meta' e meta', 22 = sh020 pieno. In fila i video
+  «flash in and out»; nel montaggio non si nota perche' la dissolvenza dell'NLE copre quella stampata.
+  I fotogrammi in piu' devono essere lo shot pieno al 100%. Correzione: nel render per shot solo la
+  colonna dello shot visibile e senza dissolvenza (capire prima come sono fatte le dissolvenze nel
+  render). Stesso export: l'etichetta stampata in alto a sinistra dice lo shot precedente
+  («sq20_sh010_P001» al fotogramma 22 di sh020).
+- **Gli MP4 di Ztoryc sono MPEG-4 Part 2, non H.264 — per la 0.17.1.** `image/ffmpeg/tiio_mp4.cpp:115`
+  cerca `libopenh264` e poi `libxh264` (refuso di Tahoma: e' `libx264`); l'ffmpeg incluso nel bundle macOS
+  non ha ne' l'uno ne' l'altro, solo `h264_videotoolbox`, quindi ogni MP4 cade sul codec predefinito
+  (mpeg4, 1999). FilmCraft non lo legge (col `.mov` ProRes si'). Correzione proposta: ripiego
+  libopenh264 → libx264 → h264_videotoolbox (Mac) → h264_mf (Windows) → predefinito; verificare cosa c'e'
+  nell'ffmpeg incluso su Windows e Linux. Cambia TUTTI i render MP4: non il giorno di un rilascio.
+  Candidato upstream (il refuso).
+- **Auto-matte su livello a parte — dopo la 0.17 (Franco, 13/10, richiesta di un utente).** Come
+  «Generate Auto-Matte» di Storyboard Pro: dal disegno (vettoriale, ma anche raster e Toonz Raster) un
+  comando genera per ogni fotogramma una sagoma piena su un **livello nuovo, in una colonna sotto**, con
+  le stesse celle; serve a rendere opaco il personaggio sopra il fondale. Per fotogramma: rasterizzare,
+  chiudere le fessure con un raggio regolabile, riempire dentro il contorno esterno, colore scelto
+  dall'utente; comando «aggiorna matte» per rigenerarla dopo aver ridisegnato. Scelto il livello a parte
+  invece dell'autofill vettoriale nel disegno: quello riempie solo le regioni chiuse (gli schizzi sono
+  aperti), mescola sagoma e colori nelle stesse regioni e modifica l'originale. Prima versione raster
+  (uno-due giorni); sagoma vettoriale modificabile eventualmente dopo.
+- **Conform dal montaggio: aggiornare l'animatic dalle modifiche fatte nel montaggio — dopo l'export
+  per Premiere (Franco, 13/10).** Storyboard Pro lo fa; da noi e' piu' fattibile del previsto, perche'
+  il main e' gia' «quali fotogrammi di quale sotto-scena, in che ordine» e le clip esportate portano il
+  nome dello shot. Comando «Conform from edit» che legge l'XML (FCPXML da DaVinci, xmeml da Premiere),
+  mostra un riepilogo prima di applicare (shot accorciati, spostati, tolti) e si annulla con un ⌘Z.
+  Fasi: (1) ordine, cancellazioni, taglio in coda, dissolvenze; (2) taglio in testa (colonna che parte
+  dal fotogramma N della sotto-scena: verificare miniature, durate, export che oggi assumono 1) e shot
+  spezzati o riusati (Copy = istanza condivisa con intervalli diversi); (3) audio, partendo dal mix
+  finale come traccia unica. Limiti: cambi di velocita' e fermi immagine del montatore; clip rinominate
+  nel montaggio perdono il collegamento allo shot.
+- **Dalla review dei pin nell'immagine (`reviews/2026-10-13_reviewer.md`, aggiunta), B1/I1/I3 corretti:**
+  - I2: nel trascinamento IK con **due pin** e personaggio specchiato il bersaglio dei pin secondari e'
+    approssimato (A^-1*W senza il termine d, `pinTargetsAtFrame`): al rilascio puo' saltare. Collaudare,
+    poi calcolare lo stesso d di `plantPins`.
+  - I4: la conversione dei pin vecchi fa due risoluzioni per chiave, una volta sola: su scene lunghe
+    puo' essere una pausa percepibile alla prima modifica del controller. Misurare.
+  - `updateMatrix()` a ogni passo del drag IK: misurare su una scena lunga.
+  - `anyStageOwned` in `plantPins` e' scritto e mai letto, e il commento dice altro (preesistente).
 - **Dalla review di chiusura (`reviews/2026-10-13_reviewer.md`), nessun bloccante:**
   - I-2: altre chiamate a `vertexDeformation(skelId, v)` senza controllo nel Plastic tool; piu' robusto
     azzerare la selezione dei vertici al cambio di colonna. Aspetta il responso di `plastic_watch.log`.

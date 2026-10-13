@@ -511,6 +511,32 @@ not portable.
   restore it from the combo. Ztoryc `780b2a6cb`.
   *(Code identical upstream; trivially reproducible.)*
 
+- ⚠️ **Paste keys on an EMPTY key selection overflows the stack** —
+  `toonz/keyframeselection.cpp`, `TKeyframeSelection::pasteKeyframesWithShift()`
+  (`upstream/master:439`), and `toonz/keyframedata.cpp`,
+  `TKeyframeData::getKeyframes(std::set<Position>&)` (`upstream/master:211`).
+  Copy guards on `isEmpty()`, Paste does not, and `enableCommands()` keeps
+  Paste enabled while the key selection is current but empty (a click on a
+  cell without keys empties it); `unselectLockedColumn()` can empty it too.
+  `getKeyframes()` then reads the anchor row/column from `positions.begin()`
+  of an empty set — garbage — and `setKeyframes()` asks `getStageObject()` for
+  a column around 87000, which creates every lower column recursively
+  (`tstageobjecttree.cpp:214`) until the stack overflows. Crash on Ztoryc on
+  2026-10-13 (macOS report: 87015 nested `getStageObject` frames under
+  `pasteKeyframesWithShift`). Fix: return when the selection is empty after
+  `unselectLockedColumn()`, and the same guard in `getKeyframes()`. Ztoryc
+  `3e098e6bc`. *(Cause from the crash report and the code, not caught under
+  lldb; code identical upstream.)*
+
+- ❓ **MP4 export never uses x264: `libxh264` is a typo** — `image/ffmpeg/tiio_mp4.cpp`
+  (`upstream/master:115-117`): the H.264 fallback checks and passes `libxh264`, which
+  no ffmpeg build has (`libx264`). When `libopenh264` is missing, no `-c:v` is given
+  and ffmpeg's default MP4 encoder is used: MPEG-4 Part 2 (`mp4v`), which some
+  editors do not decode. Fix: `libx264`, and ideally a hardware fallback
+  (`h264_videotoolbox` on macOS, `h264_mf` on Windows) before the default. Seen on
+  Ztoryc 2026-10-13 (bundled ffmpeg has only `h264_videotoolbox`). *(Code identical
+  upstream; not yet fixed in Ztoryc.)*
+
 #### ✨ New (2026-10-12)
 
 - ❓ **Saving a sub-xsheet as a scene copies every Cast folder of the parent,

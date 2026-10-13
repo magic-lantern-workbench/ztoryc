@@ -3243,6 +3243,31 @@ importata e verificata, sync ok. File corretto di Messina in `03_storyboard/anim
 
 ## Chiusi il 2026-10-13
 
+### ✅ Rilascio 0.17.0 pubblicato (`7c51a931d`)
+Tre workflow riusciti, 9 asset, note EN+IT applicate (senza i difetti nati col flip, come chiesto da
+Franco), DMG Apple Silicon verificato montato (codesign 0, versione 0.17.0). Review coi subagent su tutti
+i commit dopo la 0.16.2 (`reviews/2026-10-12_*` e `2026-10-13_*` con le aggiunte).
+
+### ✅ Crash incollando chiavi con la selezione vuota (`3e098e6bc`)
+Stack overflow in `getStageObject` (87015 chiamate, colonna spazzatura da `positions.begin()` di un
+insieme vuoto). Guardie in `pasteKeyframesWithShift` e `TKeyframeData::getKeyframes`. Non piu'
+ripresentato a Franco. Candidato upstream.
+
+### ✅ Pin nello spazio dell'immagine: reggono col personaggio specchiato (`3e098e6bc`..`3ea7082fe`)
+PinIX/PinIY, limiti specchiati nel solutore di scena, pivot compensato, matrice del tool aggiornata nel
+drag IK, conversione dei pin vecchi (anche parziali, `SkVD::imagePinTarget`). Provato da Franco nella
+SP e nell'app; B1/I1/I3 della review corretti.
+
+### ✅ Export dell'animatic per Premiere (`a8146e3cf`..`0687bf83c`)
+XML di Final Cut 7: bordi a -1 verso la dissolvenza con in/out che la comprendono (verificato col
+timecode stampato in DaVinci), stereo come coppia L/R alla maniera di Premiere, file descritti una volta,
+timeline in comune con l'FCPXML. Provato da Franco in DaVinci e in FilmCraft (video `.mov`). Testi: file
+e programmi tra parentesi, niente «beta». Resta il collaudo su Premiere vero (voce in ANIMATIC_TASKS).
+
+### ✅ Export per shot dopo una registrazione audio: shot sbagliati (`032133b47`, `0c475f95d`)
+La colonna sonora registrata entra fra gli shot; gli indici restavano vecchi. Riallineamento a ogni
+cambio dello xsheet, verifica della sotto-scena nell'export. Collaudato da Franco (6", dissolvenze ok).
+
 ### ✅ Flip H / Flip V nel Plastic; flip di Animate su un asse solo (`780b2a6cb`)
 Il controller ora accetta le scale negative. Collaudato da Franco (viewer, render, personaggio
 agganciato, maniglie, undo).

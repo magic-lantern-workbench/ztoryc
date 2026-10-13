@@ -1,3 +1,30 @@
+## [2026-10-13 sera] — Rilascio 0.17.0; pin che reggono col flip; animatic per Premiere
+
+### Rilascio
+- **v0.17.0 pubblicata** (`7c51a931d`): tre workflow riusciti, 9 asset, note EN+IT, DMG verificato.
+
+### Fixed
+- **Crash incollando chiavi con la selezione vuota** (`3e098e6bc`): stack overflow in `getStageObject`.
+- **Pin col personaggio specchiato** (`3e098e6bc`..`3ea7082fe`): PinIX/PinIY (dove sta il piede sullo
+  schermo), limiti specchiati nel solutore, pivot compensato, matrice aggiornata nel drag IK, pin vecchi
+  convertiti prima che il controller cambi o si metta un pin.
+- **Export per shot dopo una registrazione audio** (`032133b47`, `0c475f95d`): la colonna sonora entra
+  fra gli shot e gli indici restavano vecchi; riallineamento a ogni cambio dello xsheet.
+
+### Added
+- **Timeline dell'animatic per Premiere Pro** (XML di Final Cut 7, `a8146e3cf`..`0687bf83c`): stereo L/R,
+  in/out che comprendono la dissolvenza; provata in DaVinci e FilmCraft, manca Premiere vero.
+- FilmCraft installato in `/Volumes/ZioSam/PortablesApp/` (sorgente in `reference/filmcraft-src`).
+
+### Upstream candidates
+- Incolla chiavi con selezione vuota (`keyframeselection.cpp`, `keyframedata.cpp`).
+- Refuso `libxh264` in `image/ffmpeg/tiio_mp4.cpp`: gli MP4 cadono su MPEG-4 Part 2 (non ancora corretto).
+
+### Notes
+- Per la 0.17.1 (ANIMATIC_TASKS): dissolvenza stampata nei video per shot ed etichetta dello shot
+  sbagliato (SlamRockwell); MP4 in H.264. Filoni: conform dal montaggio, auto-matte su livello a parte.
+- Review coi subagent su ogni gruppo di commit, in coda a `reviews/2026-10-13_*`.
+
 ## [2026-10-13] — flip nel Plastic, il tracker segue il cambio di progetto
 
 ### Added
