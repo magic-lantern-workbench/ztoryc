@@ -30,6 +30,7 @@
 
 class QWidget;
 class ToonzScene;
+class TXsheet;
 
 struct MouthLibraryItem {
   QString   character;   // the asset name of the library
@@ -66,8 +67,13 @@ void offerOnSave();
 // The library's map for the sub-scene `sub` of this scene, found by the
 // chain «the nearest sub-scene above it named as a character's scene».
 // False if the chain finds no library (or this is a character's own scene).
+// `subXsh`: WHICH sub-scene, when the caller knows it. A scene can hold
+// several sub-scenes with the same name (sh440: «sub» in PRINCENERENTOLA and
+// in SOFIA), and by the name alone the first one in column order answered
+// for all of them. Without it, the first sub-scene called `sub`.
 bool libraryMapForSubScene(ToonzScene *scene, const QString &sub,
-                           MouthMap *map, QString *character);
+                           MouthMap *map, QString *character,
+                           TXsheet *subXsh = nullptr);
 
 // Mouths on IMPORTED levels: the library has sets the shot's copy of the
 // .zmouth does not have, or has differently. (Sub-scenes need no update:
@@ -94,7 +100,8 @@ QString characterKey(const QString &subSceneName);
 //! The character a sub-scene belongs to, from the sub-scenes above it (the one
 //! named as a character's scene), whether or not that library has sets; empty
 //! if none.  Knowing WHOSE it is forbids borrowing someone else's sets.
-QString characterOfSubScene(ToonzScene *scene, const QString &sub);
+QString characterOfSubScene(ToonzScene *scene, const QString &sub,
+                            TXsheet *subXsh = nullptr);
 
 // Runs `fn` once NO modal window is open (checked every quarter of a second,
 // given up after a minute). The questions at open and save used to pop right

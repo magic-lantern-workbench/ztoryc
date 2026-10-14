@@ -396,8 +396,9 @@ QVector<MouthApplyTarget> ZtoryMouthApply::findTargets(ToonzScene *scene) {
     if (characterScene || t.subScene.isEmpty()) continue;
     MouthMap lib;
     QString who;
-    if (!ZtoryMouthLibrary::libraryMapForSubScene(scene, t.subScene, &lib,
-                                                  &who))
+    TXshChildLevel *tcl = t.level ? t.level->getChildLevel() : nullptr;
+    if (!ZtoryMouthLibrary::libraryMapForSubScene(
+            scene, t.subScene, &lib, &who, tcl ? tcl->getXsheet() : nullptr))
       continue;
     int added = 0;
     for (MouthSet s : lib.sets) {
@@ -423,7 +424,10 @@ QVector<MouthApplyTarget> ZtoryMouthApply::findTargets(ToonzScene *scene) {
     // library has no sets yet — got another character's nine, the only «sub» with a map,
     // so «not ambiguous» (Franco, 2026-10-11): the same mistake as BRONTOLO on
     // 2026-09-25, by the back door of this fallback.
-    if (!ZtoryMouthLibrary::characterOfSubScene(scene, t.subScene).isEmpty())
+    TXshChildLevel *tcl = t.level ? t.level->getChildLevel() : nullptr;
+    if (!ZtoryMouthLibrary::characterOfSubScene(
+             scene, t.subScene, tcl ? tcl->getXsheet() : nullptr)
+             .isEmpty())
       continue;
     ZtoryModel *model = ZtoryModel::instance();
     // ⚠️ Si raccolgono TUTTI i candidati invece di fermarsi al primo.
@@ -554,7 +558,8 @@ MouthCharacters ZtoryMouthApply::characters(ToonzScene *scene) {
       // it (ZtoryMouthLibrary, by content).
       QString byContent;
       if (libKey.isEmpty()) {
-        byContent = ZtoryMouthLibrary::characterOfSubScene(scene, name);
+        byContent =
+            ZtoryMouthLibrary::characterOfSubScene(scene, name, cl->getXsheet());
         std::function<void(TXsheet *, int)> look = [&](TXsheet *xsh, int depth) {
           if (!xsh || depth > 8 || !byContent.isEmpty()) return;
           for (int cc = 0; cc < xsh->getColumnCount() && byContent.isEmpty(); cc++) {
@@ -565,7 +570,8 @@ MouthCharacters ZtoryMouthApply::characters(ToonzScene *scene) {
               if (cell2.isEmpty() || !cell2.m_level) continue;
               if (TXshChildLevel *sub = cell2.m_level->getChildLevel()) {
                 byContent = ZtoryMouthLibrary::characterOfSubScene(
-                    scene, QString::fromStdWString(cell2.m_level->getName()));
+                    scene, QString::fromStdWString(cell2.m_level->getName()),
+                    sub->getXsheet());
                 if (byContent.isEmpty()) look(sub->getXsheet(), depth + 1);
               }
               break;
