@@ -917,6 +917,12 @@ static bool ztoryDissolveAtFrame(TXsheet *xsh, int frame, int &colBOut,
     if (ztoryColumnSub(xsh, c)) shots.push_back(c);
   for (size_t k = 0; k + 1 < shots.size(); k++) {
     int colA = shots[k], colB = shots[k + 1];
+    // A hidden shot takes no part in the dissolve: blending the incoming shot
+    // over nothing would only fade it (the per-shot export renders one shot
+    // column at a time and wants its overlap frames at full strength).
+    if (!xsh->getColumn(colA)->isPreviewVisible() ||
+        !xsh->getColumn(colB)->isPreviewVisible())
+      continue;
     int half = ztoryXdNoteRows(ztoryColumnSub(xsh, colA), "XD-out");
     if (half <= 0 || half != ztoryXdNoteRows(ztoryColumnSub(xsh, colB), "XD-in"))
       continue;

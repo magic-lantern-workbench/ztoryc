@@ -8916,48 +8916,11 @@ void StoryboardPanel::onExportAnimatic() {
   QSettings().setValue("Ztoryc/BurnInShotNames", chkNames->isChecked());
   // (Clapperboard already applied live by the chkClap toggled connection.)
 
-  // Publish the burn-in config consumed by rendercommand.cpp at render setup.
-  {
-    ZtoryBurnInConfig bi;
-    bi.timecode  = chkTC->isChecked();
-    bi.shotNames = chkNames->isChecked();
-    if (bi.shotNames) {
-      for (int si = 0; si < (int)m_shots.size(); si++) {
-        // Shot frame range in the main xsheet (same scan as shotFrameRange,
-        // which is declared below — duplicated here to keep diff local).
-        TXsheet *xsh = scene->getChildStack()->getTopXsheet();
-        int col = m_shots[si].data->xsheetColumn;
-        int s0 = 0, s1 = 0;
-        for (int r = 0; r < xsh->getFrameCount(); r++)
-          if (!xsh->getCell(r, col).isEmpty()) { s0 = r; break; }
-        for (int r = xsh->getFrameCount() - 1; r >= 0; r--)
-          if (!xsh->getCell(r, col).isEmpty()) { s1 = r; break; }
-        // Label prefix: SQ label (if any) + shot label.
-        QString prefix;
-        if (!m_shots[si].data->sequenceId.isEmpty()) {
-          const SequenceData *seq =
-              ZtoryModel::instance()->findSequence(m_shots[si].data->sequenceId);
-          if (seq) prefix = seq->label + "_";
-        }
-        prefix += m_shots[si].data->label();
-        const auto &panels = m_shots[si].data->panels;
-        for (int pi = 0; pi < (int)panels.size(); pi++) {
-          ZtoryBurnInSeg seg;
-          seg.from  = s0 + panels[pi].startFrame;
-          seg.to    = (pi + 1 < (int)panels.size())
-                          ? s0 + panels[pi + 1].startFrame - 1
-                          : s1;
-          seg.to    = qMin(seg.to, s1);
-          seg.label = prefix + "_" +
-                      (panels[pi].panelLabel.isEmpty()
-                           ? QString("P%1").arg(pi + 1, 3, 10, QChar('0'))
-                           : panels[pi].panelLabel);
-          if (seg.from <= seg.to) bi.segments.push_back(seg);
-        }
-      }
-    }
-    ZtoryModel::instance()->burnIn() = bi;
-  }
+  // Burn-in config consumed by rendercommand.cpp at render setup; the label
+  // segments are filled below, once shot columns and spans are resolved.
+  ZtoryBurnInConfig burnIn;
+  burnIn.timecode  = chkTC->isChecked();
+  burnIn.shotNames = chkNames->isChecked();
 
   // ── Collect parameters ─────────────────────────────────���────────────────
   int mode       = btnGroup->checkedId();  // 0=full, 1=range, 2=each
@@ -8979,7 +8942,7 @@ void StoryboardPanel::onExportAnimatic() {
   auto isRealCell = [](const TXshCell &c) {
     return !c.isEmpty() && !c.getFrameId().isStopFrame();
   };
-  auto shotFrameRange = [&](int si) -> std::pair<int,int> {
+  auto shotColumn = [&](int si) -> int {
     TXsheet *xsh = scene->getChildStack()->getTopXsheet();
     int col = m_shots[si].data->xsheetColumn;
     // Trust the index only if that column really shows this shot's sub-scene;
@@ -9009,6 +8972,11 @@ void StoryboardPanel::onExportAnimatic() {
             break;
           }
     }
+    return col;
+  };
+  auto shotFrameRange = [&](int si) -> std::pair<int,int> {
+    TXsheet *xsh = scene->getChildStack()->getTopXsheet();
+    int col = shotColumn(si);
     int r0 = 0, r1 = 0;
     for (int r = 0; r < xsh->getFrameCount(); r++) {
       if (isRealCell(xsh->getCell(r, col))) { r0 = r; break; }
@@ -9018,6 +8986,55 @@ void StoryboardPanel::onExportAnimatic() {
     }
     return {r0, r1};
   };
+
+  // Burn-in labels of shot si, one segment per panel, measured from the NET
+  // span (shotTrueSpan): panel starts are relative to it, and in a dissolve the
+  // label must switch at the cut, not where the incoming shot's head frames
+  // begin.  [clipFrom, clipTo] widens the first/last panel over the clip's
+  // dissolve handles, which in a per-shot clip show this shot only.
+  auto shotBurnInSegments = [&](int si, int clipFrom, int clipTo) {
+    std::vector<ZtoryBurnInSeg> segs;
+    TXsheet *xsh = scene->getChildStack()->getTopXsheet();
+    int ts = 0, td = 0;
+    if (!ZtoryShotOps::shotTrueSpan(xsh, shotColumn(si), ts, td) || td <= 0) {
+      auto [r0, r1] = shotFrameRange(si);
+      ts = r0;
+      td = r1 - r0 + 1;
+    }
+    int te = ts + td - 1;
+    QString prefix;
+    if (!m_shots[si].data->sequenceId.isEmpty()) {
+      const SequenceData *seq =
+          ZtoryModel::instance()->findSequence(m_shots[si].data->sequenceId);
+      if (seq) prefix = seq->label + "_";
+    }
+    prefix += m_shots[si].data->label();
+    const auto &panels = m_shots[si].data->panels;
+    for (int pi = 0; pi < (int)panels.size(); pi++) {
+      ZtoryBurnInSeg seg;
+      seg.from = ts + panels[pi].startFrame;
+      seg.to   = (pi + 1 < (int)panels.size())
+                     ? ts + panels[pi + 1].startFrame - 1
+                     : te;
+      seg.to   = qMin(seg.to, te);
+      seg.label = prefix + "_" +
+                  (panels[pi].panelLabel.isEmpty()
+                       ? QString("P%1").arg(pi + 1, 3, 10, QChar('0'))
+                       : panels[pi].panelLabel);
+      if (seg.from <= seg.to) segs.push_back(seg);
+    }
+    if (!segs.empty()) {
+      segs.front().from = qMin(segs.front().from, clipFrom);
+      segs.back().to    = qMax(segs.back().to, clipTo);
+    }
+    return segs;
+  };
+  if (burnIn.shotNames && mode != 2)
+    for (int si = 0; si < (int)m_shots.size(); si++) {
+      auto segs = shotBurnInSegments(si, INT_MAX, INT_MIN);
+      burnIn.segments.insert(burnIn.segments.end(), segs.begin(), segs.end());
+    }
+  ZtoryModel::instance()->burnIn() = burnIn;
 
   if (mode == 0) {
     // Full animatic: from first cell to last
@@ -9076,6 +9093,33 @@ void StoryboardPanel::onExportAnimatic() {
       prop->setPath(outPath);
       prop->setRange(r0, r1, 1);
 
+      // Render this shot's column alone: the clip spans the dissolve handles,
+      // where the neighbouring shot is exposed too and would be blended in
+      // (the NLE makes the dissolve).  Hidden only while the render is set up.
+      TXsheet *topXsh  = scene->getChildStack()->getTopXsheet();
+      int ownCol       = shotColumn(si);
+      std::vector<TXshColumn *> hiddenCols;
+      for (int c = 0; c < topXsh->getColumnCount(); c++) {
+        TXshColumn *column = topXsh->getColumn(c);
+        if (c == ownCol || !column || column->isEmpty() ||
+            !column->isPreviewVisible())
+          continue;
+        int a, b;
+        if (!topXsh->getCellRange(c, a, b)) continue;
+        bool isShot = false;
+        for (int r = a; r <= b; r++) {
+          const TXshCell &cell = topXsh->getCell(r, c);
+          if (cell.isEmpty()) continue;
+          isShot = cell.getChildLevel() != nullptr;
+          break;
+        }
+        if (!isShot) continue;
+        column->setPreviewVisible(false);
+        hiddenCols.push_back(column);
+      }
+      if (burnIn.shotNames)
+        ZtoryModel::instance()->burnIn().segments = shotBurnInSegments(si, r0, r1);
+
       // Block until this shot's render completes.  A timeout guards against the
       // pathological case where a render never signals completion (e.g. it
       // failed to start) so the export can never wedge the UI permanently.
@@ -9087,6 +9131,8 @@ void StoryboardPanel::onExportAnimatic() {
       renderTimeout.setSingleShot(true);
       connect(&renderTimeout, &QTimer::timeout, &renderLoop, &QEventLoop::quit);
       CommandManager::instance()->execute(MI_Render);
+      // The frames' fx trees are built inside MI_Render: visibility can go back.
+      for (TXshColumn *column : hiddenCols) column->setPreviewVisible(true);
       renderTimeout.start(30 * 60 * 1000);  // 30-min safety cap per shot
       renderLoop.exec();
       disconnect(conn);
