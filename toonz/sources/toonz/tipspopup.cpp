@@ -19,7 +19,7 @@
 //=============================================================================
 /*! \class TipsPopup
                 \brief The TipsPopup class provides a dialog to
-   bring up Tahoma2D tips
+   bring up Ztoryc tips
 
                 Inherits \b Dialog.
 */
