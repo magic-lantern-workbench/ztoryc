@@ -535,7 +535,9 @@ not portable.
   editors do not decode. Fix: `libx264`, and ideally a hardware fallback
   (`h264_videotoolbox` on macOS, `h264_mf` on Windows) before the default. Seen on
   Ztoryc 2026-10-13 (bundled ffmpeg has only `h264_videotoolbox`). *(Code identical
-  upstream; not yet fixed in Ztoryc.)*
+  upstream.)* **Fixed in Ztoryc `a4ea2f441` (2026-10-14):** first available of
+  `libx264`, `libopenh264`, `h264_videotoolbox`, `h264_mf`; verified on macOS
+  (H.264 High, opens in DaVinci Resolve and FilmCraft). Windows not yet verified.
 
 #### ✨ New (2026-10-12)
 

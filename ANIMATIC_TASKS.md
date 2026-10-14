@@ -191,25 +191,25 @@ Dopo la 0.17: tocca Board, viewer e room.
 
 ### 🆕 Aperti dopo la 0.17 (sessioni del 12-13/10)
 
-- **Export per Premiere: manca il collaudo su Premiere vero.** Uscito nella 0.17 (`a8146e3cf`..`0687bf83c`,
+- **Export per Premiere: manca il collaudo su Premiere vero.** Il 14/10 nella 0.17.1: dissolvenze con
+  start/end ratio (`ec9d2fe38`) e tagli in chiaro invece dei bordi a -1 (`f1daa7cb0`), provati da Franco
+  in DaVinci e FilmCraft. Uscito nella 0.17 (`a8146e3cf`..`0687bf83c`,
   storia nell'archivio del 13/10). Da chiedere a chi ha Premiere (SlamRockwell / il suo montatore), con
   una build `preview.yml` se servono correzioni: dissolvenze (bordi a -1 + in/out sulla dissolvenza),
   audio letto come coppia stereo e non mono, 48 kHz assunti.
-- **Export per shot: la dissolvenza e' stampata nei fotogrammi in piu' — 0.17.1 (SlamRockwell, 13/10).**
-  Il render di ogni shot copre l'intervallo del main con la sovrapposizione: verificato su sh020
-  (`demo_ztoryc2909`), fotogramma 0 = ancora sh010, 11 = meta' e meta', 22 = sh020 pieno. In fila i video
-  «flash in and out»; nel montaggio non si nota perche' la dissolvenza dell'NLE copre quella stampata.
-  I fotogrammi in piu' devono essere lo shot pieno al 100%. Correzione: nel render per shot solo la
-  colonna dello shot visibile e senza dissolvenza (capire prima come sono fatte le dissolvenze nel
-  render). Stesso export: l'etichetta stampata in alto a sinistra dice lo shot precedente
-  («sq20_sh010_P001» al fotogramma 22 di sh020).
-- **Gli MP4 di Ztoryc sono MPEG-4 Part 2, non H.264 — per la 0.17.1.** `image/ffmpeg/tiio_mp4.cpp:115`
-  cerca `libopenh264` e poi `libxh264` (refuso di Tahoma: e' `libx264`); l'ffmpeg incluso nel bundle macOS
-  non ha ne' l'uno ne' l'altro, solo `h264_videotoolbox`, quindi ogni MP4 cade sul codec predefinito
-  (mpeg4, 1999). FilmCraft non lo legge (col `.mov` ProRes si'). Correzione proposta: ripiego
-  libopenh264 → libx264 → h264_videotoolbox (Mac) → h264_mf (Windows) → predefinito; verificare cosa c'e'
-  nell'ffmpeg incluso su Windows e Linux. Cambia TUTTI i render MP4: non il giorno di un rilascio.
-  Candidato upstream (il refuso).
+- **Firma del codice per Windows (Smart App Control) — filone a parte (Franco, 13/10).** La settimana
+  del 6/10 Ztoryc non si e' installato su macchine Windows 11: Smart App Control blocca le app non
+  firmate e, a differenza di SmartScreen, non ha «Esegui comunque». Strada scelta da valutare per prima:
+  **SignPath Foundation** (gratuita per progetti open source; Claudio l'aveva chiamata «opensign», che e'
+  invece un programma per firmare documenti). Requisiti (signpath.org/terms): licenza OSI per TUTTI i
+  componenti e nessuna parte proprietaria → prima `license-guard` su tutto il pacchetto Windows (Vosk,
+  Whisper, espeak-ng, ffmpeg, modelli); pagina «code signing policy» sul sito; build automatica con firma
+  dentro `windows_build.yml` (action `signpath/github-action-submit-signing-request`, origin verification);
+  editore del certificato = «SignPath Foundation». Alternativa a pagamento: Certum standard con SimplySign
+  (~110-170 €/anno; il loro «Open Source» pare non valere per Authenticode). Limite: anche firmata, un'app
+  nuova puo' essere bloccata finche' non ha reputazione — firmare installer + exe/dll, eventualmente
+  inviarla a Microsoft o passare dallo Store. Nel frattempo: spegnere Smart App Control e' irreversibile
+  senza reinstallare Windows.
 - **Auto-matte su livello a parte — dopo la 0.17 (Franco, 13/10, richiesta di un utente).** Come
   «Generate Auto-Matte» di Storyboard Pro: dal disegno (vettoriale, ma anche raster e Toonz Raster) un
   comando genera per ogni fotogramma una sagoma piena su un **livello nuovo, in una colonna sotto**, con
@@ -797,6 +797,55 @@ Milestone:
 ---
 
 ## 🦴 ZtoRig / personaggio
+
+### 🟡 FATTO 2026-10-14 (`a882cbf0d`), DA COLLAUDARE — «Mark as Mouth Column…»: il legame bocche ↔ personaggio senza passare dai nomi
+
+**Stato (14/10 sera):** fatto come descritto sotto, provato su copia (sh440 + SOFIA del progetto di prova:
+9 set conservati, solo la «sub» giusta riconosciuta; soglia «piu' della meta' dei disegni in comune nei
+DUE sensi», altrimenti SOFIA_1/sub_5/sub_4 passavano per bocche). Da collaudare: Franco etichetta la «sub»
+in `SOFIA.tnz` vero e riapre sh440. **Resta:** i set creati NELLO shot si salvano ancora per nome di
+sotto-scena (quattro «sub» = set condivisi); il lip sync che propone da solo la colonna etichettata.
+Nota: un `ninja` scrive dentro `Ztoryc.app` — compilare solo con l'app chiusa.
+
+**Perche'.** Oggi uno shot ritrova i set di bocche di un personaggio per NOMI: quello della
+sotto-scena («sub», «SOFIA_1») e quello del file della scena personaggio. I nomi si ripetono e
+cambiano (Tahoma aggiunge «_1», un annidamento tolto li cancella, «sub» e' il default), e ogni
+volta e' servita una toppa: BRONTOLO 25/09, sh100 11/10 (`sub_3`), sh370 12/10 (ricerca per
+contenuto), **sh440 14/10** (`5f370cd52`: quattro «sub», la ricerca prendeva quella di
+PRINCENERENTOLA, colonna a sinistra, senza set — SOFIA spariva; ora si cerca per xsheet della
+sotto-scena, ma il resto della catena resta per nome).
+
+**Proposta di Franco (14/10).** Tasto destro sull'intestazione della colonna delle bocche, nella
+scena del personaggio: **«Mark as Mouth Column…»** con la scelta del personaggio. Rende esplicito
+cio' che oggi si indovina, e serve anche a TROVARE la colonna (il lip sync puo' proporla da solo).
+
+**Vincolo: la colonna delle bocche puo' esporre una SOTTO-SCENA**, non i disegni (Franco: una O
+duplicata e rimpicciolita fa da U; la cella e' quella della sotto-scena). Quindi niente legame
+al singolo file di disegno: si lega alla COLONNA, e la colonna si riconosce dall'**impronta** =
+l'insieme dei file di disegno che usa, scendendo nelle sotto-scene (le trasformazioni stanno
+nelle pegbar, i file restano quelli; l'import rinomina livelli e sotto-scene, non i file).
+
+**Dove si scrive l'etichetta — verificato sul codice il 14/10:**
+- ❌ campo nuovo nella colonna del `.tnz`: Tahoma/OpenToonz si fermano su un tag sconosciuto
+  (`txshlevelcolumn.cpp:166`, «unknown tag») — la scena non si aprirebbe piu' fuori da Ztoryc, e
+  noi esportiamo verso quei progetti;
+- ❌ cell mark: 12 caselle a indice, il NOME lo decide la scena (`sceneproperties.cpp`,
+  `m_cellMarks`): importando, l'indice arriva e il nome «MOUTH» no; e ruba un colore;
+- ❌ note dello xsheet: ancorate a un numero di colonna, non seguono lo spostamento
+  (`xsheetdragtool.cpp:2271`, solo trascinamento a mano);
+- ✅ **nel `.zmouth` accanto alla scena**: per ogni colonna etichettata, personaggio + id stabile +
+  impronta (file dei disegni, fotogrammi) + nome della colonna e della sotto-scena come ripiego.
+
+**Ricerca nello shot, a strati:** (1) impronta della colonna confrontata con le colonne etichettate
+delle librerie (vince chi coincide di piu', pari = nessuno, come `libraryByContent`); (2) i nomi
+come oggi, solo come ultima risorsa. Lo stesso legame risolve anche i set creati NELLO shot, oggi
+salvati per nome di sotto-scena: con quattro «sub» un set fatto per SOFIA comparirebbe anche per
+il principe.
+
+**Da concordare con Puppetoonz** (il formato `.zmouth` lo scrive lui, `~/.claude/CLAUDE.md`,
+incrocio 1): campi nuovi opzionali, i `.zmouth` di oggi restano leggibili. Formato da fissare
+prima del congelamento di fine novembre.
+
 
 ### 🟡 CORRETTO 2026-10-03 (`b2fe7dde5`), DA RIPRODURRE E COLLAUDARE — Scale V a 6000% con «Mass» nei campi del controller (P1)
 

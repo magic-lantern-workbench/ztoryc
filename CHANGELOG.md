@@ -1,3 +1,31 @@
+## [2026-10-14] — 0.17.1 (export dell'animatic), bocche di SOFIA in sh440, «Mark as Mouth Column…»
+
+### Rilascio
+- **v0.17.1 pubblicata** (`780676607`): video per shot puliti, MP4 H.264, XML per Premiere con ratio e tagli
+  in chiaro, Tips riscritti. Review inline (`reviews/2026-10-14_*`), 9 asset, note EN+IT.
+
+### Fixed
+- **Export per shot** (`4360cc1b2`): niente dissolvenza stampata nei fotogrammi in piu', etichetta dello shot
+  giusto, cambi di pannello al taglio (SlamRockwell).
+- **MP4** (`a4ea2f441`): H.264 invece di MPEG-4 Part 2 (refuso `libxh264` di Tahoma).
+- **XML per Premiere** (`ec9d2fe38`, `f1daa7cb0`): dissolvenze che sfumano in DaVinci, tagli in chiaro che
+  FilmCraft legge su una traccia sola.
+- **Bocche di SOFIA in sh440** (`5f370cd52`): quattro «sub», la libreria si cercava per nome e rispondeva
+  quella di PRINCENERENTOLA.
+
+### Added
+- **«Mark as Mouth Column…»** (`a882cbf0d`, da collaudare): tasto destro sull'intestazione; etichetta e
+  impronta dei disegni nel `.zmouth` della scena, lo shot riconosce le bocche dai disegni prima che dai nomi.
+- **Tips** per Ztoryc in inglese e italiano (`7305d6365`).
+
+### Upstream candidates
+- Refuso `libxh264` (`tiio_mp4.cpp`): corretto da noi, voce aggiornata.
+
+### Notes
+- Mark Millard (WizzerWorks, magic-lantern-workbench) ha risposto: la sua correzione per CMake 4 e' gia' in
+  Ztoryc dalla PR #3; bozza di risposta data a Franco.
+- `ninja` scrive dentro `Ztoryc.app`: compilare solo con l'app chiusa (memoria salvata).
+
 ## [2026-10-13 sera] — Rilascio 0.17.0; pin che reggono col flip; animatic per Premiere
 
 ### Rilascio

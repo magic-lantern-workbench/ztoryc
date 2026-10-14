@@ -3241,6 +3241,34 @@ importata e verificata, sync ok. File corretto di Messina in `03_storyboard/anim
 
 ---
 
+## Chiusi il 2026-10-14
+
+### ✅ Rilascio 0.17.1 pubblicato (`780676607`)
+Review inline (Franco: «vai al risparmio»), tre workflow riusciti, 9 asset, note EN+IT. Ffmpeg del pacchetto
+Windows controllato: `--enable-libx264`.
+
+### ✅ Export per shot: dissolvenza stampata ed etichetta sbagliata (`4360cc1b2`, SlamRockwell)
+Nel render di ogni shot le colonne degli altri shot nascoste durante la costruzione del render, dissolvenza
+solo con entrambi gli shot visibili (`scenefx.cpp`); etichetta coi pannelli del solo shot esportato,
+misurata dal taglio (`shotTrueSpan`). Collaudato da Franco.
+
+### ✅ MP4 in H.264 (`a4ea2f441`)
+Refuso `libxh264`; ora libx264 → libopenh264 → h264_videotoolbox → h264_mf. macOS: H.264 High, letto da
+DaVinci e FilmCraft. Candidato upstream aggiornato.
+
+### ✅ XML per Premiere: dissolvenze in DaVinci e tracce in FilmCraft (`ec9d2fe38`, `f1daa7cb0`)
+Senza startratio/endratio DaVinci metteva la fine a 0. Coi bordi a -1 FilmCraft leggeva clip sovrapposte e
+spostava la seconda su una traccia nuova: ora tagli in chiaro (prova C, identica riga per riga). Resta il
+collaudo su Premiere vero (ANIMATIC_TASKS).
+
+### ✅ Bocche di SOFIA sparite in sh440 (`5f370cd52`)
+Quattro sotto-scene «sub» (PRINCENERENTOLA in colonna 12, SOFIA in 13): la libreria si cercava per nome e
+rispondeva quella del principe, senza set. Ora per xsheet della sotto-scena. Modo di prova su copia: per nome
+PRINCIAZZURRO 0 set, per sotto-scena SOFIA 9 set.
+
+### ✅ Tips riscritti per Ztoryc (`7305d6365`)
+Testo inglese e italiano nuovi, tolte le traduzioni di Tahoma.
+
 ## Chiusi il 2026-10-13
 
 ### ✅ Rilascio 0.17.0 pubblicato (`7c51a931d`)
