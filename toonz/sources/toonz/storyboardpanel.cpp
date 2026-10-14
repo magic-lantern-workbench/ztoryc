@@ -8387,29 +8387,25 @@ private:
       const FcpxClip &c = clips[i];
       const int in = tl.headCut[i], visible = tl.visible(i, clips);
       const int start = tl.cutStart(i);
-      // A side that touches a transition is -1: «the transition decides this
-      // edge». Explicit numbers there made DaVinci read a plain cut and a
-      // 0-frame dissolve (Franco, 2026-10-13). And with -1 the clip spans the
-      // whole transition, so in/out take in its frames too: in = the media at
-      // the transition START, out = at the transition END. With in/out on the
-      // cut instead, every clip after a dissolve ran its handle-count of frames
-      // ahead and the last one ran out of media early — seen on the burnt-in
-      // timecode (Franco, 2026-10-13).
-      const bool transIn  = i > 0 && tl.trans[i - 1] > 0;
+      // Each clip runs cut to cut: start/end are the cut positions, in/out the
+      // media between them, and a dissolve takes its frames from the media
+      // past in/out (the clip's handles). No -1 edges: with -1 each reader
+      // works the edges out its own way — DaVinci let the clip span the whole
+      // dissolve, FilmCraft read two overlapping clips and moved one to a new
+      // track, burying the dissolve. Explicit cuts read the same everywhere
+      // (DaVinci and FilmCraft, Franco 2026-10-14). The transition's
+      // startratio/endratio are what DaVinci needed to actually dissolve.
       const bool transOut = i + 1 < clips.size() && tl.trans[i] > 0;
-      const int inW       = transIn ? in - tl.headCut[i] : in;
-      const int outW      = std::min(
-          c.frames, in + visible + (transOut ? tl.tailCut[i] : 0));
       m_x.writeStartElement("clipitem");
       m_x.writeAttribute("id", QString("clipitem-v%1").arg(i + 1));
       text("name", c.name);
       text("enabled", "TRUE");
       num("duration", c.frames);
       rate();
-      num("start", transIn ? -1 : start);
-      num("end", transOut ? -1 : start + visible);
-      num("in", inW);
-      num("out", outW);
+      num("start", start);
+      num("end", start + visible);
+      num("in", in);
+      num("out", in + visible);
       file(c.file, c.frames, true);
       m_x.writeEndElement();  // clipitem
       if (transOut) {  // cross dissolve centred on the cut
