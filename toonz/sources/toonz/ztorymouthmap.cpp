@@ -168,6 +168,27 @@ bool ZtoryMouthMap::load(const TFilePath &ownerPath, const QString &subScene,
 
 //----------------------------------------------------------------------------
 
+// The marks, sorted so the file does not change from one save to the next.
+static void writeColumnTags(QXmlStreamWriter &xml,
+                            const QVector<MouthColumnTag> &tags) {
+  for (const MouthColumnTag &t : tags) {
+    xml.writeStartElement("mouthColumn");
+    xml.writeAttribute("subscene", t.subScene);
+    if (!t.id.isEmpty()) xml.writeAttribute("id", t.id);
+    if (!t.character.isEmpty()) xml.writeAttribute("character", t.character);
+    if (!t.characterUuid.isEmpty())
+      xml.writeAttribute("characterUuid", t.characterUuid);
+    QStringList files = t.files.values();
+    files.sort();
+    for (const QString &n : files) {
+      xml.writeStartElement("file");
+      xml.writeAttribute("name", n);
+      xml.writeEndElement();
+    }
+    xml.writeEndElement();
+  }
+}
+
 bool ZtoryMouthMap::save(const TFilePath &ownerPath, const QString &subScene,
                          const MouthMap &map, QString *error) {
   auto fail = [&](const QString &msg) {
@@ -236,7 +257,11 @@ bool ZtoryMouthMap::save(const TFilePath &ownerPath, const QString &subScene,
   for (const MouthSet &ms : map.sets)
     if (!ms.name.isEmpty() && ms.isUsable()) keep.push_back(&ms);
 
-  if (keep.isEmpty()) {
+  // The column marks live in the same file: a save of the sets keeps them.
+  QVector<MouthColumnTag> tags;
+  loadColumnTags(ownerPath, &tags);
+
+  if (keep.isEmpty() && tags.isEmpty()) {
     // L'ESISTENZA del file dichiara «questo livello e' delle bocche». Lasciarne
     // uno vuoto direbbe una cosa falsa a chiunque lo controlli dopo.
     if (QFile::exists(file) && !QFile::remove(file))
@@ -303,11 +328,134 @@ bool ZtoryMouthMap::save(const TFilePath &ownerPath, const QString &subScene,
     xml.writeEndElement();
   }
 
+  writeColumnTags(xml, tags);
   xml.writeEndElement();  // ztorymouths
   xml.writeEndDocument();
 
   f.close();
   if (f.error() != QFile::NoError)
     return fail(QObject::tr("writing %1 failed").arg(QFileInfo(file).fileName()));
+  return true;
+}
+
+//----------------------------------------------------------------------------
+
+void ZtoryMouthMap::loadColumnTags(const TFilePath &ownerPath,
+                                   QVector<MouthColumnTag> *out) {
+  if (!out) return;
+  out->clear();
+  const TFilePath p = pathFor(ownerPath);
+  if (p.isEmpty()) return;
+  QFile f(QString::fromStdWString(p.getWideString()));
+  if (!f.exists() || !f.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+  QXmlStreamReader xml(&f);
+  MouthColumnTag cur;
+  bool inTag = false;
+  while (!xml.atEnd()) {
+    xml.readNext();
+    if (xml.isStartElement()) {
+      const QXmlStreamAttributes a = xml.attributes();
+      if (xml.name() == QLatin1String("mouthColumn")) {
+        cur               = MouthColumnTag();
+        cur.subScene      = a.value("subscene").toString();
+        cur.id            = a.value("id").toString();
+        cur.character     = a.value("character").toString();
+        cur.characterUuid = a.value("characterUuid").toString();
+        inTag             = true;
+      } else if (inTag && xml.name() == QLatin1String("file")) {
+        const QString n = a.value("name").toString().toLower();
+        if (!n.isEmpty()) cur.files.insert(n);
+      }
+    } else if (xml.isEndElement() &&
+               xml.name() == QLatin1String("mouthColumn")) {
+      if (inTag && !cur.subScene.isEmpty()) out->push_back(cur);
+      inTag = false;
+    }
+  }
+}
+
+bool ZtoryMouthMap::saveColumnTags(const TFilePath &ownerPath,
+                                   const QVector<MouthColumnTag> &tags,
+                                   QString *error) {
+  if (error) error->clear();
+  const TFilePath p = pathFor(ownerPath);
+  if (p.isEmpty()) {
+    if (error) *error = QObject::tr("the scene is not saved");
+    return false;
+  }
+  const QString file = QString::fromStdWString(p.getWideString());
+
+  // Everything but the old marks, copied token by token: the sets stay
+  // exactly as written, whatever wrote them.
+  QByteArray body;
+  bool anySet = false;
+  if (QFile::exists(file)) {
+    QFile rf(file);
+    if (!rf.open(QIODevice::ReadOnly | QIODevice::Text)) {
+      if (error) *error = QObject::tr("cannot read %1").arg(QFileInfo(file).fileName());
+      return false;
+    }
+    QXmlStreamReader rx(&rf);
+    QXmlStreamWriter wx(&body);
+    int depth = 0, skip = 0;
+    while (!rx.atEnd()) {
+      rx.readNext();
+      if (rx.isStartDocument() || rx.isEndDocument() || rx.isDTD()) continue;
+      if (rx.isStartElement()) {
+        depth++;
+        if (skip || (depth == 2 && rx.name() == QLatin1String("mouthColumn"))) {
+          skip++;
+          continue;
+        }
+        if (depth == 1) continue;  // the root is rewritten below
+        if (rx.name() == QLatin1String("mouthSet")) anySet = true;
+      } else if (rx.isEndElement()) {
+        depth--;
+        if (skip) {
+          skip--;
+          continue;
+        }
+        if (depth == 0) continue;
+      } else if (skip || depth < 1) {
+        continue;
+      }
+      wx.writeCurrentToken(rx);
+    }
+    if (rx.hasError()) {
+      if (error)
+        *error = QObject::tr("%1 is damaged: %2")
+                     .arg(QFileInfo(file).fileName(), rx.errorString());
+      return false;
+    }
+  }
+
+  if (!anySet && tags.isEmpty()) {
+    if (QFile::exists(file) && !QFile::remove(file)) {
+      if (error) *error = QObject::tr("cannot remove %1").arg(QFileInfo(file).fileName());
+      return false;
+    }
+    return true;
+  }
+
+  QFile f(file);
+  if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    if (error) *error = QObject::tr("cannot write %1").arg(QFileInfo(file).fileName());
+    return false;
+  }
+  QXmlStreamWriter xml(&f);
+  xml.setAutoFormatting(true);
+  xml.writeStartDocument();
+  xml.writeStartElement("ztorymouths");
+  xml.writeAttribute("version", "1");
+  xml.writeCharacters("");  // closes the start tag before the raw body
+  f.write(body);
+  writeColumnTags(xml, tags);
+  xml.writeEndElement();
+  xml.writeEndDocument();
+  f.close();
+  if (f.error() != QFile::NoError) {
+    if (error) *error = QObject::tr("writing %1 failed").arg(QFileInfo(file).fileName());
+    return false;
+  }
   return true;
 }

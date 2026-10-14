@@ -1,5 +1,6 @@
 
 #include "xshcolumnviewer.h"
+#include "ztorymouthlibrary.h"
 
 // Tnz6 includes
 #include "xsheetviewer.h"
@@ -4300,6 +4301,8 @@ void ColumnArea::contextMenuEvent(QContextMenuEvent *event) {
         menu.addAction(cmdManager->getAction(MI_Resequence));
         menu.addAction(cmdManager->getAction(MI_CloneChild));
         menu.addAction(cmdManager->getAction(MI_ExplodeChild));
+        // Ztoryc: mark the character's mouth sub-scene (ztorymouthlibrary.h).
+        ZtoryMouthLibrary::addMouthColumnActions(&menu, xsh, m_menuCol);
       }
       menu.addSeparator();
     }

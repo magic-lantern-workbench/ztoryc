@@ -12,6 +12,7 @@
 #include "ztorysceneclass.h"
 #include "ztorymouthapply.h"
 #include "ztorymouthlibrary.h"
+#include "ztorymouthmap.h"
 #include "iocommand.h"
 #include "tapp.h"
 #include "toonz/toonzscene.h"
@@ -208,6 +209,50 @@ static void ztoryArmSceneTest() {
           fflush(stderr);
           QTimer::singleShot(1000, qApp, []() { _exit(0); });
         });
+        return;
+      }
+      // «markmouth:<sub-scene>:<character>»: what «Mark as Mouth Column…»
+      // writes, on a copy — then the file is read back: the marks AND every
+      // set must be there.
+      if (action.startsWith("markmouth:")) {
+        // markmouth:<sub>:<character>:<character scene .tnz> — the scene is
+        // read from its file, not opened (opening a character scene from the
+        // command line stops on the startup window).
+        const QStringList parts = action.mid(10).split(':');
+        ToonzScene libScene;
+        libScene.loadTnzFile(TFilePath(parts.value(2).toStdWString()));
+        ToonzScene *sc = &libScene;
+        const TFilePath owner = TFilePath(parts.value(2).toStdWString());
+        TXsheet *subXsh = nullptr;
+        TLevelSet *ls = sc->getLevelSet();
+        for (int i = 0; i < ls->getLevelCount() && !subXsh; i++)
+          if (ls->getLevel(i) && ls->getLevel(i)->getChildLevel() &&
+              QString::fromStdWString(ls->getLevel(i)->getName()) == parts.value(0))
+            subXsh = ls->getLevel(i)->getChildLevel()->getXsheet();
+        QSet<QString> before;
+        ZtoryMouthMap::mappedSubScenes(owner, &before);
+        MouthMap setsBefore;
+        ZtoryMouthMap::load(owner, parts.value(0), setsBefore);
+        MouthColumnTag tag;
+        tag.subScene  = parts.value(0);
+        tag.id        = "test";
+        tag.character = parts.value(1);
+        tag.files     = ZtoryMouthLibrary::drawingFingerprint(subXsh);
+        QVector<MouthColumnTag> tags{tag};
+        QString why;
+        const bool ok = subXsh && ZtoryMouthMap::saveColumnTags(owner, tags, &why);
+        QSet<QString> after;
+        ZtoryMouthMap::mappedSubScenes(owner, &after);
+        MouthMap setsAfter;
+        ZtoryMouthMap::load(owner, parts.value(0), setsAfter);
+        QVector<MouthColumnTag> back;
+        ZtoryMouthMap::loadColumnTags(owner, &back);
+        fprintf(stderr, "[ZTORY] scenetest: markmouth %s: %s %s | %d files | sub-scenes with sets %d -> %d | sets of it %d -> %d | marks read back %d\n",
+                qPrintable(parts.value(0)), ok ? "saved" : "FAILED", qPrintable(why),
+                (int)tag.files.size(), (int)before.size(), (int)after.size(),
+                (int)setsBefore.sets.size(), (int)setsAfter.sets.size(), (int)back.size());
+        fflush(stderr);
+        QTimer::singleShot(500, qApp, []() { _exit(0); });
         return;
       }
       if (action == "probe") {  // look only: nothing is written

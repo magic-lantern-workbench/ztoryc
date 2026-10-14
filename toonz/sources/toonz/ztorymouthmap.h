@@ -149,6 +149,22 @@ struct MouthMap {
   int indexOfSet(const QString &n) const;
 };
 
+//! A column of the character's scene marked «these are the mouths of X»
+//! (column header ▸ Mark as Mouth Column…, Franco 2026-10-14). It is what lets
+//! a shot find the character's sets without trusting names: in a shot the
+//! sub-scene can be renamed («sub_3»), repeated (four «sub» in sh440) or
+//! un-nested, but the DRAWING FILES it uses stay the same — `files` is that
+//! fingerprint, taken when the column is marked. Lives in the scene's
+//! `.zmouth`, next to the sets of the sub-scene it names; nothing goes into
+//! the .tnz, which Tahoma/OpenToonz would refuse with an unknown tag.
+struct MouthColumnTag {
+  QString subScene;       //!< the sub-scene the column exposes, in THIS scene
+  QString id;             //!< stable id, kept when the mark is redone
+  QString character;      //!< the asset's name
+  QString characterUuid;  //!< the asset's uuid, may be empty
+  QSet<QString> files;    //!< lower-case drawing file names, whole sub-tree
+};
+
 namespace ZtoryMouthMap {
 
 //! I dieci viseme, nell'ordine delle caselle. Sorgente unica: sono gli stessi
@@ -190,5 +206,14 @@ bool load(const TFilePath &ownerPath, const QString &subScene, MouthMap &out,
 //! cancellato, cosi' `exists()` continua a voler dire qualcosa.
 bool save(const TFilePath &ownerPath, const QString &subScene,
           const MouthMap &map, QString *error = nullptr);
+
+//! The marked mouth columns in the `.zmouth` of \p ownerPath (a scene).
+void loadColumnTags(const TFilePath &ownerPath, QVector<MouthColumnTag> *out);
+
+//! Replaces the marks of \p ownerPath with \p tags, leaving every set as it
+//! is. An empty list with no sets left removes the file.
+bool saveColumnTags(const TFilePath &ownerPath,
+                    const QVector<MouthColumnTag> &tags,
+                    QString *error = nullptr);
 
 }  // namespace ZtoryMouthMap

@@ -15,6 +15,9 @@
 #include "toonz/txshsimplelevel.h"
 
 #include <QCheckBox>
+#include <QInputDialog>
+#include <QMenu>
+#include <QUuid>
 #include <memory>
 #include <QMainWindow>
 #include <QApplication>
@@ -646,8 +649,49 @@ void ZtoryMouthLibrary::offerOnSave() {
   });
 }
 
-//----------------------------------------------------------------------------
+// The library whose MARKED mouth column (MouthColumnTag) uses the same
+// drawings as `subXsh`: names play no part.  The mark covering most of them
+// wins; MORE than half of the marked drawings must be here (SOFIA's mouths
+// are «a..png» + her PSD group: «a..png» alone, a name any character can
+// have, is not her mouths); a tie between two characters
+// gives nothing.  `libSub` is the marked sub-scene's name in the library,
+// the one its sets are filed under.
+static bool libraryByMark(TXsheet *subXsh, const QHash<QString, Library> &libs,
+                   Library *out, QString *libSub) {
+  if (!subXsh) return false;
+  const QSet<QString> here = ZtoryMouthLibrary::drawingFingerprint(subXsh);
+  if (here.isEmpty()) return false;
+  int best = 0;
+  bool tie = false;
+  QString bestChar;
+  for (auto it = libs.constBegin(); it != libs.constEnd(); ++it) {
+    QVector<MouthColumnTag> tags;
+    ZtoryMouthMap::loadColumnTags(it.value().scene, &tags);
+    for (const MouthColumnTag &t : tags) {
+      int n = 0;
+      for (const QString &f : t.files)
+        if (here.contains(f)) n++;
+      // Both ways: most of the marked drawings are here, AND most of what is
+      // here is the marked drawings — the sub-scenes ABOVE the mouths contain
+      // them too (SOFIA_1, sub_5 hold SOFIA's «sub»), and must not pass for it.
+      if (n == 0 || n * 2 <= t.files.size() || n * 2 <= here.size() ||
+          n < best)
+        continue;
+      if (n == best) {
+        if (it.value().character != bestChar) tie = true;
+        continue;
+      }
+      best     = n;
+      tie      = false;
+      bestChar = it.value().character;
+      *out     = it.value();
+      if (libSub) *libSub = t.subScene;
+    }
+  }
+  return best > 0 && !tie;
+}
 
+// How many frames the library's own copy of the sub-scene has (-1 unknown).
 bool ZtoryMouthLibrary::libraryMapForSubScene(ToonzScene *scene,
                                               const QString &sub,
                                               MouthMap *map,
@@ -662,6 +706,21 @@ bool ZtoryMouthLibrary::libraryMapForSubScene(ToonzScene *scene,
   QVector<int> inside;
   QString libSub;
   const QHash<QString, Library> libs = librariesByName();
+  // First the marked mouth column, recognised by its drawings.
+  if (libraryByMark(subXsh, libs, &lib, &libSub) &&
+      ZtoryMouthMap::load(lib.scene, libSub, *map) && !map->sets.isEmpty()) {
+    if (qEnvironmentVariableIsSet("ZTORYC_SCENETEST"))
+      fprintf(stderr, "[ZTORY] mapfor '%s': by mark -> '%s' (%s) %d sets\n",
+              qPrintable(sub), qPrintable(libSub), qPrintable(lib.character),
+              (int)map->sets.size());
+    for (MouthSet &s : map->sets) s.subScene = sub;
+    if (character) *character = lib.character;
+    return true;
+  }
+  lib    = Library();
+  libSub.clear();
+  *map   = MouthMap();
+  // Then the names, as before the marks existed.
   if (libraryOfSubScene(scene->getXsheet(), sub, libs, &lib, &inside, subXsh))
     libSub = libraryName(lib, inside, sub);
   if (qEnvironmentVariableIsSet("ZTORYC_SCENETEST"))
@@ -751,6 +810,7 @@ QString ZtoryMouthLibrary::characterOfSubScene(ToonzScene *scene,
   Library lib;
   const QHash<QString, Library> libs = librariesByName();
   QString libSub;
+  if (libraryByMark(subXsh, libs, &lib, &libSub)) return lib.character;
   if (!libraryOfSubScene(scene->getXsheet(), sub, libs, &lib, nullptr, subXsh) &&
       !libraryByContent(scene->getXsheet(), sub, libs, &lib, &libSub, subXsh))
     return QString();
@@ -779,5 +839,140 @@ void ZtoryMouthLibrary::offerOnOpen() {
     ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
     if (!pendingFromLibrary(scene).isEmpty())
       showUpdateDialog(dialogParent(), true);
+  });
+}
+
+//----------------------------------------------------------------------------
+
+QSet<QString> ZtoryMouthLibrary::drawingFingerprint(TXsheet *xsh) {
+  QSet<QString> out;
+  QSet<TXsheet *> seen;
+  std::function<void(TXsheet *, int)> walk = [&](TXsheet *x, int depth) {
+    if (!x || depth > 8 || seen.contains(x)) return;
+    seen.insert(x);
+    for (int c = 0; c < x->getColumnCount(); c++) {
+      int r0 = 0, r1 = -1;
+      x->getCellRange(c, r0, r1);
+      QSet<TXshLevel *> done;
+      for (int r = r0; r <= r1; r++) {
+        const TXshCell cell = x->getCell(r, c);
+        if (cell.isEmpty() || !cell.m_level) continue;
+        TXshLevel *lv = cell.m_level.getPointer();
+        if (done.contains(lv)) continue;
+        done.insert(lv);
+        if (TXshChildLevel *cl = lv->getChildLevel()) {
+          walk(cl->getXsheet(), depth + 1);
+        } else if (TXshSimpleLevel *sl = lv->getSimpleLevel()) {
+          // The file's name: Tahoma renames a level «…_15» on import, the
+          // file keeps its name.
+          const QString f = QString::fromStdWString(
+              sl->getPath().withoutParentDir().getWideString()).toLower();
+          if (!f.isEmpty()) out.insert(f);
+        }
+      }
+    }
+  };
+  walk(xsh, 0);
+  return out;
+}
+
+void ZtoryMouthLibrary::addMouthColumnActions(QMenu *menu, TXsheet *xsh,
+                                              int col) {
+  if (!menu || !xsh || col < 0 || col >= xsh->getColumnCount()) return;
+  int r0 = 0, r1 = -1;
+  if (!xsh->getCellRange(col, r0, r1)) return;
+  TXshChildLevel *cl = nullptr;
+  QString sub;
+  for (int r = r0; r <= r1 && !cl; r++) {
+    const TXshCell cell = xsh->getCell(r, col);
+    if (cell.isEmpty() || !cell.m_level) continue;
+    cl  = cell.m_level->getChildLevel();
+    sub = QString::fromStdWString(cell.m_level->getName());
+    break;
+  }
+  if (!cl) return;  // a level column: its map sits next to its file already
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  if (!scene) return;
+
+  QAction *act = nullptr;
+  if (scene->isUntitled()) {
+    act = menu->addAction(QObject::tr("Mark as Mouth Column..."));
+    act->setEnabled(false);
+    act->setToolTip(QObject::tr("Save the scene first"));
+    return;
+  }
+  const TFilePath owner = scene->decodeFilePath(scene->getScenePath());
+  QVector<MouthColumnTag> tags;
+  ZtoryMouthMap::loadColumnTags(owner, &tags);
+  int mine = -1;
+  for (int i = 0; i < tags.size(); i++)
+    if (tags[i].subScene == sub) mine = i;
+
+  if (mine >= 0) {
+    act = menu->addAction(QObject::tr("Unmark Mouth Column (%1)")
+                              .arg(tags[mine].character));
+    QObject::connect(act, &QAction::triggered, [owner, sub]() {
+      QVector<MouthColumnTag> now;
+      ZtoryMouthMap::loadColumnTags(owner, &now);
+      for (int i = now.size() - 1; i >= 0; --i)
+        if (now[i].subScene == sub) now.remove(i);
+      QString why;
+      if (!ZtoryMouthMap::saveColumnTags(owner, now, &why))
+        QMessageBox::warning(dialogParent(), QObject::tr("Mouth Column"), why);
+    });
+    return;
+  }
+
+  act = menu->addAction(QObject::tr("Mark as Mouth Column..."));
+  TXsheet *subXsh = cl->getXsheet();
+  QObject::connect(act, &QAction::triggered, [owner, sub, subXsh]() {
+    // The characters of the project; this scene's own first when it is one.
+    ZtoryModel *m = ZtoryModel::instance();
+    QStringList names;
+    QHash<QString, QString> uuidOf;
+    QString mineName;
+    const QString ownerFile = owner.getQString();
+    for (const Asset &a : m->assets()) {
+      if (!ZtoryModel::isCharacterType(a.type)) continue;
+      names << a.name;
+      uuidOf.insert(a.name, a.uuid);
+      if (QFileInfo(m->resolveAssetFile(a)) == QFileInfo(ownerFile))
+        mineName = a.name;
+    }
+    names.sort(Qt::CaseInsensitive);
+    if (names.isEmpty()) {
+      QMessageBox::information(
+          dialogParent(), QObject::tr("Mark as Mouth Column"),
+          QObject::tr("The project has no characters: add the character in "
+                      "the Production Tracker first."));
+      return;
+    }
+    bool ok = false;
+    const QString who = QInputDialog::getItem(
+        dialogParent(), QObject::tr("Mark as Mouth Column"),
+        QObject::tr("The mouths in «%1» belong to:").arg(sub), names,
+        qMax(0, names.indexOf(mineName)), false, &ok);
+    if (!ok || who.isEmpty()) return;
+
+    MouthColumnTag tag;
+    tag.subScene      = sub;
+    tag.id            = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    tag.character     = who;
+    tag.characterUuid = uuidOf.value(who);
+    tag.files         = drawingFingerprint(subXsh);
+    if (tag.files.isEmpty()) {
+      QMessageBox::warning(dialogParent(), QObject::tr("Mark as Mouth Column"),
+                           QObject::tr("«%1» has no drawings to recognise it by.")
+                               .arg(sub));
+      return;
+    }
+    QVector<MouthColumnTag> now;
+    ZtoryMouthMap::loadColumnTags(owner, &now);
+    for (int i = now.size() - 1; i >= 0; --i)
+      if (now[i].subScene == sub) now.remove(i);
+    now.push_back(tag);
+    QString why;
+    if (!ZtoryMouthMap::saveColumnTags(owner, now, &why))
+      QMessageBox::warning(dialogParent(), QObject::tr("Mark as Mouth Column"), why);
   });
 }

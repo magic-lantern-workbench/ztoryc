@@ -31,6 +31,7 @@
 class QWidget;
 class ToonzScene;
 class TXsheet;
+class QMenu;
 
 struct MouthLibraryItem {
   QString   character;   // the asset name of the library
@@ -110,6 +111,15 @@ QString characterOfSubScene(ToonzScene *scene, const QString &sub,
 // inner, and macOS reporting «modalSession has been exited prematurely» just
 // before the app froze in window activation (2026-09-27).
 void runWhenNoModal(std::function<void()> fn);
+
+// ── Marked mouth columns (MouthColumnTag, ztorymouthmap.h) ──────────────
+// The drawing files a sub-scene uses, its whole sub-tree, lower case: the
+// fingerprint that recognises the character's mouth column in a shot.
+QSet<QString> drawingFingerprint(TXsheet *xsh);
+
+// Column header menu: «Mark as Mouth Column…» (or the unmark) when column
+// \p col of \p xsh exposes a sub-scene.
+void addMouthColumnActions(QMenu *menu, TXsheet *xsh, int col);
 
 // The parent for those questions: the main window. A parentless dialog can
 // end up BEHIND it, and the app looks frozen.
