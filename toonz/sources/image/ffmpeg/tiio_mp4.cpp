@@ -109,12 +109,18 @@ TLevelWriterMp4::~TLevelWriterMp4() {
 //
   postIArgs << "-b:v";
   postIArgs << QString::number(finalBitrate) + "k";
-  if (Ffmpeg::checkCodecs("libopenh264")) {
-    postIArgs << "-c:v";
-    postIArgs << "libopenh264";
-  } else if (Ffmpeg::checkCodecs("libxh264")) {
-    postIArgs << "-c:v";
-    postIArgs << "libxh264";
+  // First H.264 encoder this ffmpeg has. Without one, ffmpeg falls back to its
+  // default mp4 codec, MPEG-4 Part 2, which many players and editors refuse.
+  // (The second name used to read "libxh264", so libx264 was never picked.)
+  // The hardware encoders cover the bundled builds that have no software one:
+  // VideoToolbox on macOS, Media Foundation on Windows.
+  for (const char *codec : {"libx264", "libopenh264", "h264_videotoolbox",
+                            "h264_mf"}) {
+    if (Ffmpeg::checkCodecs(codec)) {
+      postIArgs << "-c:v";
+      postIArgs << codec;
+      break;
+    }
   }
 
   ffmpegWriter->runFfmpeg(preIArgs, postIArgs, false, false, true);
