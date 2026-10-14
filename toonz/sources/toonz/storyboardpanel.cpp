@@ -8425,6 +8425,13 @@ private:
         text("effectcategory", "Dissolve");
         text("effecttype", "transition");
         text("mediatype", "video");
+        // The fields Final Cut 7 always writes for a transition. Without the
+        // ratios DaVinci takes the end as 0: a dissolve that never dissolves.
+        num("wipecode", 0);
+        num("wipeaccuracy", 100);
+        num("startratio", 0);
+        num("endratio", 1);
+        text("reverse", "FALSE");
         m_x.writeEndElement();  // effect
         m_x.writeEndElement();  // transitionitem
       }
