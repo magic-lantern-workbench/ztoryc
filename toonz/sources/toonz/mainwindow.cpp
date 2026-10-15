@@ -2502,7 +2502,8 @@ void MainWindow::defineActions() {
                        "Ctrl+Shift+V", "paste_above_after");
   createMenuEditAction(MI_PasteDuplicate, QT_TR_NOOP("&Paste as a Copy"), "",
                        "paste_duplicate");
-  createMenuEditAction(MI_PasteInto, QT_TR_NOOP("&Paste Into"), "",
+  // Ztoryc: ⌘⌥V (Ctrl+Alt+V) — overwrite paste had no shortcut at all.
+  createMenuEditAction(MI_PasteInto, QT_TR_NOOP("&Paste Into"), "Ctrl+Alt+V",
                        "paste_into");
 #ifdef MACOSX
   QString delKey = "Backspace";
