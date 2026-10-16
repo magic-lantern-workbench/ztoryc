@@ -13,6 +13,10 @@
 #include "ztorymouthapply.h"
 #include "ztorymouthlibrary.h"
 #include "ztorymouthmap.h"
+#include "toonzqt/paletteviewergui.h"
+#include "toonz/palettecontroller.h"
+#include "toonz/txshleveltypes.h"
+#include "tpalette.h"
 #include "iocommand.h"
 #include "tapp.h"
 #include "toonz/toonzscene.h"
@@ -251,6 +255,30 @@ static void ztoryArmSceneTest() {
                 qPrintable(parts.value(0)), ok ? "saved" : "FAILED", qPrintable(why),
                 (int)tag.files.size(), (int)before.size(), (int)after.size(),
                 (int)setsBefore.sets.size(), (int)setsAfter.sets.size(), (int)back.size());
+        fflush(stderr);
+        QTimer::singleShot(500, qApp, []() { _exit(0); });
+        return;
+      }
+      // «palettecycle»: the Windows crash of 2026-10-15 (0.17.1). The level
+      // palette viewer shows the DEFAULT vector palette (empty column,
+      // autocreate), then another one, then the default again — what entering
+      // shots from the Animatic does. The default palettes are never
+      // ref-counted: a viewer that holds and drops one deletes it.
+      if (action == "palettecycle") {
+        PaletteController *pc = TApp::instance()->getPaletteController();
+        TPalette *def   = pc->getDefaultPalette(PLI_XSHLEVEL);
+        TPalette *other = pc->getDefaultPalette(TZP_XSHLEVEL);
+        fprintf(stderr, "[ZTORY] scenetest: palettecycle default refcount=%d\n",
+                def ? def->getRefCount() : -1);
+        QWidget host;  // the viewer reads its parent's width
+        host.resize(400, 300);
+        auto *pv = new PaletteViewerGUI::PageViewer(&host);
+        pv->setPage(def ? def->getPage(0) : nullptr);
+        pv->setPage(other ? other->getPage(0) : nullptr);
+        delete pv;
+        // Read it back: freed, MallocScribble makes this garbage or a crash.
+        fprintf(stderr, "[ZTORY] scenetest: palettecycle default after: name='%s'\n",
+                def ? qPrintable(QString::fromStdWString(def->getPaletteName())) : "-");
         fflush(stderr);
         QTimer::singleShot(500, qApp, []() { _exit(0); });
         return;

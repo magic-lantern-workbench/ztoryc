@@ -254,8 +254,16 @@ bool PageViewer::getShowStyleIndex() { return ShowStyleIndex == 1; }
  */
 void PageViewer::setPage(TPalette::Page *page) {
   if (m_page == page) return;
-  m_page      = page;
-  m_pageOwner = page ? page->getPalette() : nullptr;
+  m_page = page;
+  // Held only when its references are already counted. A palette nobody
+  // counts — the default palettes of PaletteController, `new TPalette()` and
+  // never addRef'd — belongs to whoever made it: held here it went 0→1, and
+  // dropped at the next page 1→0, which DELETED it under its owner. The next
+  // look at the default palette read freed memory: five crashes on Windows
+  // with 0.17.1, entering shots from the Animatic with a vector/smart-raster
+  // default level type (2026-10-15).
+  TPalette *pal = page ? page->getPalette() : nullptr;
+  m_pageOwner   = (pal && pal->getRefCount() > 0) ? pal : nullptr;
   computeSize();
   update();
 }
