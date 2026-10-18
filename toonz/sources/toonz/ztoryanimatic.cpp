@@ -1,4 +1,5 @@
 
+#include "ztorymaingate.h"  // kInsideShotColor
 #include "ztoryanimatic.h"
 #include "toonzqt/ztorytheme.h"
 #include "ztorylightgizmo.h"
@@ -655,6 +656,42 @@ void ZtoryAnimaticController::onNativeFrameSwitched() {
 ZtoryAnimaticRuler::ZtoryAnimaticRuler(QWidget *parent) : QWidget(parent) {
   setFixedHeight(18);
   setMouseTracking(true);
+  // Entering or leaving a shot changes the darkened span (ztoryDimOutsideShot).
+  connect(TApp::instance()->getCurrentXsheet(), &TXsheetHandle::xsheetSwitched,
+          this, [this]() { update(); });
+}
+
+// The open shot's frames in the main xsheet; false at the animatic level.
+// The timeline can be browsed anywhere while the viewer shows this shot only,
+// so clips, ruler and audio darken outside it (Franco, 2026-10-19).
+static bool ztoryActiveShotSpan(int &f0, int &f1) {
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  ChildStack *cs    = scene ? scene->getChildStack() : nullptr;
+  if (!cs || cs->getAncestorCount() == 0) return false;
+  AncestorNode *node = cs->getAncestorInfo(0);
+  TXsheet *mainXsh   = ZtoryAnimaticController::instance()->mainXsheet();
+  if (!node || !mainXsh) return false;
+  int ts = 0, td = 0;
+  if (!ZtoryShotOps::shotTrueSpan(mainXsh, node->m_col, ts, td) || td <= 0)
+    return false;
+  f0 = ts;
+  f1 = ts + td - 1;
+  return true;
+}
+
+// Darkens [left, right) outside the open shot's span, and returns its x range.
+static bool ztoryDimOutsideShot(QPainter &p, int left, int right, int top,
+                                int height, double ppf, int *sx0 = nullptr,
+                                int *sx1 = nullptr) {
+  int f0, f1;
+  if (!ztoryActiveShotSpan(f0, f1)) return false;
+  const int x0 = left + (int)(f0 * ppf), x1 = left + (int)((f1 + 1) * ppf);
+  const QColor shade(0, 0, 0, 120);
+  if (x0 > left) p.fillRect(left, top, x0 - left, height, shade);
+  if (x1 < right) p.fillRect(x1, top, right - x1, height, shade);
+  if (sx0) *sx0 = x0;
+  if (sx1) *sx1 = x1;
+  return true;
 }
 
 void ZtoryAnimaticRuler::paintEvent(QPaintEvent *) {
@@ -809,6 +846,16 @@ void ZtoryAnimaticRuler::paintEvent(QPaintEvent *) {
                      Qt::AlignVCenter | Qt::AlignLeft, tag.m_label);
         }
       }
+    }
+  }
+
+  // ---- Open shot: darker outside, a light band and a yellow edge inside ----
+  {
+    int sx0, sx1;
+    if (ztoryDimOutsideShot(p, kLabelW, width(), 0, h, m_ppf, &sx0, &sx1)) {
+      const QColor yellow(ZtoryMainGate::kInsideShotColor);
+      p.fillRect(sx0, 0, sx1 - sx0, h, QColor(255, 255, 255, 28));
+      p.fillRect(sx0, h - 3, sx1 - sx0, 3, yellow);
     }
   }
 
@@ -1115,6 +1162,9 @@ ZtoryAudioTrack::ZtoryAudioTrack(int col, const QString &name, QWidget *parent)
   setFocusPolicy(Qt::ClickFocus);
   setMouseTracking(true);
   setAttribute(Qt::WA_Hover);
+  // Entering or leaving a shot changes the darkened span (ztoryDimOutsideShot).
+  connect(TApp::instance()->getCurrentXsheet(), &TXsheetHandle::xsheetSwitched,
+          this, [this]() { update(); });
 
   // Read initial volume from the underlying audio column (saved in the .tnz).
   // Also cache the TXshSoundColumn* — this pointer is stable across column
@@ -1557,6 +1607,9 @@ void ZtoryAudioTrack::paintEvent(QPaintEvent *e) {
     p.setPen(QPen(QColor(255, 255, 80, 200), 1, Qt::DashLine));
     p.drawLine(rx, 0, rx, trackH);
   }
+
+  // Open shot: the audio outside it darkened, like clips and ruler.
+  ztoryDimOutsideShot(p, labelW, width(), 0, trackH, m_ppf);
 
   // Playhead (always on top, not cached) — centered on frame like the ruler
   int phx = labelW + (int)(m_currentFrame * m_ppf) + (int)(m_ppf / 2);
@@ -2639,14 +2692,19 @@ void ZtoryAnimaticTrack::paintEvent(QPaintEvent *) {
       p.setPen(QPen(QColor(255, 160, 0), 2));
       p.drawRect(x + 2, 3, w - 4, h - 2);
     }
-    // Active shot (being edited) — magenta glow + 2px border so the user always
-    // knows which shot they are inside. Drawn on top of the selection border.
+    // Active shot (being edited): the inside-shot yellow, as the xsheet's
+    // «Animatic / sh020». The timeline can be browsed anywhere while the
+    // viewer shows this shot only, so the clip says which segment you are
+    // working on (Franco, 2026-10-18). A solid band on top tells it from the
+    // orange selection border. Drawn on top of the selection.
     if (active) {
-      p.setOpacity(0.18);
-      p.fillRect(x + 1, 2, w - 2, h, ZtoryTheme::activeShot());
+      const QColor yellow(ZtoryMainGate::kInsideShotColor);
+      p.setOpacity(0.22);
+      p.fillRect(x + 1, 2, w - 2, h, yellow);
       p.setOpacity(1.0);
-      p.setPen(QPen(ZtoryTheme::activeShot(), 2));
+      p.setPen(QPen(yellow, 3));
       p.drawRect(x + 2, 3, w - 4, h - 2);
+      p.fillRect(x + 1, 2, w - 2, 5, yellow);
     }
 
     // Thumbnail — visible when block is wide enough to show a useful preview
@@ -2729,6 +2787,15 @@ void ZtoryAnimaticTrack::paintEvent(QPaintEvent *) {
     path.addPolygon(tri);
     p.fillPath(path, transColor);
     p.restore();
+  }
+
+  // Open shot: the other clips darkened, this one lightened (its yellow
+  // border is drawn with the clip above).
+  {
+    int sx0, sx1;
+    if (ztoryDimOutsideShot(p, kLabelW, width(), 0, height(), m_ppf, &sx0,
+                            &sx1))
+      p.fillRect(sx0, 2, sx1 - sx0, height() - 4, QColor(255, 255, 255, 30));
   }
 
   // Playhead — centered on frame like the ruler
@@ -5157,6 +5224,8 @@ ZtoryAnimaticViewerPanel::ZtoryAnimaticViewerPanel(QWidget *parent)
   barLay->setContentsMargins(0, 0, 0, 0);
   barLay->setSpacing(2);
 
+  // Where you are is said by the panel title and the xsheet's path
+  // («Animatic / sh020»); this stays the plain way back (Franco, 2026-10-18).
   m_backBtn = new QToolButton(topBar);
   m_backBtn->setText(tr("← Back to Animatic"));
   m_backBtn->setToolTip(tr("Return to Animatic viewer and close sub-scene"));
@@ -5301,10 +5370,13 @@ void ZtoryAnimaticViewerPanel::updateTitle() {
       // Shot editing — show full label (sequence + shot)
       AncestorNode *node = cs->getAncestorInfo(0);
       int si = node ? ZtoryModel::instance()->shotIndexForCol(node->m_col) : -1;
-      if (si >= 0)
-        title = ZtoryModel::instance()->fullLabel(si);
-      else
-        title = tr("Shot");
+      QString shot = si >= 0 ? ZtoryModel::instance()->fullLabel(si) : tr("Shot");
+      // Deeper sub-scenes inside the shot: their names follow, as a path.
+      for (int a = 1; a < cs->getAncestorCount(); a++)
+        if (AncestorNode *n = cs->getAncestorInfo(a))
+          if (n->m_cl.getPointer())
+            shot += " › " + QString::fromStdWString(n->m_cl->getName());
+      title = tr("Animatic / %1").arg(shot);
     }
   }
   setWindowTitle(title);

@@ -1,4 +1,5 @@
 #include "ztorymodel.h"
+#include "ztorymaingate.h"
 #include "ztorytaskflow.h"
 #include "ztorycharacter.h"
 #include "ztoryshotops.h"
@@ -213,7 +214,21 @@ ZtoryModel::ZtoryModel() : m_fps(24) {
               QTimer::singleShot(300, this, [] {
                 ZtorySceneClass::askIfUnclassified();
                 ZtorySceneClass::followPlainWorkflow();
+                // A storyboard with drawing levels in its main xsheet
+                // (ztorymaingate.h): after the scene type question.
+                ZtoryMainGate::checkMainForDrawingLevels();
               });
+            });
+  // The storyboard's main xsheet holds only shots and audio: editing tools
+  // off there, and a check when drawing levels appear in it anyway (a paste,
+  // a drop from another scene) — ztorymaingate.h.
+  ZtoryMainGate::install();
+  if (TApp::instance() && TApp::instance()->getCurrentXsheet())
+    connect(TApp::instance()->getCurrentXsheet(), &TXsheetHandle::xsheetChanged,
+            this, [this]() {
+              // Deferred: never a dialog in the middle of an edit.
+              QTimer::singleShot(0, this,
+                                 [] { ZtoryMainGate::checkMainForDrawingLevels(); });
             });
   // ⌘S with no Board alive: the model writes the .ztoryc (step 3b).
   connect(this, &ZtoryModel::sceneSaved, this,

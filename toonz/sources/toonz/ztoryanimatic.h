@@ -880,7 +880,7 @@ protected:
 
 private:
   void restoreAnimaticButtons();
-  void updateTitle();   // "Animatic - <scene>" in animatic mode, "SQxx_SHxxx" in shot mode
+  void updateTitle();   // "Animatic - <scene>" in animatic mode, "Animatic / SQxx_SHxxx" in shot mode
   ZtoryAnimaticViewer *m_viewer     = nullptr;
   ComboViewerPanel    *m_shotViewer = nullptr;
   QStackedWidget      *m_stack      = nullptr;

@@ -1,4 +1,5 @@
 #include "xshbreadcrumbs.h"
+#include "ztorymaingate.h"
 
 // Tnz6 includes
 #include "xsheetviewer.h"
@@ -227,8 +228,11 @@ void BreadcrumbArea::updateBreadcrumbs() {
     childCol.push_back(col);
   }
 
-  QString separator  = tr("  >  ");
-  QString separator2 = tr("  |  ");
+  // Ztoryc: in a storyboard the path reads «Animatic / sh020», the shot in
+  // the inside-shot yellow, and nothing else (Franco, 2026-10-18).
+  const bool storyboard = ZtoryMainGate::isStoryboardScene();
+  QString separator     = storyboard ? QString("  /  ") : tr("  >  ");
+  QString separator2    = tr("  |  ");
 
   Breadcrumb *crumb;
 
@@ -273,9 +277,14 @@ void BreadcrumbArea::updateBreadcrumbs() {
     ancestorName = QString::fromStdString(columnObject->getName());
 
     // Add label for current xsheet, button for everything else
-    if (i == ancestorCount)
+    if (i == ancestorCount) {
       crumb = new Breadcrumb(CrumbType::ANCESTOR, ancestorName,
                              CrumbWidgetType::LABEL, this);
+      if (storyboard)
+        crumb->getCrumbWidget()->setStyleSheet(
+            QString("QLabel { color: %1; font-weight: bold; }")
+                .arg(ZtoryMainGate::kInsideShotColor));
+    }
     else {
       crumb = new Breadcrumb(CrumbType::ANCESTOR, ancestorName,
                              CrumbWidgetType::BUTTON, this);
@@ -287,7 +296,7 @@ void BreadcrumbArea::updateBreadcrumbs() {
         CrumbType::SEPARATOR, separator, CrumbWidgetType::LABEL, this));
   }
 
-  ancestorName = tr("Main");
+  ancestorName = storyboard ? tr("Animatic") : tr("Main");
   if (!ancestorCount)
     crumb = new Breadcrumb(CrumbType::ANCESTOR, ancestorName,
                            CrumbWidgetType::LABEL, this);
@@ -305,15 +314,23 @@ void BreadcrumbArea::updateBreadcrumbs() {
   {
     if (!m_viewer->orientation()->isVerticalTimeline())
       m_breadcrumbLayout->addSpacing(215);
-    m_breadcrumbLayout->addWidget(new QLabel(tr("Scene Depth:"), this), 0,
-                                  Qt::AlignCenter);
-    m_breadcrumbLayout->addSpacing(5);
+    if (!storyboard) {
+      m_breadcrumbLayout->addWidget(new QLabel(tr("Scene Depth:"), this), 0,
+                                    Qt::AlignCenter);
+      m_breadcrumbLayout->addSpacing(5);
+    }
 
     std::vector<Breadcrumb *>::reverse_iterator rit;
     for (rit = m_breadcrumbWidgets.rbegin(); rit != m_breadcrumbWidgets.rend();
          ++rit) {
       m_breadcrumbLayout->addWidget((*rit)->getCrumbWidget(), 0,
                                     Qt::AlignCenter);
+    }
+    // In the storyboard's main timeline: what belongs here, quietly.
+    if (storyboard && !ancestorCount) {
+      QLabel *hint = new QLabel(tr("   · shots and audio only"), this);
+      hint->setStyleSheet("QLabel { color: #8A8A8A; }");
+      m_breadcrumbLayout->addWidget(hint, 0, Qt::AlignCenter);
     }
   }
   m_breadcrumbLayout->addStretch(1);

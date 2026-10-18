@@ -1,6 +1,7 @@
 
 
 #include "cellselection.h"
+#include "ztorymaingate.h"
 
 // Tnz6 includes
 #include "celldata.h"
@@ -2225,6 +2226,8 @@ void TCellSelection::pasteCells() {
   getSelectedCells(r0, c0, r1, c1);
   QClipboard *clipboard     = QApplication::clipboard();
   const QMimeData *mimeData = clipboard->mimeData();
+  // Ztoryc: no drawings in a storyboard's main xsheet (ztorymaingate.h).
+  if (ZtoryMainGate::refusePasteInMain(mimeData)) return;
   const StrokesData *strokesData = dynamic_cast<const StrokesData *>(mimeData);
   std::unique_ptr<StrokesData> transferredStrokes;
   if (!strokesData) {
@@ -2709,6 +2712,8 @@ void TCellSelection::pasteDuplicateCells() {
 
   QClipboard *clipboard     = QApplication::clipboard();
   const QMimeData *mimeData = clipboard->mimeData();
+  // Ztoryc: no drawings in a storyboard's main xsheet (ztorymaingate.h).
+  if (ZtoryMainGate::refusePasteInMain(mimeData)) return;
 
   TXsheet *xsh         = TApp::instance()->getCurrentXsheet()->getXsheet();
   XsheetViewer *viewer = TApp::instance()->getCurrentXsheetViewer();
@@ -4012,6 +4017,8 @@ void TCellSelection::overWritePasteCells() {
 
   QClipboard *clipboard     = QApplication::clipboard();
   const QMimeData *mimeData = clipboard->mimeData();
+  // Ztoryc: no drawings in a storyboard's main xsheet (ztorymaingate.h).
+  if (ZtoryMainGate::refusePasteInMain(mimeData)) return;
 
   TXsheet *xsh = TApp::instance()->getCurrentXsheet()->getXsheet();
   if (const TCellData *cellData = dynamic_cast<const TCellData *>(mimeData)) {

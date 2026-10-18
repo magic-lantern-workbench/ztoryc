@@ -1,6 +1,8 @@
 
 
 #include "levelcreatepopup.h"
+#include "ztorymaingate.h"
+#include <QTimer>
 
 // Tnz6 includes
 #include "menubarcommandids.h"
@@ -380,6 +382,15 @@ bool LevelCreatePopup::levelExists(std::wstring levelName) {
 
 //-----------------------------------------------------------------------------
 void LevelCreatePopup::showEvent(QShowEvent *) {
+  // Ztoryc: no levels in a storyboard's main xsheet (ztorymaingate.h). The
+  // popup closes at once; the reason comes after, not inside showEvent.
+  if (ZtoryMainGate::isStoryboardMain()) {
+    QTimer::singleShot(0, this, [this] {
+      hide();
+      ZtoryMainGate::refuseInMain(tr("create a level"));
+    });
+    return;
+  }
   update();
   nextName();
   m_nameFld->setFocus();
@@ -490,6 +501,8 @@ void LevelCreatePopup::onFrameFormatButton() {
 //-----------------------------------------------------------------------------
 
 bool LevelCreatePopup::apply() {
+  // Ztoryc: also here, in case the main xsheet became current while open.
+  if (ZtoryMainGate::refuseInMain(tr("create a level"))) return false;
   TApp *app = TApp::instance();
   int row   = app->getCurrentFrame()->getFrame();
   int col   = app->getCurrentColumn()->getColumnIndex();

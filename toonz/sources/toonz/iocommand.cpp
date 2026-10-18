@@ -1,6 +1,7 @@
 #include <memory>
 
 #include "iocommand.h"
+#include "ztorymaingate.h"
 #include "xsheetdragtool.h"  // isOutputSyncedWithPlayRange
 
 // Toonz includes
@@ -2912,6 +2913,27 @@ int IoCmd::loadResources(LoadResourceArguments &args, bool updateRecentFile,
   // use current frame/column if row/col is not set
   if (row0 == -1) row0 = app->getCurrentFrame()->getFrameIndex();
   if (col0 == -1) col0 = app->getCurrentColumn()->getColumnIndex();
+
+  // Ztoryc: a storyboard's main xsheet takes only audio — no levels, images,
+  // assets or scenes loaded as sub-scenes (ztorymaingate.h, Franco 2026-10-18).
+  // Every load path comes here: Load Level, Load Sub-Scene, drops on the
+  // xsheet and the viewer, the browsers.
+  if (ZtoryMainGate::isStoryboardMain()) {
+    for (auto &rd : args.resourceDatas) {
+      TFilePath decoded = scene->decodeFilePath(rd.m_path);
+      if (TFileType::getInfo(decoded) != TFileType::AUDIO_LEVEL) {
+        if (!args.silent)
+          ZtoryMainGate::refuseInMain(QObject::tr("load %1")
+              .arg(QString::fromStdWString(decoded.withoutParentDir().getWideString())));
+        else
+          args.errors << QObject::tr("%1: not loaded, the storyboard's main "
+                                     "timeline holds only shots and audio")
+                             .arg(QString::fromStdWString(
+                                 decoded.withoutParentDir().getWideString()));
+        return 0;
+      }
+    }
+  }
 
   // In Ztoryc storyboard workflow, block audio import inside sub-scenes.
   // Audio must be loaded from the main xsheet only.

@@ -957,6 +957,13 @@ QString TTool::updateEnabled() {
 }
 
 // See the overridden function EditTool::updateEnabled() for the Animate Tool
+// Ztoryc: set once at start-up by the application (ztorymaingate.cpp).
+static TTool::EditVeto s_editVeto = nullptr;
+
+void TTool::setEditVeto(EditVeto veto) { s_editVeto = veto; }
+
+QString TTool::editVetoReason() { return s_editVeto ? s_editVeto() : QString(); }
+
 QString TTool::updateEnabled(int rowIndex, int columnIndex) {
   // Disable every tool during playback
   if (m_application->getCurrentFrame()->isPlaying())
@@ -967,6 +974,10 @@ QString TTool::updateEnabled(int rowIndex, int columnIndex) {
   int targetType = getTargetType();
 
   if (toolType == TTool::GenericTool) return (enable(true), QString());
+
+  // Ztoryc: the application may forbid editing here (storyboard main xsheet).
+  const QString veto = editVetoReason();
+  if (!veto.isEmpty()) return (enable(false), veto);
 
   // Retrieve vars and view modes
   TXsheet *xsh = m_application->getCurrentXsheet()->getXsheet();
