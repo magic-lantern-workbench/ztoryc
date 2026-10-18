@@ -656,6 +656,9 @@ void ZtoryAnimaticController::onNativeFrameSwitched() {
 ZtoryAnimaticRuler::ZtoryAnimaticRuler(QWidget *parent) : QWidget(parent) {
   setFixedHeight(18);
   setMouseTracking(true);
+  // Entering or leaving a shot changes the darkened span (ztoryDimOutsideShot).
+  connect(TApp::instance()->getCurrentXsheet(), &TXsheetHandle::xsheetSwitched,
+          this, [this]() { update(); });
 }
 
 // The open shot's frames in the main xsheet; false at the animatic level.
@@ -1159,6 +1162,9 @@ ZtoryAudioTrack::ZtoryAudioTrack(int col, const QString &name, QWidget *parent)
   setFocusPolicy(Qt::ClickFocus);
   setMouseTracking(true);
   setAttribute(Qt::WA_Hover);
+  // Entering or leaving a shot changes the darkened span (ztoryDimOutsideShot).
+  connect(TApp::instance()->getCurrentXsheet(), &TXsheetHandle::xsheetSwitched,
+          this, [this]() { update(); });
 
   // Read initial volume from the underlying audio column (saved in the .tnz).
   // Also cache the TXshSoundColumn* — this pointer is stable across column
