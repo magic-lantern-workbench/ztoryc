@@ -1,6 +1,7 @@
 
 
 #include "toonzrasterbrushtool.h"
+#include "autofilllinesplit.h"
 
 // TnzTools includes
 #include "tools/toolhandle.h"
@@ -1242,30 +1243,9 @@ void ToonzRasterBrushTool::updateTranslation() {
 //---------------------------------------------------------------------------------------------------
 
 void ToonzRasterBrushTool::rebuildAutoFillStyleCombo(TPalette *pal) {
-  // Preserve current selection across rebuild.
-  // NOTE: TEnumProperty::deleteAllValues/addValue/setItemUIName do NOT emit Qt
-  // signals, so this function is safe to call from inside a Qt signal chain.
-  std::wstring cur = m_autoFillStyle.getValue();
-  m_autoFillStyle.deleteAllValues();
-  m_autoFillStyle.addValue(L"Next Style (N+1)");
-  m_autoFillStyle.setItemUIName(L"Next Style (N+1)", tr("Next Style (N+1)"));
-  m_autoFillStyle.addValue(L"Current Style");
-  m_autoFillStyle.setItemUIName(L"Current Style", tr("Current Style"));
-  if (pal) {
-    int nStyles = pal->getStyleCount();
-    for (int i = 0; i < nStyles; i++) {
-      TColorStyle *style = pal->getStyle(i);
-      if (!style) continue;
-      std::wstring name = style->getName();
-      if (name.empty()) name = L"Style " + std::to_wstring(i);
-      std::wstring key = L"palette_" + std::to_wstring(i);
-      m_autoFillStyle.addValue(key);
-      m_autoFillStyle.setItemUIName(
-          key, QString("[%1] %2").arg(i).arg(QString::fromStdWString(name)));
-    }
-  }
-  if (m_autoFillStyle.isValue(cur))
-    m_autoFillStyle.setValue(cur);
+  // Shared with the vector brush (toolutils.cpp). No "Line Style" entry here:
+  // on Toonz Raster the line is ink, the fill is paint — same id is pointless.
+  ToolUtils::rebuildAutoFillStyleProperty(m_autoFillStyle, pal, false);
 }
 
 //---------------------------------------------------------------------------------------------------
@@ -2635,22 +2615,10 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
           TTool::Application *app2 = TTool::getApplication();
           int styleId = app2 ? app2->getCurrentLevelStyleIndex() : 1;
           if (styleId <= 0) styleId = 1;
-          int fillStyleId;
-          std::wstring autoFillVal = m_autoFillStyle.getValue();
-          if (autoFillVal == L"Current Style") {
-            fillStyleId = styleId;
-          } else if (autoFillVal.substr(0, 8) == L"palette_") {
-            try { fillStyleId = std::stoi(autoFillVal.substr(8)); }
-            catch (...) { fillStyleId = styleId + 1; }
-            TPaletteP pal = ti->getPalette();
-            if (!pal || !pal->getStyle(fillStyleId)) fillStyleId = styleId;
-          } else {
-            // "Next Style (N+1)": classic ink→fill convention (default)
-            fillStyleId = styleId + 1;
-            TPaletteP pal = ti->getPalette();
-            if (pal && !pal->getStyle(fillStyleId))
-              fillStyleId = styleId;
-          }
+          // Here the line style IS the current style, so both ids match.
+          int fillStyleId = ToolUtils::resolveAutoFillStyle(
+              m_autoFillStyle.getValue(), styleId, styleId,
+              ti->getPalette());
 
           // ── Only NEW shapes ──────────────────────────────────────────────
           // Fill an enclosed region ONLY if its boundary includes ink drawn by
@@ -2711,7 +2679,13 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
             TPixelCM32 *srow = ras->pixels(y0 + sry) + x0;
             for (int srx = 0; srx < sw; srx++) {
               int seed = sry * sw + srx;
-              if (visited[seed] || exterior[seed] || srow[srx].getPaint() != 0)
+              // Seeds are EMPTY pixels only. Line pixels used to start their
+              // own one-pixel "regions", so every line pixel of the stroke got
+              // the fill colour, outer edge included: that colour peeking out
+              // of the antialiased edge was the rim. Which line pixels get
+              // the fill is decided by pass 2 below.
+              if (visited[seed] || exterior[seed] ||
+                  srow[srx].getPaint() != 0 || srow[srx].getInk() != 0)
                 continue;
               region.clear(); stack.clear();
               stack.push_back(seed); visited[seed] = 1;
@@ -2738,6 +2712,11 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
                 toFill.insert(toFill.end(), region.begin(), region.end());
             }
           }
+
+          // Pass 2: give the fill colour also to the antialiased line pixels
+          // on the inner side of the line — without it they keep paint 0 and
+          // show as a light halo. See autofilllinesplit.h.
+          AutoFillLineSplit::addInnerLinePixels(ras, x0, y0, sw, sh, toFill);
 
           if (!toFill.empty()) {
             // Bounding rect of the pixels to fill.
