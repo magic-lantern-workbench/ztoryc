@@ -3241,6 +3241,39 @@ importata e verificata, sync ok. File corretto di Messina in `03_storyboard/anim
 
 ---
 
+## Chiusi fra il 2026-10-15 e il 2026-10-19
+
+### ✅ Crash aprendo gli shot su Windows — regressione della 0.17 (`333278d69`, 0.18.0)
+Cinque crash di un utente Windows (livello predefinito vettoriale): il PageViewer di `e32b865c3` teneva
+con un `TPaletteP` la palette mostrata; le palette predefinite di PaletteController (`new TPalette()`, mai
+contate) passavano da 0 a 1 e alla pagina dopo tornavano a 0, cancellate sotto al padrone. Riprodotto col
+modo di prova `palettecycle` + MallocScribble (nome vuoto senza correzione, intatto con). Ora il viewer
+tiene solo palette gia' contate.
+
+### ✅ Rilascio 0.18.0 (`39d80e364`, 16/10)
+Crash palette, bocche sh440, Mark as Mouth Column, ⌘⌥V. 9 asset, note EN+IT, DMG codesign 0. Incidente:
+`git push | tail && gh workflow run` ha fatto partire la CI sul commit sbagliato (push rifiutato da
+SCANOSS); annullata con force-cancel prima che pubblicasse (memoria feedback_push_pipe_hides_failure).
+Windows al secondo tentativo (Chocolatey irraggiungibile).
+
+### ✅ ⌘⌥V = Paste Into (`30eb99eaf`) e scorciatoie personali di Franco riportate nel profilo vivo
+
+### ✅ Autofill: PR #5, #6, #7 in master (18/10, `b4beaf52d`, `3b99c6303`, `88ac31d66`)
+Sviluppate dalla sessione cloud (passaggio di consegne `AUTOFILL_HANDOFF_2026-10-16.md` su Drive),
+compilate e collaudate qui. #5 vettoriale: «Fill Style» e, con Auto Group spento, riempimento delle zone
+chiuse da piu' tratti (non forza piu' Auto Close/Auto Group). #6 raster a colori pieni: Auto Fill nuovo
+col `fullColorFill()` del secchiello, «Fill Depth» fra le opzioni (anche coi pennelli MyPaint). #7 smart
+raster: **il bordino aperto dal 13/06 e' chiuso** (causa: anche i pixel della linea facevano da seme;
+divisione della linea a meta', `autofilllinesplit.h`, programma di prova `tools/autofill_halo_harness/`).
+Seguiti in ANIMATIC_TASKS (aperti dopo la 0.18).
+
+### ✅ #8 storyboard: il main tiene solo shot e audio, e si capisce dove si e' (`4d2a25820`, 19/10)
+Da una segnalazione Discord (17/10, livello vettoriale disegnato nel main). Nel main di uno storyboard:
+strumenti di disegno e Animate spenti, livelli nuovi/caricamenti/incolla di disegni rifiutati (audio si),
+avviso se una scena ha gia' disegni nel main. «Animatic / sh030» sopra lo xsheet; clip dello shot aperto
+gialla e il resto della timeline scurito (clip, righello, audio); «← Back to Animatic» rimesso sopra il
+visore. Rifiniture in ANIMATIC_TASKS (20/10).
+
 ## Chiusi il 2026-10-14
 
 ### ✅ Rilascio 0.17.1 pubblicato (`780676607`)

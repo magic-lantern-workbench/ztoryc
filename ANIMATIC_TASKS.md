@@ -80,20 +80,6 @@ degli status).
   FlipConsole, che usa `to = m_markerTo` quando i marker ci sono — e dentro
   uno shot ci sono sempre. Quindi porta sul mark out, non sulla fine scena.
   **Non riproporlo** come difetto.
-- **Il secchiello / autofill nella Thumbs room — NON SI FA** (Franco,
-  2026-09-21): *«no il secchiello non lo metterei non complichiamoci la
-  vita»*. Era nato da una sua osservazione mentre si chiudeva la Thumbs room
-  («avrebbe fatto comodo l'autofill come quello che abbiamo sullo smart
-  raster»), e la risposta misurata è che **non si trasporta**: l'autofill
-  vive in `toonzrasterbrushtool.cpp` e lavora su `TRasterCM32P` — ink, paint
-  e tone separati, BFS con barriera `getInk() != 0` e riempimento con
-  `setPaint()`. La tela della Thumbs room è `TRaster32P`, RGBA pieno, senza
-  ink e senza paint: sarebbe un riempimento **nuovo**, non un travaso.
-  In più l'autofill che abbiamo ha un difetto ancora aperto — il bordino
-  bianco sui pixel antialiased, cinque approcci tutti regrediti il
-  2026-06-13 — e su RGBA lo stesso problema si ripresenta senza nemmeno il
-  tone che nel fill nativo dà la direzionalità.
-  **Non riproporlo.** Si riapre solo se lo riapre lui.
 - **I crash e i problemi sulle SCENE VECCHIE** (2026-08-14): *«per quanto
   riguarda i crash e i problemi con scene vecchie lascerei stare, vediamo se
   ricapita lavorandoci»*. Coperti da questa decisione:
@@ -163,31 +149,58 @@ degli status).
 
 ## 🎬 Ztoryc — storyboard, animatic, thumbs
 
-### 🆕 2026-10-12 — Far capire che si e' DENTRO uno shot (da ragionare, Franco fa delle prove)
+### 🆕 2026-10-19 — Rifiniture di «dove sono» (Franco, per il 20/10)
 
-Il problema (Franco): l'utente spesso non capisce se e' dentro lo shot o no,
-soprattutto se mentre e' nello shot passa al Board invece che all'xsheet. Oggi
-l'unico segnale sono le breadcrumb dell'xsheet («Main › sh330»); nel Board non
-c'e' niente. (Il pannello «Back to storyboard», `ztorybackpanel`, citato in
-AGENTS.md non esiste piu': riga da correggere.)
+Fatto con la #8 (`4d2a25820`, archivio 19/10): «Animatic / sh030» sopra lo xsheet, clip dello shot
+aperto gialla e il resto della timeline scurito (clip, righello, audio), blocchi nel main.
+Restano, decisi da Franco il 19/10:
+- **«← Back to Animatic» in giallo**, come «sh030» nello xsheet (`ztoryanimatic.cpp`, `m_backBtn`).
+- **Vedere l'animatic intero mentre si e' dentro uno shot**: il visore mostra solo lo shot, la timeline
+  si naviga tutta e crea confusione. Valutare un piccolo visore collegato alla timeline, come fa gia' il
+  Monitor (`ztorymonitorpanel.cpp`). Se e come: da decidere con Franco.
+- Nel Board (dalla proposta del 12/10): la card dello shot aperto evidenziata, le altre attenuate. Non
+  ancora fatto; il Board oggi non dice in che shot si e'.
 
-Proposta discussa il 12/10, con mockup (un solo segnale, lo stesso colore dello
-shot selezionato, ovunque si guardi):
-1. **fascia sopra il viewer, in tutte le room**: «Inside shot sh330 · frames
-   1–175 · Back to storyboard»; sparisce a livello storyboard. L'unico pezzo che
-   funziona anche nel Board.
-2. **nel Board**, la card dello shot in cui si e' dentro con contorno spesso e
-   pastiglia «inside»; le altre attenuate.
-3. **nella timeline / StoryStrip**, il blocco corrente colorato, gli altri spenti.
-4. il nome dello shot nel titolo della finestra («Ztoryc — sh330 (shot)»).
-Scartato: cambiare il colore di tutta l'interfaccia (stanca, litiga coi disegni).
+### 🆕 Aperti dopo la 0.18 (sessioni del 15-19/10)
 
-Da decidere (Franco):
-- attenuare le altre card aiuta o disturba quando si guarda lo storyboard?
-- il pulsante per uscire nella fascia: quale uscita, o solo l'indicazione?
-- nel Board, clic su un altro shot mentre si e' dentro sh330: cosa deve fare?
-Collegato a «🚪 TOGLIERE L'OBBLIGO DI USCIRE DALLO SHOT» (piu' sotto).
-Dopo la 0.17: tocca Board, viewer e room.
+- **Autofill: seguiti delle PR #5/#6/#7** (in master dal 18/10, collaudate da Franco):
+  - **la scelta «Fill Style» non si ricorda al riavvio**, in nessuno dei tre pennelli: i valori
+    `palette_N` dipendono dalla palette, serve prima una decisione;
+  - **#6, raster**: «tocca il tratto» si decide col RETTANGOLO del tratto: un cerchio piccolo vuoto dentro
+    un tratto grande nuovo si riempie anche lui. Usare l'impronta del tratto (le tessere dell'undo),
+    come lo smart raster; e la ricerca dell'esterno scorre tutta la tela a ogni tratto (4K non misurato);
+  - **#5, vettoriale con Auto Group spento**: `findRegions()` su tutta l'immagine a ogni tratto, non
+    misurato su disegni pesanti;
+  - **nota per Rodney** pubblicata (https://claude.ai/artifact/MxnTdU2JNgdE9LW9GjtGTS, strada A: le porta
+    lui in OT-Dev): Franco deve condividerla e mandargli il messaggio.
+- **Autofill nella Thumbs room — RIAPERTO da Franco il 16/10** (era fra i SOSPESI dal 21/09). Il dato
+  che cambia tutto: la carta della tela e' **trasparente** (`kPaper = TPixel32(0,0,0,0)`,
+  `ztorythumbnailcanvas.cpp:65`), quindi e' lo stesso caso del raster a colori pieni della #6, non un
+  riempimento nuovo. Circa un giorno:
+  - riusare la ricerca delle zone della #6 (`findAutoFillSeeds`, da spostare in un header comune come
+    `autofilllinesplit.h`, coperto dal programma di prova) e `fullColorFill()`;
+  - **tela a pagine**: limitare la ricerca alla vignetta del tratto (il suo bordo conta come esterno);
+  - **undo a pezzetti** (`Patch`, `capturePatchesAt`/`applyPatches`): i pezzetti del riempimento insieme a
+    quelli del tratto; NON `pushUndo()` (istantanea intera, vedi ~`ztorythumbnailcanvas.cpp:3277`);
+  - **colore**: la Thumbs room non ha la palette di un livello (palette temporanea con un solo stile, o
+    una variante con un `TPixel32`); **da decidere con Franco**: colore del pennello o un secondo colore;
+  - interruttore Auto Fill nella barra; prove come la #6 piu' i tratti sul bordo della vignetta.
+- **Cadmium: colorazione automatica da un fotogramma di riferimento — DA VALUTARE (Franco, 17/10,
+  segnalato da terzi).** [latentspacelabs/cadmium-oss](https://github.com/latentspacelabs/cadmium-oss):
+  si colora a mano un fotogramma, il modello **AnT** abbina le zone chiuse degli altri e le riempie a
+  colori piatti (c'e' anche un GapCloser). App Electron (macOS arm64, Windows), server locale FastAPI
+  (`/segment`, `/colorize`, `/predict`, PNG in base64) o versione Rust senza Python; CoreML/DirectML;
+  codice Apache 2.0. Ci interessa perche' lo smart raster (inchiostro + zone con indice di palette) e'
+  proprio cio' che vuole e restituisce: zone dal livello → server locale (`QNetworkAccessManager`, come
+  Kitsu) → colore → stile di palette → `setPaint` + undo. Versione intelligente dell'«Autofill» del
+  secchiello (`tnztools/autofilltlv.cpp`). **Dubbi:** licenza dei modelli e dati di addestramento NON
+  dichiarati (niente nel pacchetto, bloccherebbe SignPath; strada pulita solo come **programma esterno
+  opzionale**, schema `include/thirdparty.h`, modelli scaricati dall'utente); progetto giovanissimo; limite
+  di 255 zone; solo colori piatti. Da verificare: server Rust gia' compilato per Mac/Windows o dentro
+  l'app; avvio senza aprire l'app. Passi: provarlo su una sequenza esportata, poi chiedere la licenza.
+- **Vecchie scorciatoie di Franco**: stavano in `stuff/profiles/users/francobianco/shortcuts.ini` (profilo
+  morto), riportate il 15/10 nel profilo vivo `~/Library/Application Support/Ztoryc/Ztoryc/profiles/users/
+  francobianco/`; ⌘⌥V = Paste Into ora e' predefinita (`30eb99eaf`).
 
 ### 🆕 Aperti dopo la 0.17 (sessioni del 12-13/10)
 
@@ -219,6 +232,13 @@ Dopo la 0.17: tocca Board, viewer e room.
   invece dell'autofill vettoriale nel disegno: quello riempie solo le regioni chiuse (gli schizzi sono
   aperti), mescola sagoma e colori nelle stesse regioni e modifica l'originale. Prima versione raster
   (uno-due giorni); sagoma vettoriale modificabile eventualmente dopo.
+  **Aggiornato il 17/10 (Franco):** il risultato e' un livello vero, visibile mentre si lavora (un effetto
+  di render NON sostituisce questa funzione). **Due motori**: A semplice (allargare la linea, esterno dal
+  bordo, sagoma = non esterno; poi fino a meta' linea con la regola di `AutoFillLineSplit`), predefinito;
+  B **LazyBrush** per gli schizzi aperti, il taglio di grafo di `naru_lazybrush.cpp` usato come funzione
+  (candidato in `OPENTOONZ_PORT_CANDIDATES.md`), semi automatici dentro/fondo. Misurare prima la velocita'
+  del taglio di grafo su un fotogramma intero. La parte lunga resta la timeline (livello, colonna sotto,
+  «aggiorna matte», un undo unico).
 - **Conform dal montaggio: aggiornare l'animatic dalle modifiche fatte nel montaggio — dopo l'export
   per Premiere (Franco, 13/10).** Storyboard Pro lo fa; da noi e' piu' fattibile del previsto, perche'
   il main e' gia' «quali fotogrammi di quale sotto-scena, in che ordine» e le clip esportate portano il

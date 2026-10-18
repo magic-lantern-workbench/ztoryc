@@ -1,3 +1,32 @@
+## [2026-10-15 → 19] — 0.18.0 (crash su Windows), autofill su tutti i pennelli, il main dello storyboard
+
+### Rilascio
+- **v0.18.0 pubblicata** (`39d80e364`, 16/10): crash aprendo gli shot su Windows, bocche sh440, Mark as
+  Mouth Column, ⌘⌥V. 9 asset, note EN+IT, DMG codesign 0. Incidente sulla CI (push rifiutato da SCANOSS ma
+  workflow partiti lo stesso, `| tail` nascondeva l'errore): annullati prima di pubblicare.
+
+### Fixed
+- **Crash aprendo gli shot su Windows** (`333278d69`): regressione della 0.17 — il PageViewer cancellava le
+  palette predefinite (mai contate) quando le lasciava. Riprodotto col modo di prova `palettecycle`.
+- **Bordino dello smart raster sull'antialias** (#7, aperto dal 13/06): chiuso, con programma di prova.
+
+### Added
+- **Autofill** (#5, #6, #7, in master il 18/10): vettoriale con «Fill Style» e zone chiuse da piu' tratti;
+  raster a colori pieni con «Fill Depth»; smart raster senza bordino. Nota per Rodney (OT-Dev) pubblicata.
+- **Main dello storyboard** (#8, `4d2a25820`): solo shot e audio, «Animatic / sh030» sopra lo xsheet,
+  timeline scurita fuori dallo shot aperto.
+- **⌘⌥V = Paste Into** (`30eb99eaf`); scorciatoie personali di Franco riportate nel profilo vivo.
+
+### Upstream candidates
+- Voce 15 (fill-style picker) aggiornata: sbloccata per OT-Dev, consegnata a Rodney.
+- PageViewer che cancella le palette non contate (`333278d69`, insieme a `e32b865c3`).
+- LazyBrush Naru aggiunto ai candidati da OpenToonz.
+
+### Notes
+- Per il 20/10: «← Back to Animatic» giallo; visore dell'animatic intero dentro uno shot (da decidere).
+- Riaperto da Franco l'autofill nella Thumbs room; Cadmium da valutare; auto-matte con due motori.
+- Il profilo vivo di Ztoryc sta in Application Support; `ninja` scrive dentro `Ztoryc.app` (memorie).
+
 ## [2026-10-14] — 0.17.1 (export dell'animatic), bocche di SOFIA in sh440, «Mark as Mouth Column…»
 
 ### Rilascio

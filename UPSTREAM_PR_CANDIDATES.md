@@ -700,7 +700,7 @@ one large contribution or split.
 
 #### 🔹 Brush / painting
 
-15. 🟢 **AutoFill fill-style picker** *(⚠️ blocked for OpenToonz: OT has no Auto Fill / Vector Auto Close yet — those must be ported from Tahoma2D first. Rodney, 2026-08-18. Can go to **Tahoma2D** directly.)* — choose the colour AutoFill uses: "Next Style (N+1)" (default) or "Current Style", plus a dynamic palette picker listing all styles as `[N] StyleName` (rebuilds on palette/level change). `toonzrasterbrushtool.h/.cpp`, `tooloptions.cpp`.
+15. 🟢 **AutoFill fill-style picker** *(Update 2026-10-18: no longer blocked — Rodney ported Auto Close and the vector Auto Fill to OT-Dev on 2026-10-15, commit `02d38527`, PR #214. The Ztoryc Auto Fill work (#5 vector Fill Style + multi-stroke fill, #6 full-colour raster Auto Fill with Fill Depth, #7 Smart Raster rim fix + offline harness) is merged in Ztoryc and handed to Rodney for OT-Dev: https://claude.ai/artifact/MxnTdU2JNgdE9LW9GjtGTS. Tahoma2D does not accept AI-written code, PR #2285.)* — choose the colour AutoFill uses: "Next Style (N+1)" (default) or "Current Style", plus a dynamic palette picker listing all styles as `[N] StyleName` (rebuilds on palette/level change). `toonzrasterbrushtool.h/.cpp`, `tooloptions.cpp`.
 16. 🟡 **Tilt that follows the surface, not the screen** *(⚠️ same for OpenToonz: OT has no pen-tilt support yet. Rodney, 2026-08-18. Tahoma2D directly is fine.)* *(August 2026)* — with the elbow bent, a tablet's tilt axes do not line up with the screen axes, and the brush ends up shaped by how you are sitting rather than how you are drawing.
 
 #### 🔹 File handling

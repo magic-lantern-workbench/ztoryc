@@ -79,6 +79,20 @@ prima al rig/IK.
 
 ## MEDIA PRIORITÀ
 
+- **LazyBrush Naru (Fx) — candidato (Franco, 17/10/2026).** `toonz/sources/stdfx/naru_lazybrush.cpp` (~975
+  righe) + `naru_graph.h` + `stuff/profiles/layouts/fxs/STD_naru_LazyBrushFx.xml` + voci in
+  `stuff/config/current.txt` + `stdfx/CMakeLists.txt`. Autore Naru Nino; OpenToonz PR #6040 (30/09/2025) e
+  #6946 (30/06/2026), in OpenToonz 1.8.0. Non c'e' in Tahoma2D 1.6. Metodo LazyBrush di Sýkora (come la
+  Colorize Mask di Krita): «Source» (tratto) + «Reference» (scarabocchi di colore), taglio di grafo che segue
+  le linee anche aperte; Auto Scribble, Auto BG Scribble, LoG, lambda. Colore calcolato in render.
+  Dipendenze: OpenCV (c'e'); `naru_graph.h` da `patmjen/maxflow_algorithms` (cartella `reimpls`, **MIT**,
+  non la GPL di Boykov-Kolmogorov): verificare l'intestazione con `license-guard`.
+  Uso per Ztoryc: 1) il taglio di grafo **come funzione** per il motore B dell'auto-matte (scrive in un
+  livello, visibile subito); 2) eventualmente l'effetto intero per colorazioni di prova in render.
+  Limite: come effetto si vede solo in anteprima/render, non sostituisce autofill e auto-matte (Franco,
+  17/10). Da verificare: velocita' su fotogrammi grandi; che il port sia davvero isolato.
+
+
 *(vuoto — da riempire quando si farà la passata sistematica sui 2636 commit,
 col filtro della sezione 5 del metodo: `toonzlib/`, `tcore/`, `common/`,
 `tnztools/`)*
