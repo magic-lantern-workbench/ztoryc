@@ -309,6 +309,7 @@ FullColorBrushTool::FullColorBrushTool(std::string name)
     , m_mypaintTilt("ModifierTilt", false)
     , m_autoFill("Auto Fill", false)
     , m_autoFillStyle("Fill Style:")
+    , m_autoFillDepth("Fill Depth", 0, 15, 4)
     , m_enabledTilt(false)
     , m_enabledOPressure(false)
     , m_enabledOTilt(false)
@@ -347,10 +348,12 @@ FullColorBrushTool::FullColorBrushTool(std::string name)
   m_prop.bind(m_snapGrid);
   m_prop.bind(m_autoFill);
   m_prop.bind(m_autoFillStyle);
+  m_prop.bind(m_autoFillDepth);
   m_prop.bind(m_preset);
 
   m_autoFill.setId("AutoFill");
   m_autoFillStyle.setId("AutoFillStyle");
+  m_autoFillDepth.setId("AutoFillDepth");
   // Same default as the Toonz Raster brush: Next Style (N+1).
   ToolUtils::rebuildAutoFillStyleProperty(m_autoFillStyle, nullptr, true);
   m_autoFillStyle.setValue(L"Next Style (N+1)");
@@ -406,6 +409,7 @@ void FullColorBrushTool::updateTranslation() {
   m_modifierPaintBehind.setQStringName(tr("Paint Behind"));
   m_snapGrid.setQStringName(tr("Grid"));
   m_autoFill.setQStringName(tr("Auto Fill"));
+  m_autoFillDepth.setQStringName(tr("Fill Depth"));
   m_autoFillStyle.setQStringName(tr("Fill Style:"));
   m_mypaintPressure.setQStringName(tr("Pressure"));
   m_mypaintTilt.setQStringName(tr("Tilt"));
@@ -418,6 +422,9 @@ void FullColorBrushTool::updateTranslation() {
 
 void FullColorBrushTool::onActivate() {
   if (!m_notifier) m_notifier = new FullColorBrushToolNotifier(this);
+  // The Fill tool may have changed it meanwhile: it is one setting.
+  m_autoFillDepth.setValue(
+      std::min(std::max((int)FullColorMinFillDepth, 0), 15));
 
   updateCurrentStyle();
 
@@ -1462,7 +1469,7 @@ void FullColorBrushTool::applyAutoFill(const TRasterImageP &ri,
       m_autoFillStyle.getValue(), lineStyleId, lineStyleId, pal);
   if (fillStyleId <= 0) return;
 
-  int depth    = std::min(std::max((int)FullColorMinFillDepth, 0), 15);
+  int depth    = std::min(std::max(m_autoFillDepth.getValue(), 0), 15);
   int depth255 = (depth << 4) | depth;  // same conversion as fullColorFill
 
   ras->lock();
@@ -1718,6 +1725,8 @@ bool FullColorBrushTool::onPropertyChanged(std::string propertyName) {
     getApplication()->getCurrentTool()->notifyToolChanged();
     m_propertyUpdating = false;
     return true;
+  } else if (propertyName == m_autoFillDepth.getName()) {
+    FullColorMinFillDepth = m_autoFillDepth.getValue();
   } else if (propertyName == m_modifierLockAlpha.getName()) {
     if (m_modifierLockAlpha.getValue()) {
       m_modifierPaintBehind.setValue(false);

@@ -109,6 +109,9 @@ protected:
   TBoolProperty m_snapGrid;
   TBoolProperty m_mypaintTilt;
   TBoolProperty m_autoFill;
+  // Auto Fill "Fill Depth": the Fill tool's FullColorMinFillDepth, shown here
+  // too (grainy MyPaint lines need it lower to count as closed).
+  TIntProperty m_autoFillDepth;
   TEnumProperty m_autoFillStyle;  // see ToolUtils::resolveAutoFillStyle
   TStylusProperty m_sizeStylusProperty, m_opacityStylusProperty;
   TBrushTipProperty m_brushTip;
