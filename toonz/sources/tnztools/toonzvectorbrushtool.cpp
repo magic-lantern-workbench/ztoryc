@@ -36,6 +36,9 @@
 #include "tvectorimage.h"
 #include "tenv.h"
 #include "tregion.h"
+
+#include <functional>
+#include <set>
 #include "tinbetween.h"
 #include "tsystem.h"
 
@@ -368,6 +371,42 @@ static void findMaxCurvPoints(TStroke *stroke, const float &angoloLim,
   }
 }
 
+// Auto Fill without Auto Group: the areas closed by the strokes just added —
+// alone or together with strokes already there — that are still EMPTY get
+// \p styleId. An area counts when one of its edges lies on a new stroke, so
+// old empty shapes the stroke does not touch stay empty, and details drawn
+// inside a filled shape keep its colour (their areas are born filled).
+// Returns what was painted, for the redo.
+static std::vector<TFilledRegionInf> fillAreasClosedBy(
+    const TVectorImageP &vi, const std::set<int> &strokeIds, int styleId) {
+  std::vector<TFilledRegionInf> painted;
+  if (!vi || strokeIds.empty() || styleId <= 0) return painted;
+  vi->findRegions();
+  std::function<void(TRegion *)> visit = [&](TRegion *r) {
+    if (!r) return;
+    if (r->getStyle() == 0) {
+      for (UINT e = 0; e < r->getEdgeCount(); e++) {
+        TEdge *edge = r->getEdge(e);
+        if (edge && edge->m_s && strokeIds.count(edge->m_s->getId())) {
+          r->setStyle(styleId);
+          painted.push_back(TFilledRegionInf(r->getId(), styleId));
+          break;
+        }
+      }
+    }
+    for (UINT s = 0; s < r->getSubregionCount(); s++) visit(r->getSubregion(s));
+  };
+  // Only the areas of the group the strokes went into: another group's
+  // shapes are not this drawing's.
+  int anyStroke = -1;
+  for (int i = 0; i < (int)vi->getStrokeCount() && anyStroke < 0; i++)
+    if (strokeIds.count(vi->getStroke(i)->getId())) anyStroke = i;
+  for (UINT i = 0; i < vi->getRegionCount(); i++)
+    if (anyStroke < 0 || vi->sameGroupStrokeAndRegion(anyStroke, i))
+      visit(vi->getRegion(i));
+  return painted;
+}
+
 static void addStroke(TTool::Application *application, const TVectorImageP &vi,
                       TStroke *stroke, bool breakAngles, bool autoGroup,
                       bool autoFill, bool frameCreated, bool levelCreated,
@@ -400,6 +439,18 @@ static void addStroke(TTool::Application *application, const TVectorImageP &vi,
   TFrameId id = application->getCurrentTool()->getTool()->getCurrentFid();
   if (id == TFrameId::NO_FRAME && fid != TFrameId::NO_FRAME) id = fid;
   int addedStrokeIndex                                          = -1;
+
+  // Auto Fill colour: chosen in the brush's "Fill Style:" option. -1 keeps the
+  // stock behaviour (the stroke's own style) when the brush is not the
+  // current tool, e.g. strokes added by another caller.
+  int fillStyleId = -1;
+  if (autoFill) {
+    auto *brush = dynamic_cast<ToonzVectorBrushTool *>(
+        application->getCurrentTool()->getTool());
+    if (brush) fillStyleId = brush->getAutoFillStyleId(stroke->getStyle());
+  }
+  std::set<int> addedIds;  // the strokes this call adds
+  UndoPencil *lastUndo = nullptr;
   if (!corners.empty()) {
     if (breakAngles)
       split(stroke, corners, strokes);
@@ -416,9 +467,18 @@ static void addStroke(TTool::Application *application, const TVectorImageP &vi,
                                                        stroke->getBBox());
       TStroke *str     = new TStroke(*strokes[i]);
       addedStrokeIndex = vi->addStroke(str, true, sendToBack);
-      TUndoManager::manager()->add(
-          new UndoPencil(str, fillInformation, sl, id, frameCreated,
-                         levelCreated, autoGroup, autoFill, sendToBack));
+      addedIds.insert(str->getId());
+      lastUndo = new UndoPencil(str, fillInformation, sl, id, frameCreated,
+                                levelCreated, autoGroup, autoFill, sendToBack,
+                                fillStyleId);
+      TUndoManager::manager()->add(lastUndo);
+    }
+    // The areas are filled once all pieces are in (below); the last piece's
+    // undo carries them, so a redo of the block repaints after the last one.
+    if (autoFill && !autoGroup && lastUndo) {
+      int fillStyle = fillStyleId >= 0 ? fillStyleId : stroke->getStyle();
+      lastUndo->setAutoFilledRegions(
+          fillAreasClosedBy(vi, addedIds, fillStyle));
     }
     TUndoManager::manager()->endBlock();
   } else {
@@ -428,9 +488,16 @@ static void addStroke(TTool::Application *application, const TVectorImageP &vi,
                                                      stroke->getBBox());
     TStroke *str     = new TStroke(*stroke);
     addedStrokeIndex = vi->addStroke(str, true, sendToBack);
-    TUndoManager::manager()->add(
-        new UndoPencil(str, fillInformation, sl, id, frameCreated, levelCreated,
-                       autoGroup, autoFill, sendToBack));
+    addedIds.insert(str->getId());
+    lastUndo = new UndoPencil(str, fillInformation, sl, id, frameCreated,
+                              levelCreated, autoGroup, autoFill, sendToBack,
+                              fillStyleId);
+    if (autoFill && !autoGroup) {
+      int fillStyle = fillStyleId >= 0 ? fillStyleId : stroke->getStyle();
+      lastUndo->setAutoFilledRegions(
+          fillAreasClosedBy(vi, addedIds, fillStyle));
+    }
+    TUndoManager::manager()->add(lastUndo);
   }
 
   if (autoGroup) {
@@ -441,8 +508,9 @@ static void addStroke(TTool::Application *application, const TVectorImageP &vi,
       // to avoid filling other strokes, I enter into the new stroke group
       int currentGroup = vi->exitGroup();
       vi->enterGroup(index);
-      vi->selectFill(stroke->getBBox().enlarge(1, 1), 0, stroke->getStyle(),
-                     false, true, false);
+      int fillStyle = fillStyleId >= 0 ? fillStyleId : stroke->getStyle();
+      vi->selectFill(stroke->getBBox().enlarge(1, 1), 0, fillStyle, false,
+                     true, false);
       if (currentGroup != -1)
         vi->enterGroup(currentGroup);
       else
@@ -569,6 +637,7 @@ ToonzVectorBrushTool::ToonzVectorBrushTool(std::string name, int targetType)
     , m_autoClose("Auto Close", false)
     , m_autoGroup("Auto Group", false)
     , m_autoFill("Auto Fill", false)
+    , m_autoFillStyle("Fill Style:")
     , m_targetType(targetType)
     , m_workingFrameId(TFrameId())
     , m_snapGrid("Grid", false)
@@ -590,6 +659,7 @@ ToonzVectorBrushTool::ToonzVectorBrushTool(std::string name, int targetType)
   m_prop[0].bind(m_autoClose);
   m_prop[0].bind(m_autoGroup);
   m_prop[0].bind(m_autoFill);
+  m_prop[0].bind(m_autoFillStyle);
   m_prop[0].bind(m_sendToBack);
   m_prop[0].bind(m_frameRange);
   m_prop[0].bind(m_snap);
@@ -604,6 +674,7 @@ ToonzVectorBrushTool::ToonzVectorBrushTool(std::string name, int targetType)
   m_autoClose.setId("AutoClose");
   m_autoGroup.setId("AutoGroup");
   m_autoFill.setId("Autofill");
+  m_autoFillStyle.setId("AutoFillStyle");
   m_sendToBack.setId("DrawUnder");
   m_breakAngles.setId("BreakSharpAngles");
   m_frameRange.setId("FrameRange");
@@ -628,6 +699,10 @@ ToonzVectorBrushTool::ToonzVectorBrushTool(std::string name, int targetType)
 
   m_preset.addValue(CUSTOM_WSTR);
 
+  // "Line Style" first = default: same result as stock Tahoma2D Auto Fill.
+  // The palette entries are added by rebuildAutoFillStyleCombo().
+  ToolUtils::rebuildAutoFillStyleProperty(m_autoFillStyle, nullptr, true);
+
   m_capStyle.addValue(BUTT_WSTR, QString::fromStdWString(BUTT_WSTR));
   m_capStyle.addValue(ROUNDC_WSTR, QString::fromStdWString(ROUNDC_WSTR));
   m_capStyle.addValue(PROJECTING_WSTR,
@@ -636,6 +711,27 @@ ToonzVectorBrushTool::ToonzVectorBrushTool(std::string name, int targetType)
   m_joinStyle.addValue(MITER_WSTR, QString::fromStdWString(MITER_WSTR));
   m_joinStyle.addValue(ROUNDJ_WSTR, QString::fromStdWString(ROUNDJ_WSTR));
   m_joinStyle.addValue(BEVEL_WSTR, QString::fromStdWString(BEVEL_WSTR));
+}
+
+//-------------------------------------------------------------------------------------------------------
+
+void ToonzVectorBrushTool::rebuildAutoFillStyleCombo(TPalette *pal) {
+  ToolUtils::rebuildAutoFillStyleProperty(m_autoFillStyle, pal, true);
+}
+
+//-------------------------------------------------------------------------------------------------------
+
+int ToonzVectorBrushTool::getAutoFillStyleId(int lineStyleId) const {
+  TTool::Application *app = TTool::getApplication();
+  int currentStyleId      = app ? app->getCurrentLevelStyleIndex() : lineStyleId;
+  if (currentStyleId <= 0) currentStyleId = lineStyleId;
+  TPalette *pal = nullptr;
+  if (app) {
+    if (TXshSimpleLevel *sl = app->getCurrentLevel()->getSimpleLevel())
+      pal = sl->getPalette();
+  }
+  return ToolUtils::resolveAutoFillStyle(m_autoFillStyle.getValue(),
+                                         lineStyleId, currentStyleId, pal);
 }
 
 //-------------------------------------------------------------------------------------------------------
@@ -665,6 +761,7 @@ void ToonzVectorBrushTool::updateTranslation() {
   m_sendToBack.setQStringName(tr("Draw Under"));
   m_autoClose.setQStringName(tr("Auto Close"));
   m_autoFill.setQStringName(tr("Auto Fill"));
+  m_autoFillStyle.setQStringName(tr("Fill Style:"));
   m_autoGroup.setQStringName(tr("Auto Group"));
   m_sizeStylusProperty.setQStringName(tr("Stylus Settings - Size"));
 
@@ -2288,28 +2385,10 @@ bool ToonzVectorBrushTool::onPropertyChanged(std::string propertyName) {
     break;
   }
 
-  if (propertyName == m_autoClose.getName() && !m_autoClose.getValue()) {
-    // We need autofill off if off.
-    m_autoFill.setValue(false);
-    V_VectorBrushAutoFill = m_autoFill.getValue();
-    notifyTool            = true;
-  }
-
-  if (propertyName == m_autoGroup.getName() && !m_autoGroup.getValue()) {
-    // We need autofill off if off.
-    m_autoFill.setValue(false);
-    V_VectorBrushAutoFill = m_autoFill.getValue();
-    notifyTool            = true;
-  }
-
-  // we need close and group on
-  if (propertyName == m_autoFill.getName() && m_autoFill.getValue()) {
-    m_autoClose.setValue(true);
-    m_autoGroup.setValue(true);
-    V_VectorBrushAutoClose = m_autoClose.getValue();
-    V_VectorBrushAutoGroup = m_autoGroup.getValue();
-    notifyTool             = true;
-  }
+  // Ztoryc: Auto Fill no longer switches Auto Close and Auto Group on, nor
+  // goes off with them. With Auto Group it fills the shape a stroke closes
+  // by itself (stock); without, the empty areas a stroke closes together with
+  // other strokes — a face drawn in several strokes (fillAreasClosedBy).
 
   if (propertyName == m_joinStyle.getName()) notifyTool = true;
 
