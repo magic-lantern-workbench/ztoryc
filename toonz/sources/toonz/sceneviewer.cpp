@@ -97,7 +97,6 @@
 #include "ext/plasticvisualsettings.h"
 #include "toonzqt/selectioncommandids.h"
 #include "ztoryanimatic.h"
-#include "ztorymaingate.h"
 
 TEnv::IntVar ShowSceneOverlay("ShowSceneOverlay", 1);
 
@@ -2157,36 +2156,6 @@ void SceneViewer::drawViewerIndicators() {
 }
 
 //-----------------------------------------------------------------------------
-// Ztoryc: inside a shot of a storyboard, a frame in the accent colour around
-// the viewer, so you always know you are drawing inside the shot (Franco,
-// 2026-10-18; ztorymaingate.h). The shot's name is above the viewer, in the
-// animatic viewer's path [‹ Animatic] › SH030.
-// Not on the animatic viewer, which always shows the main xsheet.
-
-void SceneViewer::drawZtoryShotFrame() {
-  if (m_alwaysMainXsheet || m_previewMode == FULL_PREVIEW) return;
-  const QString shot = ZtoryMainGate::currentShotName();
-  if (shot.isEmpty()) return;
-
-  const int dpr   = getDevPixRatio();
-  const double hw = width() * dpr * 0.5;  // the modelview origin is the
-  const double hh = height() * dpr * 0.5;  // centre, units are device pixels
-  const double t  = 4.0 * dpr;              // frame thickness
-  const QColor c(ZtoryMainGate::kInsideShotColor);
-
-  glPushMatrix();
-  glDisable(GL_BLEND);
-  glColor3d(c.redF(), c.greenF(), c.blueF());
-  glRectd(-hw, hh - t, hw, hh);    // top
-  glRectd(-hw, -hh, hw, -hh + t);  // bottom
-  glRectd(-hw, -hh, -hw + t, hh);  // left
-  glRectd(hw - t, -hh, hw, hh);    // right
-  // The shot's name is above the viewer, in the animatic viewer's path
-  // ([‹ Animatic] › SH030, Franco 2026-10-18): the frame alone stays here.
-  glPopMatrix();
-}
-
-//-----------------------------------------------------------------------------
 
 static void drawFpsGraph(int t0, int t1) {
   glDisable(GL_BLEND);
@@ -2318,8 +2287,6 @@ void SceneViewer::paintGL() {
   drawDisableScissor();
 
   drawViewerIndicators();
-
-  drawZtoryShotFrame();
 
   // Il freezed e' attivo ed e' in stato "update": faccio il grab del viewer.
   if (m_freezedStatus == UPDATE_FREEZED) {

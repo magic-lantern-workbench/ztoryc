@@ -364,8 +364,6 @@ protected:
   void drawPreview();
   void drawOverlay();
   void drawViewerIndicators();
-  // Ztoryc: coloured frame + shot name when inside a storyboard shot.
-  void drawZtoryShotFrame();
 
   void drawScene();
   void drawSceneOverlay();

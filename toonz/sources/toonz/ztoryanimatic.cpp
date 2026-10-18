@@ -2640,14 +2640,19 @@ void ZtoryAnimaticTrack::paintEvent(QPaintEvent *) {
       p.setPen(QPen(QColor(255, 160, 0), 2));
       p.drawRect(x + 2, 3, w - 4, h - 2);
     }
-    // Active shot (being edited) — magenta glow + 2px border so the user always
-    // knows which shot they are inside. Drawn on top of the selection border.
+    // Active shot (being edited): the inside-shot yellow, as the xsheet's
+    // «Animatic / sh020». The timeline can be browsed anywhere while the
+    // viewer shows this shot only, so the clip says which segment you are
+    // working on (Franco, 2026-10-18). A solid band on top tells it from the
+    // orange selection border. Drawn on top of the selection.
     if (active) {
-      p.setOpacity(0.18);
-      p.fillRect(x + 1, 2, w - 2, h, ZtoryTheme::activeShot());
+      const QColor yellow(ZtoryMainGate::kInsideShotColor);
+      p.setOpacity(0.22);
+      p.fillRect(x + 1, 2, w - 2, h, yellow);
       p.setOpacity(1.0);
-      p.setPen(QPen(ZtoryTheme::activeShot(), 2));
+      p.setPen(QPen(yellow, 3));
       p.drawRect(x + 2, 3, w - 4, h - 2);
+      p.fillRect(x + 1, 2, w - 2, 5, yellow);
     }
 
     // Thumbnail — visible when block is wide enough to show a useful preview
@@ -5158,23 +5163,14 @@ ZtoryAnimaticViewerPanel::ZtoryAnimaticViewerPanel(QWidget *parent)
   barLay->setContentsMargins(0, 0, 0, 0);
   barLay->setSpacing(2);
 
-  // A path, not just a «back» button (Franco, 2026-10-18): [‹ Animatic] ›
-  // SQ20_SH030 — where you are and the way back in one element, as Tahoma's
-  // sub-scene breadcrumbs. «Animatic» is drawn as a button so it reads as
-  // clickable; the shot is in the inside-shot yellow (ztorymaingate.h).
+  // Where you are is said by the panel title and the xsheet's path
+  // («Animatic / sh020»); this stays the plain way back (Franco, 2026-10-18).
   m_backBtn = new QToolButton(topBar);
-  m_backBtn->setText(tr("‹ Animatic"));
+  m_backBtn->setText(tr("← Back to Animatic"));
   m_backBtn->setToolTip(tr("Return to Animatic viewer and close sub-scene"));
-  m_backBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+  m_backBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   m_backBtn->setFixedHeight(22);
   barLay->addWidget(m_backBtn);
-
-  m_shotCrumb = new QLabel(topBar);
-  m_shotCrumb->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-  m_shotCrumb->setStyleSheet(
-      QString("QLabel { color: %1; font-weight: bold; padding-left: 6px; }")
-          .arg(ZtoryMainGate::kInsideShotColor));
-  barLay->addWidget(m_shotCrumb);
 
   m_linkBtn = new QToolButton(topBar);
   m_linkBtn->setText(tr("🔗"));
@@ -5320,7 +5316,6 @@ void ZtoryAnimaticViewerPanel::updateTitle() {
           if (n->m_cl.getPointer())
             shot += " › " + QString::fromStdWString(n->m_cl->getName());
       title = tr("Animatic / %1").arg(shot);
-      if (m_shotCrumb) m_shotCrumb->setText("›  " + shot);
     }
   }
   setWindowTitle(title);
