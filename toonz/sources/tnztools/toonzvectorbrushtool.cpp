@@ -475,7 +475,7 @@ static void addStroke(TTool::Application *application, const TVectorImageP &vi,
     }
     // The areas are filled once all pieces are in (below); the last piece's
     // undo carries them, so a redo of the block repaints after the last one.
-    if (autoFill && !autoGroup) {
+    if (autoFill && !autoGroup && lastUndo) {
       int fillStyle = fillStyleId >= 0 ? fillStyleId : stroke->getStyle();
       lastUndo->setAutoFilledRegions(
           fillAreasClosedBy(vi, addedIds, fillStyle));
