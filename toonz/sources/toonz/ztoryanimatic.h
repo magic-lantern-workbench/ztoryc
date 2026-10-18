@@ -880,12 +880,13 @@ protected:
 
 private:
   void restoreAnimaticButtons();
-  void updateTitle();   // "Animatic - <scene>" in animatic mode, "SQxx_SHxxx" in shot mode
+  void updateTitle();   // "Animatic - <scene>" in animatic mode, "Animatic / SQxx_SHxxx" in shot mode
   ZtoryAnimaticViewer *m_viewer     = nullptr;
   ComboViewerPanel    *m_shotViewer = nullptr;
   QStackedWidget      *m_stack      = nullptr;
   QWidget             *m_topBar     = nullptr;  // back btn + link btn bar
   QToolButton         *m_backBtn    = nullptr;
+  QLabel              *m_shotCrumb  = nullptr;  // "› SQ20_SH030" after m_backBtn
   QToolButton         *m_linkBtn    = nullptr;
   // Overlay buttons (symmetry, perspective, safe area, field guide):
   // added to the panel title bar but only visible in shot mode.

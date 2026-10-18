@@ -1,4 +1,5 @@
 
+#include "ztorymaingate.h"  // kInsideShotColor
 #include "ztoryanimatic.h"
 #include "toonzqt/ztorytheme.h"
 #include "ztorylightgizmo.h"
@@ -5157,12 +5158,23 @@ ZtoryAnimaticViewerPanel::ZtoryAnimaticViewerPanel(QWidget *parent)
   barLay->setContentsMargins(0, 0, 0, 0);
   barLay->setSpacing(2);
 
+  // A path, not just a «back» button (Franco, 2026-10-18): [‹ Animatic] ›
+  // SQ20_SH030 — where you are and the way back in one element, as Tahoma's
+  // sub-scene breadcrumbs. «Animatic» is drawn as a button so it reads as
+  // clickable; the shot is in the inside-shot yellow (ztorymaingate.h).
   m_backBtn = new QToolButton(topBar);
-  m_backBtn->setText(tr("← Back to Animatic"));
+  m_backBtn->setText(tr("‹ Animatic"));
   m_backBtn->setToolTip(tr("Return to Animatic viewer and close sub-scene"));
-  m_backBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  m_backBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
   m_backBtn->setFixedHeight(22);
   barLay->addWidget(m_backBtn);
+
+  m_shotCrumb = new QLabel(topBar);
+  m_shotCrumb->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  m_shotCrumb->setStyleSheet(
+      QString("QLabel { color: %1; font-weight: bold; padding-left: 6px; }")
+          .arg(ZtoryMainGate::kInsideShotColor));
+  barLay->addWidget(m_shotCrumb);
 
   m_linkBtn = new QToolButton(topBar);
   m_linkBtn->setText(tr("🔗"));
@@ -5301,10 +5313,14 @@ void ZtoryAnimaticViewerPanel::updateTitle() {
       // Shot editing — show full label (sequence + shot)
       AncestorNode *node = cs->getAncestorInfo(0);
       int si = node ? ZtoryModel::instance()->shotIndexForCol(node->m_col) : -1;
-      if (si >= 0)
-        title = ZtoryModel::instance()->fullLabel(si);
-      else
-        title = tr("Shot");
+      QString shot = si >= 0 ? ZtoryModel::instance()->fullLabel(si) : tr("Shot");
+      // Deeper sub-scenes inside the shot: their names follow, as a path.
+      for (int a = 1; a < cs->getAncestorCount(); a++)
+        if (AncestorNode *n = cs->getAncestorInfo(a))
+          if (n->m_cl.getPointer())
+            shot += " › " + QString::fromStdWString(n->m_cl->getName());
+      title = tr("Animatic / %1").arg(shot);
+      if (m_shotCrumb) m_shotCrumb->setText("›  " + shot);
     }
   }
   setWindowTitle(title);

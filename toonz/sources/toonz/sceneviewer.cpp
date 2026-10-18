@@ -2158,8 +2158,9 @@ void SceneViewer::drawViewerIndicators() {
 
 //-----------------------------------------------------------------------------
 // Ztoryc: inside a shot of a storyboard, a frame in the accent colour around
-// the viewer and the shot's name in the top-left corner, so you always know
-// you are drawing inside the shot (Franco, 2026-10-18; ztorymaingate.h).
+// the viewer, so you always know you are drawing inside the shot (Franco,
+// 2026-10-18; ztorymaingate.h). The shot's name is above the viewer, in the
+// animatic viewer's path [‹ Animatic] › SH030.
 // Not on the animatic viewer, which always shows the main xsheet.
 
 void SceneViewer::drawZtoryShotFrame() {
@@ -2180,17 +2181,8 @@ void SceneViewer::drawZtoryShotFrame() {
   glRectd(-hw, -hh, hw, -hh + t);  // bottom
   glRectd(-hw, -hh, -hw + t, hh);  // left
   glRectd(hw - t, -hh, hw, hh);    // right
-  // The label: a tab in the frame colour, dark text on it.
-  // tglDrawText's stroke font at 2x, as drawViewerIndicators uses it: about
-  // 13 px per character and 16 px tall (times the device pixel ratio).
-  const QString label = tr("INSIDE SHOT %1").arg(shot);
-  const double tabW   = (label.size() * 13.0 + 16.0) * dpr;
-  const double tabH   = 24.0 * dpr;
-  glRectd(-hw, hh - tabH, -hw + tabW, hh);
-  glColor3d(0.1, 0.1, 0.1);
-  glTranslated(-hw + 8.0 * dpr, hh - tabH + 5.0 * dpr, 0);
-  glScaled(2.0 * dpr, 2.0 * dpr, 1.0);
-  tglDrawText(TPointD(0, 0), label.toStdString());
+  // The shot's name is above the viewer, in the animatic viewer's path
+  // ([‹ Animatic] › SH030, Franco 2026-10-18): the frame alone stays here.
   glPopMatrix();
 }
 
