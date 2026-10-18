@@ -543,6 +543,14 @@ transformation.
                             //!  reason in case the tool was disabled.
   virtual QString updateEnabled(int rowIndex, int columnIndex);
 
+  //! Ztoryc: an application-wide veto on every non-generic tool. The
+  //! application installs it once (the storyboard's main xsheet holds only
+  //! shots, see ztorymaingate.h). It returns the reason shown to the user
+  //! when tools must stay off, an empty string when they may work.
+  typedef QString (*EditVeto)();
+  static void setEditVeto(EditVeto veto);
+  static QString editVetoReason();
+
   bool isColumnLocked(int columnIndex) const;
 
   void resetInputMethod();  //!< Resets Input Context (IME)

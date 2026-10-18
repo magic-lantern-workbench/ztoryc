@@ -1,6 +1,7 @@
 
 
 #include "xsheetviewer.h"
+#include "ztorymodel.h"
 #include "sceneviewerevents.h"
 #include "tapp.h"
 #include "floatingpanelcommand.h"
@@ -458,7 +459,10 @@ void XsheetViewer::positionSections() {
     m_toolbarScrollArea->setGeometry(0, 0, 0, 0);
   }
 
-  if (Preferences::instance()->isShowXsheetBreadcrumbsEnabled()) {
+  // Ztoryc: in the Storyboard workflow the area is always on — it carries the
+  // "inside shot / main timeline" banner (ztorymaingate.h).
+  if (Preferences::instance()->isShowXsheetBreadcrumbsEnabled() ||
+      ZtoryModel::instance()->isStoryboardWorkflow()) {
     m_breadcrumbArea->showBreadcrumbs(true);
     int w = geometry().width();
     if (o->isVerticalTimeline())

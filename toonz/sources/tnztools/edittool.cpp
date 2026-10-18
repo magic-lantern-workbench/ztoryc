@@ -2051,6 +2051,11 @@ QString EditTool::updateEnabled(int rowIndex, int columnIndex) {
   if (m_application->getCurrentFrame()->isPlaying())
     return (enable(false), QString());
 
+  // Ztoryc: the application may forbid editing here (storyboard main xsheet:
+  // the camera and the drawings are edited inside the shot).
+  const QString veto = editVetoReason();
+  if (!veto.isEmpty()) return (enable(false), veto);
+
   // Disable in Level Strip
   if (m_application->getCurrentFrame()->isEditingLevel())
     return (

@@ -1,4 +1,5 @@
 #include "xshbreadcrumbs.h"
+#include "ztorymaingate.h"
 
 // Tnz6 includes
 #include "xsheetviewer.h"
@@ -305,6 +306,25 @@ void BreadcrumbArea::updateBreadcrumbs() {
   {
     if (!m_viewer->orientation()->isVerticalTimeline())
       m_breadcrumbLayout->addSpacing(215);
+    // Ztoryc: in a storyboard, say plainly where you are (ztorymaingate.h).
+    if (ZtoryMainGate::isStoryboardScene()) {
+      const QString shot = ZtoryMainGate::currentShotName();
+      QLabel *where      = new QLabel(this);
+      if (!shot.isEmpty()) {
+        where->setText(tr("  INSIDE SHOT %1  ").arg(shot));
+        where->setStyleSheet(
+            QString("QLabel { background: %1; color: #1A1A1A; "
+                    "font-weight: bold; padding: 2px 6px; }")
+                .arg(ZtoryMainGate::kInsideShotColor));
+      } else {
+        where->setText(tr("  MAIN TIMELINE · shots and audio only  "));
+        where->setStyleSheet(
+            "QLabel { background: #3A3A3A; color: #D0D0D0; "
+            "font-weight: bold; padding: 2px 6px; }");
+      }
+      m_breadcrumbLayout->addWidget(where, 0, Qt::AlignCenter);
+      m_breadcrumbLayout->addSpacing(10);
+    }
     m_breadcrumbLayout->addWidget(new QLabel(tr("Scene Depth:"), this), 0,
                                   Qt::AlignCenter);
     m_breadcrumbLayout->addSpacing(5);

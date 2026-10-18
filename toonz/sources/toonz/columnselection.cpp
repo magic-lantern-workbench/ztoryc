@@ -1,6 +1,7 @@
 
 
 #include "columnselection.h"
+#include "ztorymaingate.h"
 
 // Tnz6 includes
 #include "subscenecommand.h"
@@ -176,6 +177,9 @@ void TColumnSelection::pasteColumnsBelow() {
   }
 
   TUndoManager::manager()->endBlock();
+  // Ztoryc: drawing columns pasted into a storyboard's main xsheet are taken
+  // back at once (ztorymaingate.h).
+  ZtoryMainGate::undoIfDrawingColumnsPasted(indices);
 }
 
 //-----------------------------------------------------------------------------
@@ -202,6 +206,9 @@ void TColumnSelection::pasteColumns() {
   }
 
   TUndoManager::manager()->endBlock();
+  // Ztoryc: drawing columns pasted into a storyboard's main xsheet are taken
+  // back at once (ztorymaingate.h).
+  ZtoryMainGate::undoIfDrawingColumnsPasted(indices);
 }
 
 //-----------------------------------------------------------------------------

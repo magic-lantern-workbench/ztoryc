@@ -184,6 +184,7 @@ set(HEADERS
     ztoryphonemes.h
     ztorycharacter.h
     ztorysceneclass.h
+    ztorymaingate.h
     ztorymouthmap.h
     ztorymouthapply.h
     ztorysecret.h
@@ -294,6 +295,7 @@ set(SOURCES
     ztoryphonemes.cpp
     ztorycharacter.cpp
     ztorysceneclass.cpp
+    ztorymaingate.cpp
     ztorytestmode.cpp
     ztorymouthmap.cpp
     ztorymouthapply.cpp
