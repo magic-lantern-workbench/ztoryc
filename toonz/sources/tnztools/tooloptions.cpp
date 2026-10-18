@@ -3243,9 +3243,10 @@ BrushToolOptionsBox::BrushToolOptionsBox(QWidget *parent, TTool *tool,
         dynamic_cast<ToolOptionCheckbox *>(m_controls.value("Auto Fill"));
     if (m_autoFillCheckbox)
       m_autoFillCheckbox->setStatusTip(
-          tr("Auto Fill: automatically fill closed shapes after each stroke "
-             "(needs Auto Close and Auto Group). Choose the fill color with "
-             "\"Fill Style\""));
+          tr("Auto Fill: fill closed shapes after each stroke. With Auto "
+             "Group, the shape the stroke closes by itself; without, the "
+             "empty areas it closes together with other strokes. Choose the "
+             "fill color with \"Fill Style\""));
     m_snapCheckbox =
         dynamic_cast<ToolOptionCheckbox *>(m_controls.value("Snap"));
     m_snapSensitivityCombo =

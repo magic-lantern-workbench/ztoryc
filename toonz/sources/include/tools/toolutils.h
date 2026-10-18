@@ -309,8 +309,15 @@ class UndoPencil final : public TToolUndo {
   // Style used by Auto Fill; -1 = the stroke's own style (stock behaviour).
   // Remembered so that redo fills with the same colour as the original stroke.
   int m_fillStyleId;
+  // Auto Fill without Auto Group: the empty areas the stroke closed together
+  // with other strokes, and the style given to them. Redo paints them again;
+  // undo needs nothing more (m_fillInformation has their styles before).
+  std::vector<TFilledRegionInf> m_autoFilledRegions;
 
 public:
+  void setAutoFilledRegions(const std::vector<TFilledRegionInf> &regions) {
+    m_autoFilledRegions = regions;
+  }
   UndoPencil(TStroke *stroke, std::vector<TFilledRegionInf> *fillInformation,
              TXshSimpleLevel *level, const TFrameId &frameId,
              bool m_createdFrame, bool m_createdLevel, bool autogroup = false,

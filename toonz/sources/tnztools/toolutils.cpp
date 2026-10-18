@@ -1153,6 +1153,9 @@ void ToolUtils::UndoPencil::redo() const {
         image->exitGroup();
     }
   }
+  for (const TFilledRegionInf &inf : m_autoFilledRegions)
+    if (TRegion *reg = image->getRegion(inf.m_regionId))
+      reg->setStyle(inf.m_styleId);
   app->getCurrentXsheet()->notifyXsheetChanged();
   notifyImageChanged();
 }
