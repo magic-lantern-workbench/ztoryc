@@ -180,14 +180,15 @@ QStringList ZtoryMainGate::drawingColumnsInMain() {
     if (!lc) continue;  // shots are child columns, audio sound columns
     int r0, r1;
     lc->getRange(r0, r1);
+    // The first exposed cell tells: a column holds one kind of level. Runs
+    // on every xsheet change, so a shot column is not walked to its end.
     for (int r = r0; r <= r1; r++) {
       TXshCell cell = lc->getCell(r);
       if (cell.isEmpty() || !cell.m_level) continue;
-      if (isDrawingLevelType(cell.m_level->getType())) {
+      if (isDrawingLevelType(cell.m_level->getType()))
         names << QString::fromStdString(
             xsh->getStageObject(TStageObjectId::ColumnId(c))->getName());
-        break;
-      }
+      break;
     }
   }
   return names;
