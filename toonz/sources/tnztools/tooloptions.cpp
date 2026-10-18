@@ -3181,6 +3181,8 @@ BrushToolOptionsBox::BrushToolOptionsBox(QWidget *parent, TTool *tool,
     rasterBrush->rebuildAutoFillStyleCombo(pltHandle->getPalette());
   else if (auto *vectorBrush = dynamic_cast<ToonzVectorBrushTool *>(tool))
     vectorBrush->rebuildAutoFillStyleCombo(pltHandle->getPalette());
+  else if (auto *fullColorBrush = dynamic_cast<FullColorBrushTool *>(tool))
+    fullColorBrush->rebuildAutoFillStyleCombo(pltHandle->getPalette());
 
   ToolOptionControlBuilder builder(this, tool, pltHandle, toolHandle);
   if (tool && tool->getProperties(0)) tool->getProperties(0)->accept(builder);
@@ -3315,7 +3317,7 @@ void BrushToolOptionsBox::filterControls() {
         (it.key() == "Lock Alpha" || it.key() == "Pressure" ||
                      it.key() == "Preset:" || it.key() == "Grid" ||
                      it.key() == "Smooth:" || it.key() == "Paint Behind" ||
-                     it.key() == "Fill Style:");
+                     it.key() == "Fill Style:" || it.key() == "Fill Depth");
     bool visible = isCommon || (isModifier == showModifiers);
     it.value()->setVisible(visible);
   }
@@ -3327,7 +3329,8 @@ void BrushToolOptionsBox::filterControls() {
         (it.key() == "Lock Alpha" || it.key() == "Pressure" ||
                      it.key() == "Preset:" || it.key() == "Grid" ||
                      it.key() == "Smooth:" || it.key() == "Paint Behind" ||
-                     it.key() == "Auto Fill" || it.key() == "Fill Style:");
+                     it.key() == "Auto Fill" || it.key() == "Fill Style:" ||
+                     it.key() == "Fill Depth");
     bool visible = isCommon || (isModifier == showModifiers);
     if (QWidget *widget = dynamic_cast<QWidget *>(it.value()))
       widget->setVisible(visible);
@@ -3458,6 +3461,8 @@ void BrushToolOptionsBox::doRebuildAutoFillCombo() {
     rasterBrush->rebuildAutoFillStyleCombo(m_pltHandle->getPalette());
   else if (auto *vectorBrush = dynamic_cast<ToonzVectorBrushTool *>(m_tool))
     vectorBrush->rebuildAutoFillStyleCombo(m_pltHandle->getPalette());
+  else if (auto *fullColorBrush = dynamic_cast<FullColorBrushTool *>(m_tool))
+    fullColorBrush->rebuildAutoFillStyleCombo(m_pltHandle->getPalette());
   else
     return;
   m_autoFillStyleCombo->loadEntries();
