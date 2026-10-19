@@ -193,6 +193,7 @@ protected:
   TBoolProperty m_pencil;
   TBoolProperty m_autoFill;
   TEnumProperty m_autoFillStyle;  // "Next Style (N+1)" | "Current Style" | "palette_N"
+  TIntProperty m_autoCloseGap;  // px; openings closed by Auto Fill
   TBoolProperty m_mypaintPressure;
   TDoubleProperty m_modifierSize;
   TBoolProperty m_modifierLockAlpha;

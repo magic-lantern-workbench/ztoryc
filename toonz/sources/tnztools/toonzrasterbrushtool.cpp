@@ -40,6 +40,9 @@
 #include "tvectorimage.h"
 #include "tenv.h"
 #include "tregion.h"
+#include "ztoryautomattecore.h"  // exteriorWithGaps (Auto Close Gap)
+
+#include <map>
 #include "tinbetween.h"
 #include "tsystem.h"
 
@@ -75,6 +78,8 @@ TEnv::DoubleVar BrushSmooth("InknpaintBrushSmooth", 0);
 TEnv::IntVar BrushDrawOrder("InknpaintBrushDrawOrder", 0);
 TEnv::IntVar RasterBrushPencilMode("InknpaintRasterBrushPencilMode", 0);
 TEnv::DoubleVar RasterBrushHardness("RasterBrushHardness", 100);
+// Ztoryc: Auto Fill closes openings up to about twice this, in pixels.
+TEnv::IntVar RasterBrushAutoCloseGap("RasterBrushAutoCloseGap", 4);
 TEnv::DoubleVar RasterBrushModifierSize("RasterBrushModifierSize", 0);
 TEnv::StringVar RasterBrushPreset("RasterBrushPreset", "<custom>");
 TEnv::IntVar BrushLockAlpha("InknpaintBrushLockAlpha", 0);
@@ -971,6 +976,7 @@ ToonzRasterBrushTool::ToonzRasterBrushTool(std::string name, int targetType)
     , m_pencil("Pencil", false)
     , m_autoFill("Auto Fill", false)
     , m_autoFillStyle("Fill Style:")
+    , m_autoCloseGap("Auto Close Gap", 0, 30, 4)
     , m_mypaintPressure("ModifierPressure", true)
     , m_modifierSize("ModifierSize", -3, 3, 0, true)
     , m_cmRasterBrush(0)
@@ -1011,6 +1017,7 @@ ToonzRasterBrushTool::ToonzRasterBrushTool(std::string name, int targetType)
   m_prop[0].bind(m_pencil);
   m_prop[0].bind(m_autoFill);
   m_prop[0].bind(m_autoFillStyle);
+  m_prop[0].bind(m_autoCloseGap);
   m_prop[0].bind(m_mypaintPressure);
   m_prop[0].bind(m_mypaintTilt);
   m_prop[0].bind(m_snapGrid);
@@ -1018,6 +1025,7 @@ ToonzRasterBrushTool::ToonzRasterBrushTool(std::string name, int targetType)
 
   m_pencil.setId("PencilMode");
   m_autoFillStyle.setId("AutoFillStyle");
+  m_autoCloseGap.setId("AutoCloseGap");
   m_drawOrder.setId("DrawOrder");
   m_snapGrid.setId("SnapGrid");
   m_preset.setId("BrushPreset");
@@ -1230,6 +1238,7 @@ void ToonzRasterBrushTool::updateTranslation() {
   m_autoFill.setQStringName(tr("Auto Fill"));
   m_autoFill.setId("AutoFill");
   m_autoFillStyle.setQStringName(tr("Fill Style:"));
+  m_autoCloseGap.setQStringName(tr("Auto Close Gap"));
   m_autoFillStyle.setItemUIName(L"Next Style (N+1)", tr("Next Style (N+1)"));
   m_autoFillStyle.setItemUIName(L"Current Style",    tr("Current Style"));
   m_modifierLockAlpha.setQStringName(tr("Lock Alpha"));
@@ -2580,33 +2589,53 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
           sb = m_strokeRect;
         else if (!m_strokeRect.isEmpty())
           sb = sb + m_strokeRect;
-        sb = sb.enlarge(1);
+        // Room for the gap: the outside must reach round the drawing.
+        const int gap = std::max(0, (int)m_autoCloseGap.getValue());
+        sb = sb.enlarge(1 + gap + 2);
         const int x0 = std::max(sb.x0, 0), y0 = std::max(sb.y0, 0);
         const int x1 = std::min(sb.x1, lx-1), y1 = std::min(sb.y1, ly-1);
         const int sw = x1 - x0 + 1, sh = y1 - y0 + 1;
 
         if (sw > 0 && sh > 0) {
-          // exterior sub-image: 1 if pixel reachable from savebox border without ink.
-          std::vector<uint8_t> exterior(sw * sh, 0);
+          // exterior sub-image: 1 if the pixel is outside — reachable from the
+          // scan border without ink and, with «Auto Close Gap», without
+          // passing an opening narrower than about 2 x gap (Franco,
+          // 2026-10-19, as on vectors). gap 0 = the plain flood of before.
+          std::vector<uint8_t> lineMask(sw * sh, 0);
+          for (int ry = 0; ry < sh; ry++) {
+            const TPixelCM32 *row = ras->pixels(y0 + ry) + x0;
+            for (int rx = 0; rx < sw; rx++)
+              lineMask[ry * sw + rx] = row[rx].getInk() != 0;
+          }
+          std::vector<uint8_t> exterior =
+              ZtoryAutoMatteCore::exteriorWithGaps(lineMask, sw, sh, gap);
 
-          std::vector<int> bfsQ;
-          bfsQ.reserve(2 * (sw + sh));
-          auto enqueue = [&](int rx, int ry) {
-            if (rx < 0 || ry < 0 || rx >= sw || ry >= sh) return;
-            int sidx = ry * sw + rx;
-            if (exterior[sidx]) return;
-            if (ras->pixels(y0 + ry)[x0 + rx].getInk() != 0) return;
-            exterior[sidx] = 1;
-            bfsQ.push_back(sidx);
-          };
-          for (int rx = 0; rx < sw; rx++) { enqueue(rx, 0); enqueue(rx, sh-1); }
-          for (int ry = 1; ry < sh-1; ry++) { enqueue(0, ry); enqueue(sw-1, ry); }
-
-          for (int qi = 0; qi < (int)bfsQ.size(); qi++) {
-            int sidx = bfsQ[qi];
-            int rx = sidx % sw, ry = sidx / sw;
-            enqueue(rx-1, ry); enqueue(rx+1, ry);
-            enqueue(rx, ry-1); enqueue(rx, ry+1);
+          // The ink THIS stroke laid: ink now where the undo tiles (the
+          // raster before the stroke) had none. A region counts as closed by
+          // the stroke when it borders this ink — not merely ink inside the
+          // stroke's box, which also took old details lying in that box.
+          std::vector<uint8_t> newInk(sw * sh, 0);
+          bool haveNewInk = false;
+          if (m_tileSet) {
+            for (int t = 0; t < m_tileSet->getTileCount(); t++) {
+              const TTileSetCM32::Tile *tile = m_tileSet->getTile(t);
+              if (!tile) continue;
+              TRasterCM32P before;
+              tile->getRaster(before);
+              if (!before) continue;
+              const TRect tb = tile->m_rasterBounds;
+              for (int ay = std::max(tb.y0, y0); ay <= std::min(tb.y1, y1); ay++)
+                for (int ax = std::max(tb.x0, x0); ax <= std::min(tb.x1, x1);
+                     ax++) {
+                  const TPixelCM32 &was = before->pixels(ay - tb.y0)[ax - tb.x0];
+                  const TPixelCM32 &now = ras->pixels(ay)[ax];
+                  if (now.getInk() != 0 && now.getTone() < 255 &&
+                      (was.getInk() == 0 || was.getTone() == 255)) {
+                    newInk[(ay - y0) * sw + (ax - x0)] = 1;
+                    haveNewInk = true;
+                  }
+                }
+            }
           }
 
           // Determine fill style from tool option.
@@ -2672,45 +2701,72 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
             if (rx < 0 || ry < 0 || rx >= sw || ry >= sh) return false;
             return ras->pixels(y0 + ry)[x0 + rx].getInk() != 0;
           };
+          // Pass 1: the enclosed pieces — 4-connected pixels without ink and
+          // of ONE paint, not outside. A piece counts when it borders the
+          // stroke's ink. Empty pieces are filled; of the painted ones, per
+          // colour the LARGEST is the shape and keeps its colour, the smaller
+          // ones (a curl, a band of a collar) take the fill colour — as on
+          // vectors (Franco, 2026-10-19).
+          auto touchesNew = [&](int rx, int ry) -> bool {
+            if (rx < 0 || ry < 0 || rx >= sw || ry >= sh) return false;
+            if (haveNewInk) return newInk[ry * sw + rx] != 0;
+            return inkAt(rx, ry) && inStroke(x0 + rx, y0 + ry);
+          };
+          struct Piece { int paint; std::vector<int> pixels; };
+          std::vector<Piece> pieces;
           std::vector<uint8_t> visited(sw * sh, 0);
           std::vector<int> toFill;   // pixel indices to paint
-          std::vector<int> region, stack;
+          std::vector<int> stack;
           for (int sry = 0; sry < sh; sry++) {
             TPixelCM32 *srow = ras->pixels(y0 + sry) + x0;
             for (int srx = 0; srx < sw; srx++) {
               int seed = sry * sw + srx;
-              // Seeds are EMPTY pixels only. Line pixels used to start their
-              // own one-pixel "regions", so every line pixel of the stroke got
-              // the fill colour, outer edge included: that colour peeking out
-              // of the antialiased edge was the rim. Which line pixels get
-              // the fill is decided by pass 2 below.
-              if (visited[seed] || exterior[seed] ||
-                  srow[srx].getPaint() != 0 || srow[srx].getInk() != 0)
+              // Seeds are pixels without ink only: line pixels used to start
+              // one-pixel "regions" and the fill colour peeked out of the
+              // antialiased edge (the rim). Pass 2 decides the line pixels.
+              if (visited[seed] || exterior[seed] || srow[srx].getInk() != 0)
                 continue;
-              region.clear(); stack.clear();
+              const int paint = srow[srx].getPaint();
+              if (paint == fillStyleId) { visited[seed] = 1; continue; }
+              Piece piece{paint, {}};
+              stack.clear();
               stack.push_back(seed); visited[seed] = 1;
               bool touchesStroke = false;
               while (!stack.empty()) {
                 int si = stack.back(); stack.pop_back();
                 int rx = si % sw, ry = si / sw;
-                region.push_back(si);
+                piece.pixels.push_back(si);
                 const int nx[4] = {rx-1, rx+1, rx, rx};
                 const int ny[4] = {ry, ry, ry-1, ry+1};
                 for (int k = 0; k < 4; k++) {
+                  if (nx[k] < 0 || ny[k] < 0 || nx[k] >= sw || ny[k] >= sh)
+                    continue;
                   if (inkAt(nx[k], ny[k])) {
-                    if (inStroke(x0 + nx[k], y0 + ny[k])) touchesStroke = true;
-                  } else if (nx[k] >= 0 && ny[k] >= 0 && nx[k] < sw && ny[k] < sh) {
-                    int ni = ny[k] * sw + nx[k];
-                    if (!visited[ni] && !exterior[ni] &&
-                        ras->pixels(y0 + ny[k])[x0 + nx[k]].getPaint() == 0) {
-                      visited[ni] = 1; stack.push_back(ni);
-                    }
+                    if (touchesNew(nx[k], ny[k])) touchesStroke = true;
+                    continue;
+                  }
+                  int ni = ny[k] * sw + nx[k];
+                  if (!visited[ni] && !exterior[ni] &&
+                      ras->pixels(y0 + ny[k])[x0 + nx[k]].getPaint() == paint) {
+                    visited[ni] = 1; stack.push_back(ni);
                   }
                 }
               }
-              if (touchesStroke)
-                toFill.insert(toFill.end(), region.begin(), region.end());
+              if (touchesStroke) pieces.push_back(std::move(piece));
             }
+          }
+          std::map<int, size_t> largestOf;  // paint -> index of its largest piece
+          for (size_t i = 0; i < pieces.size(); i++) {
+            if (pieces[i].paint == 0) continue;
+            auto it = largestOf.find(pieces[i].paint);
+            if (it == largestOf.end() ||
+                pieces[i].pixels.size() > pieces[it->second].pixels.size())
+              largestOf[pieces[i].paint] = i;
+          }
+          for (size_t i = 0; i < pieces.size(); i++) {
+            if (pieces[i].paint != 0 && largestOf[pieces[i].paint] == i) continue;
+            toFill.insert(toFill.end(), pieces[i].pixels.begin(),
+                          pieces[i].pixels.end());
           }
 
           // Pass 2: give the fill colour also to the antialiased line pixels
@@ -3034,6 +3090,7 @@ bool ToonzRasterBrushTool::onPropertyChanged(std::string propertyName) {
   BrushDrawOrder                  = m_drawOrder.getIndex();
   RasterBrushPencilMode           = m_pencil.getValue();
   RasterBrushHardness             = m_hardness.getValue();
+  RasterBrushAutoCloseGap         = m_autoCloseGap.getValue();
   RasterBrushModifierSize         = m_modifierSize.getValue();
   BrushLockAlpha                  = m_modifierLockAlpha.getValue();
   BrushSnapGrid                   = m_snapGrid.getValue();
@@ -3214,6 +3271,7 @@ void ToonzRasterBrushTool::loadLastBrush() {
   m_drawOrder.setIndex(BrushDrawOrder);
   m_pencil.setValue(RasterBrushPencilMode ? 1 : 0);
   m_hardness.setValue(RasterBrushHardness);
+  m_autoCloseGap.setValue(RasterBrushAutoCloseGap);
   m_smooth.setValue(BrushSmooth);
   m_modifierSize.setValue(RasterBrushModifierSize);
   m_modifierLockAlpha.setValue(BrushLockAlpha ? 1 : 0);

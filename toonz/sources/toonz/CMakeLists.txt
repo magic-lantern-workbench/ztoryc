@@ -118,7 +118,6 @@ set(MOC_HEADERS
     ztoryassetpreview.h
     ztorymouthlibrary.h
     ztoryautomatte.h
-    ztoryautomattecore.h
     ztoriglibrary.h
     ztorigclips.h
     ztorylipsync.h

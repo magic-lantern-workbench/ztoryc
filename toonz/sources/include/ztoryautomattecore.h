@@ -15,7 +15,8 @@
 // the drawing (between arm and body, say) are filled too, as Storyboard Pro's
 // Generate Auto-Matte does.  Openings wider than 2 x gap let the outside in.
 //
-// Header-only and free of Toonz types, so it can be tested offline.
+// Header-only and free of Toonz types, so it can be tested offline. Also the
+// gap closing of the raster brushes' Auto Fill (exteriorWithGaps below).
 
 #include <cstdint>
 #include <vector>
@@ -94,6 +95,18 @@ inline std::vector<uint8_t> computeMatte(const std::vector<uint8_t> &solid,
   chamferDistance(outside, w, h, distOut);
   for (size_t i = 0; i < matte.size(); i++)
     matte[i] = (solid[i] || distOut[i] > limit) ? 1 : 0;
+  return matte;
+}
+
+// Auto Fill with «Auto Close Gap» (raster brushes): 1 where a pixel is
+// OUTSIDE — reachable from the border of the scanned area without passing an
+// opening narrower than about 2 x gap; the outside then grows back up to the
+// line, so a closed shape keeps all its pixels.  gap 0 = the plain flood from
+// the border (stock behaviour).
+inline std::vector<uint8_t> exteriorWithGaps(const std::vector<uint8_t> &line,
+                                             int w, int h, int gap) {
+  std::vector<uint8_t> matte = computeMatte(line, w, h, gap);
+  for (auto &v : matte) v = !v;  // not matte = outside
   return matte;
 }
 
