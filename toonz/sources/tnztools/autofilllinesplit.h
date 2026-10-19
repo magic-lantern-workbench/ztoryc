@@ -28,6 +28,7 @@
 // this exact code with a mock raster.
 
 #include <cstdint>
+#include <algorithm>
 #include <vector>
 
 namespace AutoFillLineSplit {
@@ -38,9 +39,15 @@ namespace AutoFillLineSplit {
 // toFill      : sub-rectangle indices (y * sw + x) of the EMPTY pixels that
 //               are going to be filled; on return the line pixels on the
 //               inner side of the line (and still unpainted) are appended.
+// repaint     : paints a line pixel may already have and still be given the
+//               fill: the old colours of the pieces being recoloured (a curl
+//               cut off a coloured head). Without it their line pixels kept
+//               the old colour, a thin rim along the line (Franco,
+//               2026-10-19). Empty = only unpainted line pixels, as before.
 template <class RasterP>
 void addInnerLinePixels(const RasterP &ras, int x0, int y0, int sw, int sh,
-                        std::vector<int> &toFill) {
+                        std::vector<int> &toFill,
+                        const std::vector<int> &repaint = {}) {
   const int n = sw * sh;
   if (n <= 0 || toFill.empty()) return;
 
@@ -89,7 +96,10 @@ void addInnerLinePixels(const RasterP &ras, int x0, int y0, int sw, int sh,
 
   for (int i = 0; i < n; i++) {
     if (owner[i] != Filled || !isLine(i)) continue;
-    if (ras->pixels(y0 + i / sw)[x0 + i % sw].getPaint() != 0) continue;
+    const int paint = ras->pixels(y0 + i / sw)[x0 + i % sw].getPaint();
+    if (paint != 0 &&
+        std::find(repaint.begin(), repaint.end(), paint) == repaint.end())
+      continue;
     toFill.push_back(i);
   }
 }

@@ -40,6 +40,8 @@ typedef Ras *TRasterCM32P;
 struct TPalette {}; struct TTileSaverCM32 { void save(TRect) {} };
 
 #include "stock_fill.inc"
+#include <map>
+#include "ztoryautomattecore.h"  // the gap closing pass 1 uses
 #include "ztoryc_pass1.inc"
 #include "../../toonz/sources/tnztools/autofilllinesplit.h"
 
