@@ -86,6 +86,8 @@ TEnv::IntVar V_VectorBrushSnapSensitivity("VectorBrushSnapSensitivity", 0);
 TEnv::IntVar V_VectorBrushDrawBehind("VectorBrushDrawBehind", 0);
 TEnv::IntVar V_VectorBrushAutoClose("VectorBrushAutoClose", 0);
 TEnv::IntVar V_VectorBrushAutoFill("VectorBrushAutoFill", 0);
+TEnv::DoubleVar V_VectorBrushAutoCloseGap("VectorBrushAutoCloseGap",
+                                          c_ztorycAutocloseTolerance);
 TEnv::IntVar V_VectorBrushAutoGroup("VectorBrushAutoGroup", 0);
 TEnv::StringVar V_VectorBrushPreset("VectorBrushPreset", "<custom>");
 TEnv::IntVar V_VectorBrushSnapGrid("VectorBrushSnapGrid", 0);
@@ -378,14 +380,15 @@ static void findMaxCurvPoints(TStroke *stroke, const float &angoloLim,
 // inside a filled shape keep its colour (their areas are born filled).
 // Returns what was painted, for the redo.
 static std::vector<TFilledRegionInf> fillAreasClosedBy(
-    const TVectorImageP &vi, const std::set<int> &strokeIds, int styleId) {
+    const TVectorImageP &vi, const std::set<int> &strokeIds, int styleId,
+    double gap) {
   std::vector<TFilledRegionInf> painted;
   if (!vi || strokeIds.empty() || styleId <= 0) return painted;
-  // A drawing still at Tahoma's tolerance gets Ztoryc's, as with the Fill
-  // tool: at 1.15 strokes that only touch close nothing (tvectorimage.h).
-  if (areAlmostEqual(vi->getAutocloseTolerance(), c_newAutocloseTolerance,
-                     0.001)) {
-    vi->setAutocloseTolerance(c_ztorycAutocloseTolerance);
+  // The brush's «Auto Close Gap» becomes the drawing's, as the Fill tool's
+  // slider does: at Tahoma's 1.15 strokes that only touch close nothing
+  // (tvectorimage.h).
+  if (gap > 0 && !areAlmostEqual(vi->getAutocloseTolerance(), gap, 0.001)) {
+    vi->setAutocloseTolerance(gap);
     vi->forceRegionsRecompute();
   }
   vi->findRegions();
@@ -451,10 +454,14 @@ static void addStroke(TTool::Application *application, const TVectorImageP &vi,
   // stock behaviour (the stroke's own style) when the brush is not the
   // current tool, e.g. strokes added by another caller.
   int fillStyleId = -1;
+  double fillGap  = c_ztorycAutocloseTolerance;
   if (autoFill) {
     auto *brush = dynamic_cast<ToonzVectorBrushTool *>(
         application->getCurrentTool()->getTool());
-    if (brush) fillStyleId = brush->getAutoFillStyleId(stroke->getStyle());
+    if (brush) {
+      fillStyleId = brush->getAutoFillStyleId(stroke->getStyle());
+      fillGap     = brush->getAutoCloseGap();
+    }
   }
   std::set<int> addedIds;  // the strokes this call adds
   UndoPencil *lastUndo = nullptr;
@@ -485,7 +492,7 @@ static void addStroke(TTool::Application *application, const TVectorImageP &vi,
     if (autoFill && !autoGroup && lastUndo) {
       int fillStyle = fillStyleId >= 0 ? fillStyleId : stroke->getStyle();
       lastUndo->setAutoFilledRegions(
-          fillAreasClosedBy(vi, addedIds, fillStyle));
+          fillAreasClosedBy(vi, addedIds, fillStyle, fillGap));
     }
     TUndoManager::manager()->endBlock();
   } else {
@@ -502,7 +509,7 @@ static void addStroke(TTool::Application *application, const TVectorImageP &vi,
     if (autoFill && !autoGroup) {
       int fillStyle = fillStyleId >= 0 ? fillStyleId : stroke->getStyle();
       lastUndo->setAutoFilledRegions(
-          fillAreasClosedBy(vi, addedIds, fillStyle));
+          fillAreasClosedBy(vi, addedIds, fillStyle, fillGap));
     }
     TUndoManager::manager()->add(lastUndo);
   }
@@ -645,6 +652,7 @@ ToonzVectorBrushTool::ToonzVectorBrushTool(std::string name, int targetType)
     , m_autoGroup("Auto Group", false)
     , m_autoFill("Auto Fill", false)
     , m_autoFillStyle("Fill Style:")
+    , m_autoCloseGap("Auto Close Gap", 0.01, 30.0, c_ztorycAutocloseTolerance)
     , m_targetType(targetType)
     , m_workingFrameId(TFrameId())
     , m_snapGrid("Grid", false)
@@ -667,6 +675,7 @@ ToonzVectorBrushTool::ToonzVectorBrushTool(std::string name, int targetType)
   m_prop[0].bind(m_autoGroup);
   m_prop[0].bind(m_autoFill);
   m_prop[0].bind(m_autoFillStyle);
+  m_prop[0].bind(m_autoCloseGap);
   m_prop[0].bind(m_sendToBack);
   m_prop[0].bind(m_frameRange);
   m_prop[0].bind(m_snap);
@@ -682,6 +691,7 @@ ToonzVectorBrushTool::ToonzVectorBrushTool(std::string name, int targetType)
   m_autoGroup.setId("AutoGroup");
   m_autoFill.setId("Autofill");
   m_autoFillStyle.setId("AutoFillStyle");
+  m_autoCloseGap.setId("AutoCloseGap");
   m_sendToBack.setId("DrawUnder");
   m_breakAngles.setId("BreakSharpAngles");
   m_frameRange.setId("FrameRange");
@@ -769,6 +779,7 @@ void ToonzVectorBrushTool::updateTranslation() {
   m_autoClose.setQStringName(tr("Auto Close"));
   m_autoFill.setQStringName(tr("Auto Fill"));
   m_autoFillStyle.setQStringName(tr("Fill Style:"));
+  m_autoCloseGap.setQStringName(tr("Auto Close Gap"));
   m_autoGroup.setQStringName(tr("Auto Group"));
   m_sizeStylusProperty.setQStringName(tr("Stylus Settings - Size"));
 
@@ -2369,6 +2380,7 @@ bool ToonzVectorBrushTool::onPropertyChanged(std::string propertyName) {
   V_VectorBrushAutoClose       = m_autoClose.getValue();
   V_VectorBrushAutoGroup       = m_autoGroup.getValue();
   V_VectorBrushAutoFill        = m_autoFill.getValue();
+  V_VectorBrushAutoCloseGap    = m_autoCloseGap.getValue();
   V_VectorBrushSnap            = m_snap.getValue();
   int snapSensitivityIndex     = m_snapSensitivity.getIndex();
   V_VectorBrushSnapSensitivity = snapSensitivityIndex;
@@ -2534,6 +2546,7 @@ void ToonzVectorBrushTool::loadLastBrush() {
   m_autoGroup.setValue(V_VectorBrushAutoGroup);
   m_autoClose.setValue(V_VectorBrushAutoClose);
   m_autoFill.setValue(V_VectorBrushAutoFill);
+  m_autoCloseGap.setValue(V_VectorBrushAutoCloseGap);
   m_snapGrid.setValue(V_VectorBrushSnapGrid);
 
   // Recalculate based on prior values
