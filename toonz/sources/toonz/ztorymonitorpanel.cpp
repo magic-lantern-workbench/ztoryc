@@ -153,7 +153,8 @@ ZtoryMonitorPanel::ZtoryMonitorPanel(QWidget *parent)
   // gia' allineati: makeTbBtn e' identico a quello dell'Animatic.
   QToolButton *fitAllBtn = makeTbBtn("ztoryc_fit_all",
                                      tr("Fit All — zoom to show the entire "
-                                        "animatic (Ctrl+0)"));
+                                        "animatic (%1)")
+                                         .arg(trModKey("Ctrl+0")));
   tbLay->addWidget(fitAllBtn);
   tbLay->addSpacing(4);
 
@@ -241,9 +242,9 @@ ZtoryMonitorPanel::ZtoryMonitorPanel(QWidget *parent)
   tbLay->addWidget(autoMatchBtn);
   tbLay->addSpacing(8);
 
-  QToolButton *copyBtn  = makeTbBtn("ztoryc_copy",  tr("Copy selected shots  (Ctrl+C)"));
-  QToolButton *cloneBtn = makeTbBtn("ztoryc_clone", tr("Clone selected shots  (Ctrl+D)"));
-  QToolButton *pasteBtn = makeTbBtn("ztoryc_paste", tr("Paste shots  (Ctrl+V)"));
+  QToolButton *copyBtn  = makeTbBtn("ztoryc_copy",  tr("Copy selected shots  (%1)").arg(trModKey("Ctrl+C")));
+  QToolButton *cloneBtn = makeTbBtn("ztoryc_clone", tr("Clone selected shots  (%1)").arg(trModKey("Ctrl+D")));
+  QToolButton *pasteBtn = makeTbBtn("ztoryc_paste", tr("Paste shots  (%1)").arg(trModKey("Ctrl+V")));
   tbLay->addWidget(copyBtn);
   tbLay->addWidget(cloneBtn);
   tbLay->addWidget(pasteBtn);
@@ -547,6 +548,11 @@ void ZtoryMonitorPanel::onShotClicked(int col) {
 // Double-click: open the shot sub-scene in the main application context.
 
 void ZtoryMonitorPanel::onShotDoubleClicked(int col) {
+  // On the shot you are inside: back to the animatic (ztorymodel.h).
+  if (ztoryIsInsideShot(col)) {
+    ztoryExitShot();
+    return;
+  }
   TApp *app = TApp::instance();
   ToonzScene *scene = app->getCurrentScene()->getScene();
   if (!scene) return;

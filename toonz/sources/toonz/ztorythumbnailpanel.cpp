@@ -298,9 +298,10 @@ ZtoryThumbnailPanel::ZtoryThumbnailPanel(QWidget *parent) : TPanel(parent) {
   xformBtn->setIcon(dashedRectIcon());
   xformBtn->setCheckable(true);
   xformBtn->setToolTip(
-      tr("Rectangular selection: move it, copy (Cmd/Ctrl+C, V), scale "
+      tr("Rectangular selection: move it, copy (%1, %2), scale "
          "(corners)\nor rotate (top handle). Enter applies, Esc cancels, "
-         "Del/Backspace erases."));
+         "Del/Backspace erases.")
+          .arg(trModKey("Ctrl+C"), trModKey("Ctrl+V")));
   m_brushBarLay->addWidget(xformBtn);
 
   auto *lassoBtn = new QToolButton(bar);

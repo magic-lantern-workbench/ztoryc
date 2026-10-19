@@ -766,8 +766,9 @@ void ZtoryAnimaticRuler::paintEvent(QPaintEvent *) {
   // thins the labels out progressively as we zoom in on timecode.
   int lastVisibleFrame = (m_ppf > 0) ? (int)(w / m_ppf) : 0;
   QFontMetrics fm(p.font());
+  // 64, not 40: at 40 the numbers ran into each other (UI audit, 2026-10-19).
   int kMinLabelPx =
-      qMax(40, fm.horizontalAdvance(fmtFrame(lastVisibleFrame)) + 14);
+      qMax(64, fm.horizontalAdvance(fmtFrame(lastVisibleFrame)) + 14);
   int labelEvery = kNice[0];
   for (int iv : kNice) {
     if ((int)(iv * m_ppf) >= kMinLabelPx) { labelEvery = iv; break; }
@@ -2734,14 +2735,23 @@ void ZtoryAnimaticTrack::paintEvent(QPaintEvent *) {
       p.drawRect(x + 2, 3, w - 4, h - 2);
     }
 
-    // Numero shot — to the right of the thumbnail if present
+    // Numero shot — to the right of the thumbnail when it fits whole;
+    // otherwise whole over the thumbnail, top-left on a dark box. Squeezed
+    // beside the picture it was cut to «sh0» (UI audit, 2026-10-19): the
+    // name wins over the thumbnail.
     p.setPen(ZtoryTheme::g(255));
+    const int nameW = p.fontMetrics().horizontalAdvance(b.shotNumber);
     int textX = x + 4 + (thumbW > 0 ? thumbW + 2 : 0);
     int textW = w - 8 - (thumbW > 0 ? thumbW + 2 : 0);
-    if (textW > 10)
+    if (textW >= nameW)
       p.drawText(textX, 2, textW, h, Qt::AlignVCenter | Qt::AlignLeft, b.shotNumber);
-    else
-      p.drawText(x + 4, 2, w - 8, h, Qt::AlignVCenter | Qt::AlignLeft, b.shotNumber);
+    else {
+      const int boxH = p.fontMetrics().height() + 2;
+      const int boxW = qMin(nameW + 6, w - 4);
+      p.fillRect(x + 2, 4, boxW, boxH, QColor(0, 0, 0, 150));
+      p.drawText(x + 5, 4, boxW - 4, boxH, Qt::AlignVCenter | Qt::AlignLeft,
+                 b.shotNumber);
+    }
 
     // Cross-dissolve transition indicator: overlapping triangles on the right edge
     if (b.transitionFrames > 0) {
@@ -4394,8 +4404,9 @@ ZtoryPanelNavigator::ZtoryPanelNavigator(QWidget *parent)
   newShotBtn->setText("+");
   newShotBtn->setFixedSize(28, 28);
   newShotBtn->setToolTip(
-      tr("New shot after this one (Shift+N).\nCreated right after the shot "
-         "you are editing; you enter it directly and keep drawing."));
+      tr("New shot after this one (%1).\nCreated right after the shot "
+         "you are editing; you enter it directly and keep drawing.")
+          .arg(trModKey("Shift+N")));
   newShotBtn->setStyleSheet(
       "QToolButton{background:transparent;color:#ccc;border:1px solid #555;border-radius:4px;font-size:15px;}"
       "QToolButton:hover{background:#555;}");
@@ -5674,7 +5685,7 @@ ZtoryAnimaticPanel::ZtoryAnimaticPanel(QWidget *parent, bool switchEnabled)
   m_fitAllBtn->setIcon(createQIcon("ztoryc_fit_all"));
   m_fitAllBtn->setIconSize(QSize(20, 20));
   m_fitAllBtn->setFixedSize(28, 28);
-  m_fitAllBtn->setToolTip(tr("Fit All — zoom to show the entire animatic (Ctrl+0)"));
+  m_fitAllBtn->setToolTip(tr("Fit All — zoom to show the entire animatic (%1)").arg(trModKey("Ctrl+0")));
   m_fitAllBtn->setStyleSheet(
       "QToolButton{background:transparent;border:none;border-radius:4px;}"
       "QToolButton:hover{background:#555;}");
@@ -5766,9 +5777,9 @@ ZtoryAnimaticPanel::ZtoryAnimaticPanel(QWidget *parent, bool switchEnabled)
                        "QToolButton:hover{background:#555;}");
     return btn;
   };
-  QToolButton *copyBtn  = makeAnimaticBtn2("ztoryc_copy",  tr("Copy selected shots  (Ctrl+C)"));
-  QToolButton *cloneBtn = makeAnimaticBtn2("ztoryc_clone", tr("Clone selected shots  (Ctrl+D)"));
-  QToolButton *pasteBtn = makeAnimaticBtn2("ztoryc_paste", tr("Paste shots  (Ctrl+V)"));
+  QToolButton *copyBtn  = makeAnimaticBtn2("ztoryc_copy",  tr("Copy selected shots  (%1)").arg(trModKey("Ctrl+C")));
+  QToolButton *cloneBtn = makeAnimaticBtn2("ztoryc_clone", tr("Clone selected shots  (%1)").arg(trModKey("Ctrl+D")));
+  QToolButton *pasteBtn = makeAnimaticBtn2("ztoryc_paste", tr("Paste shots  (%1)").arg(trModKey("Ctrl+V")));
   connect(copyBtn,  &QToolButton::clicked, this, &ZtoryAnimaticPanel::onCopyShots);
   connect(cloneBtn, &QToolButton::clicked, this, &ZtoryAnimaticPanel::onCloneShots);
   connect(pasteBtn, &QToolButton::clicked, this, &ZtoryAnimaticPanel::onPasteShots);
@@ -6976,6 +6987,11 @@ void ZtoryAnimaticPanel::onShotClicked(int col) {
 }
 
 void ZtoryAnimaticPanel::onShotDoubleClicked(int col) {
+  // On the shot you are inside: back to the animatic (ztorymodel.h).
+  if (ztoryIsInsideShot(col)) {
+    ztoryExitShot();
+    return;
+  }
   TApp *app = TApp::instance();
   ToonzScene *scene = app->getCurrentScene()->getScene();
   if (!scene) return;

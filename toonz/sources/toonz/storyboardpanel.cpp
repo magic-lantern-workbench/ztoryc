@@ -5772,6 +5772,12 @@ void StoryboardPanel::onAddShot() {
 
 void StoryboardPanel::onEditShot(int shotIdx) {
   if (shotIdx < 0 || shotIdx >= (int)m_shots.size()) return;
+  // On the shot you are inside: back to the animatic (ztorymodel.h).
+  if (m_shots[shotIdx].data &&
+      ztoryIsInsideShot(m_shots[shotIdx].data->xsheetColumn)) {
+    ztoryExitShot();
+    return;
+  }
 
   // Select this shot in the Board before entering edit mode
   selectShot(shotIdx);

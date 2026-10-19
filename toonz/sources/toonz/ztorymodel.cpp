@@ -213,7 +213,7 @@ ZtoryModel::ZtoryModel() : m_fps(24) {
               // Boards have read it as plain (ztorysceneclass.h).
               QTimer::singleShot(300, this, [] {
                 ZtorySceneClass::askIfUnclassified();
-                ZtorySceneClass::followPlainWorkflow();
+                ZtorySceneClass::followSceneWorkflow();
                 // A storyboard with drawing levels in its main xsheet
                 // (ztorymaingate.h): after the scene type question.
                 ZtoryMainGate::checkMainForDrawingLevels();
@@ -4237,3 +4237,21 @@ void ZtoryModel::activateShotForViewing(int col) {
   emit shotActivatedForViewing(col);
 }
 void ZtoryModel::requestReturnToViewer()         { emit returnToViewerMainRequested(); }
+
+bool ztoryIsInsideShot(int col) {
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  if (!scene || col < 0) return false;
+  ChildStack *cs = scene->getChildStack();
+  if (!cs || cs->getAncestorCount() == 0) return false;
+  AncestorNode *node = cs->getAncestorInfo(0);
+  return node && node->m_col == col;
+}
+
+bool ztoryExitShot() {
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  if (!scene || scene->getChildStack()->getAncestorCount() == 0) return false;
+  ZtoryModel::instance()->requestReturnToViewer();
+  while (scene->getChildStack()->getAncestorCount() > 0)
+    CommandManager::instance()->execute("MI_CloseChild");
+  return true;
+}

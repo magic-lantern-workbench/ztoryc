@@ -1405,3 +1405,12 @@ signals:
 private:
   bool m_inAutosave = false;
 };
+
+// Double-click on the shot you are inside = «← Back to Animatic» (Franco,
+// 2026-10-19: one gesture to go in and out; Esc was dropped, the tools use
+// it). ztoryIsInsideShot: the open sub-scene is the shot of main column col.
+// ztoryExitShot asks the viewer panel to return to the animatic, then closes
+// any sub-scene still open (a room without that panel); false when no shot
+// is open.
+bool ztoryIsInsideShot(int col);
+bool ztoryExitShot();
