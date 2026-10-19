@@ -2609,6 +2609,10 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
           }
           std::vector<uint8_t> exterior =
               ZtoryAutoMatteCore::exteriorWithGaps(lineMask, sw, sh, gap);
+          // Distance from the line, to tell a shape from the crumbs the gap
+          // closing makes along a rough line (pass 1).
+          std::vector<int> lineDist;
+          ZtoryAutoMatteCore::chamferDistance(lineMask, sw, sh, lineDist);
 
           // The ink THIS stroke laid: ink now where the undo tiles (the
           // raster before the stroke) had none. A region counts as closed by
@@ -2732,10 +2736,12 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
               stack.clear();
               stack.push_back(seed); visited[seed] = 1;
               bool touchesStroke = false;
+              bool hasCore       = false;  // a pixel farther than gap from line
               while (!stack.empty()) {
                 int si = stack.back(); stack.pop_back();
                 int rx = si % sw, ry = si / sw;
                 piece.pixels.push_back(si);
+                if (lineDist[si] > 3 * gap) hasCore = true;
                 const int nx[4] = {rx-1, rx+1, rx, rx};
                 const int ny[4] = {ry, ry, ry-1, ry+1};
                 for (int k = 0; k < 4; k++) {
@@ -2752,7 +2758,14 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
                   }
                 }
               }
-              if (touchesStroke) pieces.push_back(std::move(piece));
+              // Crumbs: the dents of a rough line and the holes inside it,
+              // which the gap closing turns into tiny enclosed pieces — all
+              // of them hug the line. Filled, they dirtied the stroke
+              // (Franco, 2026-10-19). A real shape is big, or reaches farther
+              // than the gap from its outline.
+              const int minArea = 20 + 4 * gap * gap;
+              const bool crumb  = !hasCore && (int)piece.pixels.size() < minArea;
+              if (touchesStroke && !crumb) pieces.push_back(std::move(piece));
             }
           }
           std::map<int, size_t> largestOf;  // paint -> index of its largest piece
