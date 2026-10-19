@@ -1297,21 +1297,28 @@ void SceneViewer::hideEvent(QHideEvent *) {
   }
 }
 
+// A viewer may have no rulers (Ztoryc's animatic viewer, the mini monitor):
+// the vector brush asks for the guides on every mouse move when snapping is
+// on, and a null ruler crashed it (2026-10-19). No rulers = no guides.
 int SceneViewer::getVGuideCount() {
-  if (viewGuideToggle.getStatus())
+  if (m_vRuler && viewGuideToggle.getStatus())
     return m_vRuler->getGuideCount();
   else
     return 0;
 }
 int SceneViewer::getHGuideCount() {
-  if (viewGuideToggle.getStatus())
+  if (m_hRuler && viewGuideToggle.getStatus())
     return m_hRuler->getGuideCount();
   else
     return 0;
 }
 
-double SceneViewer::getVGuide(int index) { return m_vRuler->getGuide(index); }
-double SceneViewer::getHGuide(int index) { return m_hRuler->getGuide(index); }
+double SceneViewer::getVGuide(int index) {
+  return m_vRuler ? m_vRuler->getGuide(index) : 0.0;
+}
+double SceneViewer::getHGuide(int index) {
+  return m_hRuler ? m_hRuler->getGuide(index) : 0.0;
+}
 
 //-----------------------------------------------------------------------------
 
