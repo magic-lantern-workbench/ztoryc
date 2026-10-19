@@ -1312,6 +1312,11 @@ void PanelWidget::dropEvent(QDropEvent *e) {
 }
 
 void PanelWidget::enterEvent(QEvent *) {
+  // On the shot you are inside the double-click takes you out (ztorymodel.h).
+  if (s_openShot >= 0 && m_shotIndex == s_openShot) {
+    TApp::instance()->showZtoryHint(tr("Double-click to return to the Animatic"));
+    return;
+  }
   TApp::instance()->showZtoryHint(
       tr("Double-click to open the shot and draw  |  "
          "Drag to reorder  |  Del to remove  --  "

@@ -3237,10 +3237,24 @@ void ZtoryAnimaticTrack::mouseMoveEvent(QMouseEvent *e) {
         if (edgeHasNext)
           hint += tr("  --  hold %1 and drag to add a cross-dissolve").arg(kMod);
         TApp::instance()->showZtoryHint(hint);
-      } else
+      } else {
+        // Over the shot you are inside the double-click takes you out
+        // (ztorymodel.h).
+        bool overOpenShot = false;
+        for (auto &b : m_blocks) {
+          const int bx0 = (int)(b.startFrameInMain * m_ppf);
+          const int bx1 = (int)((b.startFrameInMain + b.f1 - b.f0 + 1) * m_ppf);
+          if (mx >= bx0 && mx < bx1) {
+            overOpenShot = ztoryIsInsideShot(b.col);
+            break;
+          }
+        }
         TApp::instance()->showZtoryHint(
-            tr("Double-click to enter the shot and draw  --  "
-               "Timing and audio are edited here in the Animatic"));
+            overOpenShot
+                ? tr("Double-click to return to the Animatic")
+                : tr("Double-click to enter the shot and draw  --  "
+                     "Timing and audio are edited here in the Animatic"));
+      }
     }
   } else if (m_tool == TrimTool) {
     Qt::CursorShape cur = Qt::ArrowCursor;
