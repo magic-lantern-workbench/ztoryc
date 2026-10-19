@@ -1406,9 +1406,11 @@ private:
   bool m_inAutosave = false;
 };
 
-// Esc inside a shot = «← Back to Animatic» (UI audit, 2026-10-19): asks the
-// viewer panel to return to the animatic, then closes any sub-scene still
-// open (a room without the viewer panel). False when no shot is open, so the
-// caller lets Esc go on. Only for the Ztoryc panels: in the viewer Esc
-// belongs to the tools.
+// Double-click on the shot you are inside = «← Back to Animatic» (Franco,
+// 2026-10-19: one gesture to go in and out; Esc was dropped, the tools use
+// it). ztoryIsInsideShot: the open sub-scene is the shot of main column col.
+// ztoryExitShot asks the viewer panel to return to the animatic, then closes
+// any sub-scene still open (a room without that panel); false when no shot
+// is open.
+bool ztoryIsInsideShot(int col);
 bool ztoryExitShot();

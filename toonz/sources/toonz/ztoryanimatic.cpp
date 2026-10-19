@@ -6958,12 +6958,6 @@ void ZtoryAnimaticPanel::keyPressEvent(QKeyEvent *e) {
     return;
   }
 
-  // Esc inside a shot = «← Back to Animatic» (ztoryExitShot).
-  if (e->key() == Qt::Key_Escape && mod == Qt::NoModifier && ztoryExitShot()) {
-    e->accept();
-    return;
-  }
-
   TPanel::keyPressEvent(e);
 }
 
@@ -6993,6 +6987,11 @@ void ZtoryAnimaticPanel::onShotClicked(int col) {
 }
 
 void ZtoryAnimaticPanel::onShotDoubleClicked(int col) {
+  // On the shot you are inside: back to the animatic (ztorymodel.h).
+  if (ztoryIsInsideShot(col)) {
+    ztoryExitShot();
+    return;
+  }
   TApp *app = TApp::instance();
   ToonzScene *scene = app->getCurrentScene()->getScene();
   if (!scene) return;

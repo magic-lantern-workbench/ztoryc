@@ -548,6 +548,11 @@ void ZtoryMonitorPanel::onShotClicked(int col) {
 // Double-click: open the shot sub-scene in the main application context.
 
 void ZtoryMonitorPanel::onShotDoubleClicked(int col) {
+  // On the shot you are inside: back to the animatic (ztorymodel.h).
+  if (ztoryIsInsideShot(col)) {
+    ztoryExitShot();
+    return;
+  }
   TApp *app = TApp::instance();
   ToonzScene *scene = app->getCurrentScene()->getScene();
   if (!scene) return;

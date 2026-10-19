@@ -4238,6 +4238,15 @@ void ZtoryModel::activateShotForViewing(int col) {
 }
 void ZtoryModel::requestReturnToViewer()         { emit returnToViewerMainRequested(); }
 
+bool ztoryIsInsideShot(int col) {
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  if (!scene || col < 0) return false;
+  ChildStack *cs = scene->getChildStack();
+  if (!cs || cs->getAncestorCount() == 0) return false;
+  AncestorNode *node = cs->getAncestorInfo(0);
+  return node && node->m_col == col;
+}
+
 bool ztoryExitShot() {
   ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
   if (!scene || scene->getChildStack()->getAncestorCount() == 0) return false;
