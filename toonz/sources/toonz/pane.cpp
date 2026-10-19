@@ -716,7 +716,23 @@ void TPanelTitleBar::paintEvent(QPaintEvent *) {
 
     painter.setBrush(Qt::NoBrush);
     painter.setPen(isPanelActive ? m_activeTitleColor : m_titleColor);
-    painter.drawText(QPointF(8, 13), titleText);
+    // Ztoryc: a panel may ask for the END of its title in another colour
+    // (properties "ztoryTitleAccent" = that end, "ztoryTitleAccentColor"):
+    // the shot's name in «Animatic / sh030», yellow as in the xsheet's path.
+    const QString accent = dw->property("ztoryTitleAccent").toString();
+    if (!accent.isEmpty() && titleText == dw->windowTitle() &&
+        titleText.endsWith(accent)) {
+      const QString head = titleText.left(titleText.size() - accent.size());
+      // Steady colour: lighting up when the panel gets the focus, next to
+      // the yellow and above a real button, it read as clickable (Franco).
+      painter.setPen(m_titleColor);
+      painter.drawText(QPointF(8, 13), head);
+      painter.setPen(QColor(dw->property("ztoryTitleAccentColor").toString()));
+      painter.drawText(
+          QPointF(8 + painter.fontMetrics().horizontalAdvance(head), 13),
+          accent);
+    } else
+      painter.drawText(QPointF(8, 13), titleText);
   }
 
   if (dw->isFloating()) {

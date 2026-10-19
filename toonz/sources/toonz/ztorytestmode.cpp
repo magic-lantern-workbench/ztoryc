@@ -12,6 +12,16 @@
 #include "ztorysceneclass.h"
 #include "ztorymouthapply.h"
 #include "ztorymouthlibrary.h"
+#include "ztoryautomatte.h"
+#include "tvectorimage.h"
+#include "tstroke.h"
+#include "toonz/palettecontroller.h"
+#include "toonz/txshleveltypes.h"
+#include <cmath>
+#include "ttoonzimage.h"
+#include "tundo.h"
+#include "toonz/tstageobject.h"
+#include <QImage>
 #include "ztorymouthmap.h"
 #include "toonzqt/paletteviewergui.h"
 #include "toonz/palettecontroller.h"
@@ -279,6 +289,90 @@ static void ztoryArmSceneTest() {
         // Read it back: freed, MallocScribble makes this garbage or a crash.
         fprintf(stderr, "[ZTORY] scenetest: palettecycle default after: name='%s'\n",
                 def ? qPrintable(QString::fromStdWString(def->getPaletteName())) : "-");
+        fflush(stderr);
+        QTimer::singleShot(500, qApp, []() { _exit(0); });
+        return;
+      }
+      // «automatte:<col>:<gap>[:<png>]»: Generate Auto-Matte on a column of
+      // the current xsheet, with no dialog; the first matte frame is written
+      // as a PNG (matte white over the drawing's ink), then undo and redo
+      // must give back the same columns.  Nothing is saved.
+      if (action.startsWith("automatte:")) {
+        const QStringList p = action.mid(10).split(':');
+        TXsheet *xsh = TApp::instance()->getCurrentXsheet()->getXsheet();
+        int col = p.value(0).toInt();
+        const int gap = p.value(1, "6").toInt();
+        if (p.value(0) == "synth") {
+          // A vector level made here: a ring open on the right (an 8-unit
+          // gap) and an open stroke inside it, on two frames.
+          ToonzScene *sc = TApp::instance()->getCurrentScene()->getScene();
+          TXshSimpleLevel *vl =
+              sc->createNewLevel(PLI_XSHLEVEL, L"synthring")->getSimpleLevel();
+          vl->setPalette(TApp::instance()->getPaletteController()
+                             ->getDefaultPalette(PLI_XSHLEVEL)->clone());
+          col = xsh->getFirstFreeColumnIndex();
+          for (int fr = 1; fr <= 2; fr++) {
+            TVectorImageP vi = new TVectorImage();
+            std::vector<TThickPoint> ring, inner;
+            const double R = 100 + 20 * fr;
+            for (int i = 0; i <= 64; i++) {
+              const double a = 0.08 + i * (2 * M_PI - 0.16) / 64;
+              ring.push_back(TThickPoint(R * cos(a), R * sin(a), 2));
+            }
+            for (int i = 0; i <= 8; i++)
+              inner.push_back(TThickPoint(-40 + 10 * i, 20 * sin(i * 0.8), 2));
+            TStroke *s1 = TStroke::interpolate(ring, 0.5, false);
+            TStroke *s2 = TStroke::interpolate(inner, 0.5, false);
+            s1->setStyle(1), s2->setStyle(1);
+            vi->addStroke(s1), vi->addStroke(s2);
+            vi->setPalette(vl->getPalette());
+            vl->setFrame(TFrameId(fr), vi);
+            xsh->setCell(fr - 1, col, TXshCell(vl, TFrameId(fr)));
+          }
+        }
+        const int cols0 = xsh->getColumnCount();
+        const QString name = ZtoryAutoMatte::generateForTest(xsh, col, gap);
+        const int cols1 = xsh->getColumnCount();
+        TXshSimpleLevel *ml = nullptr, *src = nullptr;
+        int r0 = 0, r1 = -1, cells = 0;
+        xsh->getCellRange(col, r0, r1);
+        for (int r = r0; r <= r1; r++) {
+          const TXshCell a = xsh->getCell(r, col), b = xsh->getCell(r, col + 1);
+          if (!a.isEmpty() && a.m_level) ml = a.m_level->getSimpleLevel(), cells++;
+          if (!b.isEmpty() && b.m_level && !src) src = b.m_level->getSimpleLevel();
+        }
+        const TStageObjectId parent =
+            xsh->getStageObjectParent(TStageObjectId::ColumnId(col));
+        long long mattepx = 0;
+        if (ml) {
+          std::vector<TFrameId> fids;
+          ml->getFids(fids);
+          TToonzImageP ti;
+          if (!fids.empty()) ti = ml->getFrame(fids[0], false);
+          if (ti) {
+            TRasterCM32P ras = ti->getCMapped();
+            QImage img(ras->getLx(), ras->getLy(), QImage::Format_RGB32);
+            for (int y = 0; y < ras->getLy(); y++)
+              for (int x = 0; x < ras->getLx(); x++) {
+                const bool on = ras->pixels(y)[x].getPaint() != 0;
+                mattepx += on;
+                img.setPixel(x, ras->getLy() - 1 - y, on ? 0xffffffff : 0xff202020);
+              }
+            if (!p.value(2).isEmpty()) img.save(p.value(2));
+          }
+          fprintf(stderr, "[ZTORY] scenetest: automatte '%s' frames=%d size=%dx%d first-frame matte px=%lld\n",
+                  qPrintable(name), (int)fids.size(), ti ? ti->getSize().lx : 0,
+                  ti ? ti->getSize().ly : 0, mattepx);
+        }
+        fprintf(stderr, "[ZTORY] scenetest: automatte columns %d -> %d, matte cells %d, source below=%s, parent=%s\n",
+                cols0, cols1, cells,
+                src ? qPrintable(QString::fromStdWString(src->getName())) : "-",
+                parent.toString().c_str());
+        TUndoManager::manager()->undo();
+        const int cols2 = xsh->getColumnCount();
+        TUndoManager::manager()->redo();
+        fprintf(stderr, "[ZTORY] scenetest: automatte undo -> %d columns, redo -> %d columns\n",
+                cols2, xsh->getColumnCount());
         fflush(stderr);
         QTimer::singleShot(500, qApp, []() { _exit(0); });
         return;

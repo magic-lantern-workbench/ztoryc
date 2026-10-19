@@ -151,6 +151,9 @@ public:
   // time: emits no Qt signals) and resolve it to a style id for a stroke.
   void rebuildAutoFillStyleCombo(TPalette *pal);
   int getAutoFillStyleId(int lineStyleId) const;
+  // Auto Close Gap the brush's Auto Fill applies to the drawing (the same
+  // value as the Fill tool's slider, tvectorimage.h).
+  double getAutoCloseGap() const { return m_autoCloseGap.getValue(); }
   void checkStrokeSnapping(bool beforeMousePress, bool invertCheck);
   bool doGuidedAutoInbetween(TFrameId cFid, const TVectorImageP &cvi,
                              TStroke *cStroke, bool breakAngles,
@@ -170,6 +173,7 @@ protected:
   TBoolProperty m_sendToBack;
   TBoolProperty m_autoFill;
   TEnumProperty m_autoFillStyle;  // see ToolUtils::resolveAutoFillStyle
+  TDoubleProperty m_autoCloseGap;
   TBoolProperty m_autoClose;
   TBoolProperty m_autoGroup;
   TEnumProperty m_frameRange;

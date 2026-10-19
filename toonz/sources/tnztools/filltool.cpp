@@ -2387,7 +2387,7 @@ FillTool::FillTool(int targetType)
     , m_segment("Segment", false)
     , m_onionStyleId(0)
     , m_currCell(-1, -1)
-    , m_maxGapDistance("Auto Close Gap", 0.01, 10.0, 1.15)
+    , m_maxGapDistance("Auto Close Gap", 0.01, 30.0, c_ztorycAutocloseTolerance)
     , m_closeStyleIndex("Style Index:", L"current")  // W_ToolOptions_InkIndex
     , m_rasterGapDistance("Distance:", 1, 100, 10)
     , m_closeRasterGaps("Gaps:")
@@ -3187,7 +3187,7 @@ void FillTool::onActivate() {
       TImageP img = getImage(true);
       if (TVectorImageP vi = img) {
         double tolerance = vi->getAutocloseTolerance();
-        if (tolerance < 9.9) tolerance += 0.000001;
+        if (tolerance < 29.9) tolerance += 0.000001;
         m_maxGapDistance.setValue(tolerance);
       }
     }

@@ -4822,13 +4822,18 @@ HandToolOptionsBox::HandToolOptionsBox(QWidget *parent, TTool *tool,
   setFrameStyle(QFrame::StyledPanel);
   setFixedHeight(26);
 
+  // Ztoryc: the Hand tool's button fits the camera to the window. Only
+  // re-centring kept whatever zoom you had, and after panning around you
+  // usually want the whole frame back (Franco, 2026-10-19).
   QAction *resetPositionAction =
-      CommandManager::instance()->getAction(VB_PositionReset);
+      CommandManager::instance()->getAction(VB_ZoomFit);
 
-  QPushButton *button = new QPushButton(tr("Reset Position"));
-  int buttonWidth     = fontMetrics().horizontalAdvance(button->text()) + 20;
-  button->setFixedWidth(buttonWidth);
-  button->setFixedHeight(20);
+  // An icon, the same as the viewers' title bar and the timeline's Fit All.
+  QPushButton *button = new QPushButton();
+  button->setIcon(createQIcon("ztoryc_fit_all"));
+  button->setIconSize(QSize(16, 16));
+  button->setToolTip(tr("Fit to Window"));
+  button->setFixedSize(26, 20);
   button->addAction(resetPositionAction);
 
   connect(button, SIGNAL(clicked()), resetPositionAction, SLOT(trigger()));

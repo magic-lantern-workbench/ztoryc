@@ -863,11 +863,11 @@ void ZtoryAnimaticRuler::paintEvent(QPaintEvent *) {
   static const int kPH = 8;
   int px = kLabelW + (int)(m_currentFrame * m_ppf) + (int)(m_ppf / 2);
   p.setPen(Qt::NoPen);
-  p.setBrush(QColor(255, 100, 0));
+  p.setBrush(ZtoryTheme::playhead());
   QPolygon tri;
   tri << QPoint(px - 5, rulerY) << QPoint(px + 5, rulerY) << QPoint(px, rulerY + kPH);
   p.drawConvexPolygon(tri);
-  p.setPen(QPen(QColor(255, 100, 0), 1));
+  p.setPen(QPen(ZtoryTheme::playhead(), 1));
   p.drawLine(px, rulerY + kPH, px, h);
 }
 
@@ -1613,7 +1613,7 @@ void ZtoryAudioTrack::paintEvent(QPaintEvent *e) {
 
   // Playhead (always on top, not cached) — centered on frame like the ruler
   int phx = labelW + (int)(m_currentFrame * m_ppf) + (int)(m_ppf / 2);
-  p.setPen(QColor(255, 100, 0));
+  p.setPen(ZtoryTheme::playhead());
   p.drawLine(phx, 0, phx, trackH);
 
   // Focus indicator: bright border around the whole track when keyboard-focused
@@ -2686,12 +2686,8 @@ void ZtoryAnimaticTrack::paintEvent(QPaintEvent *) {
     // Sfondo shot
     QColor bg = selected ? QColor(80, 110, 160) : QColor(60, 90, 130);
     p.fillRect(x + 1, 2, w - 2, h, bg);
-    p.setPen(selected ? QColor(255, 160, 0) : QColor(100, 140, 200));
+    p.setPen(selected ? ZtoryTheme::selection() : QColor(100, 140, 200));
     p.drawRect(x + 1, 2, w - 2, h);
-    if (selected) {
-      p.setPen(QPen(QColor(255, 160, 0), 2));
-      p.drawRect(x + 2, 3, w - 4, h - 2);
-    }
     // Active shot (being edited): the inside-shot yellow, as the xsheet's
     // «Animatic / sh020». The timeline can be browsed anywhere while the
     // viewer shows this shot only, so the clip says which segment you are
@@ -2725,6 +2721,17 @@ void ZtoryAnimaticTrack::paintEvent(QPaintEvent *) {
       p.setOpacity(0.85);
       p.drawPixmap(x + 2, thumbY, thumbW, thumbH, b.thumbnail);
       p.setOpacity(1.0);
+    }
+
+    // Selection AFTER the thumbnail: drawn before it, the 2px border was
+    // covered on three sides and the selection barely showed (Franco,
+    // 2026-10-19). A blue wash over the picture plus a 3px frame.
+    if (selected) {
+      QColor wash = ZtoryTheme::selection();
+      wash.setAlpha(70);
+      p.fillRect(x + 1, 2, w - 2, h, wash);
+      p.setPen(QPen(ZtoryTheme::selection(), 3));
+      p.drawRect(x + 2, 3, w - 4, h - 2);
     }
 
     // Numero shot — to the right of the thumbnail if present
@@ -2800,7 +2807,7 @@ void ZtoryAnimaticTrack::paintEvent(QPaintEvent *) {
 
   // Playhead — centered on frame like the ruler
   int px = kLabelW + (int)(m_currentFrame * m_ppf) + (int)(m_ppf / 2);
-  p.setPen(QColor(255, 100, 0));
+  p.setPen(ZtoryTheme::playhead());
   p.drawLine(px, 0, px, height());
 
   // Razor hover preview — bright vertical line snapped to the frame boundary
@@ -3485,7 +3492,7 @@ void ZtoryStoryStrip::paintEvent(QPaintEvent *) {
       p.drawPixmap(r, e.thumb.scaled(r.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
 
     // Border
-    p.setPen(current ? QColor(255, 160, 0) : ZtoryTheme::g(80));
+    p.setPen(current ? ZtoryTheme::insideShot() : ZtoryTheme::g(80));
     p.drawRect(r);
 
     // Shot number overlay
@@ -3521,6 +3528,8 @@ void ZtoryStoryStrip::wheelEvent(QWheelEvent *e) {
 // ---- ZtoryAnimaticViewer (standalone) ----
 
 ZtoryAnimaticViewer::~ZtoryAnimaticViewer() {
+  if (ZtoryAnimaticController::instance()->viewer() == this)
+    ZtoryAnimaticController::instance()->setViewer(nullptr);
   // Stop FlipConsole's internal play timer/thread before Qt destroys child
   // widgets. QThread::~QThread calls abort() if the thread is still running,
   // which crashes the app on room switch or panel close while playing.
@@ -4063,7 +4072,43 @@ void ZtoryAnimaticViewer::onAudioToggleChanged() {
   m_continuousPlay = false;
 }
 
+void ZtoryAnimaticViewer::setEssential() {
+  m_essential = true;
+  // Playback controls and the frame slider: where the room shows the shot's
+  // own timeline (Ztoryc T), the slider is the only way along the animatic.
+  setVisiblePartsFlag(VPPARTS_PLAYBAR | VPPARTS_FRAMESLIDER);
+  // On the playbar, the playback buttons and nothing else (Franco,
+  // 2026-10-20): no fps, sound, viewer controls (☰ can bring them back).
+  m_flipConsole->setCustomizemask(eShowVcr);
+  m_sceneViewer->setReferenceMode(SceneViewer::CAMERA_REFERENCE);
+  QTimer::singleShot(0, this, [this]() { m_sceneViewer->fitToCamera(); });
+}
+
 bool ZtoryAnimaticViewer::eventFilter(QObject *obj, QEvent *e) {
+  // Essential (the small monitor): the image only shows; its framing stays on
+  // the camera whatever the size.
+  if (m_essential && obj == m_sceneViewer) {
+    switch (e->type()) {
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonRelease:
+    case QEvent::MouseButtonDblClick:
+    case QEvent::MouseMove:
+    case QEvent::Wheel:
+    case QEvent::TabletPress:
+    case QEvent::TabletMove:
+    case QEvent::TabletRelease:
+    case QEvent::ContextMenu:
+    case QEvent::Gesture:
+    case QEvent::NativeGesture:
+      return true;
+    case QEvent::Resize:
+    case QEvent::Show:
+      QTimer::singleShot(0, this, [this]() { m_sceneViewer->fitToCamera(); });
+      break;
+    default:
+      break;
+    }
+  }
   // The animatic viewer is a timing/preview surface: the Animate (Edit) tool
   // must not transform shot objects here. Swallow its left-button and tablet
   // actions; hover, pan (middle/space) and zoom (wheel) still pass through.
@@ -4968,6 +5013,14 @@ ZtoryRightPanel::ZtoryRightPanel(QWidget *parent)
   m_toggleBtn->setChecked(false);
   m_toggleBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   m_toggleBtn->setFixedHeight(22);
+  // Quiet brand colour, not the theme's saturated accent: the header was the
+  // loudest thing on screen (UI review, 2026-10-20).
+  m_toggleBtn->setStyleSheet(
+      QString("QToolButton { background: %1; color: #E8E2E7; border: none;"
+              " border-radius: 3px; font-weight: bold; }"
+              "QToolButton:hover { background: %2; }")
+          .arg(ZtoryTheme::panelHeader().name(),
+               ZtoryTheme::panelHeader().lighter(125).name()));
   barL->addWidget(m_toggleBtn);
 
   m_linkBtn = new QToolButton(bar);
@@ -5113,6 +5166,14 @@ ZtoryLeftPanel::ZtoryLeftPanel(QWidget *parent)
   m_toggleBtn->setChecked(false);  // false = Board, true = XSheet
   m_toggleBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   m_toggleBtn->setFixedHeight(22);
+  // Quiet brand colour, not the theme's saturated accent: the header was the
+  // loudest thing on screen (UI review, 2026-10-20).
+  m_toggleBtn->setStyleSheet(
+      QString("QToolButton { background: %1; color: #E8E2E7; border: none;"
+              " border-radius: 3px; font-weight: bold; }"
+              "QToolButton:hover { background: %2; }")
+          .arg(ZtoryTheme::panelHeader().name(),
+               ZtoryTheme::panelHeader().lighter(125).name()));
   barL->addWidget(m_toggleBtn);
 
   m_linkBtn = new QToolButton(bar);
@@ -5231,6 +5292,11 @@ ZtoryAnimaticViewerPanel::ZtoryAnimaticViewerPanel(QWidget *parent)
   m_backBtn->setToolTip(tr("Return to Animatic viewer and close sub-scene"));
   m_backBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   m_backBtn->setFixedHeight(22);
+  // In the inside-shot yellow, as «sh030» in the xsheet's path (Franco,
+  // 2026-10-20): the way out reads as part of the same signal.
+  m_backBtn->setStyleSheet(
+      QString("QToolButton { color: %1; font-weight: bold; }")
+          .arg(ZtoryMainGate::kInsideShotColor));
   barLay->addWidget(m_backBtn);
 
   m_linkBtn = new QToolButton(topBar);
@@ -5286,6 +5352,22 @@ ZtoryAnimaticViewerPanel::ZtoryAnimaticViewerPanel(QWidget *parent)
   };
   m_overlayButtons.append(makeOverlayBtn(-198, "pane_symmetry",    "Show Symmetry Guide",    MI_ShowSymmetryGuide));
   m_overlayButtons.append(makeOverlayBtn(-177, "pane_perspective", "Show Perspective Grids", MI_ShowPerspectiveGrids));
+
+  // Fit to Window, the same icon as the timeline's Fit All: one click, not a
+  // toggle. Acts on whichever viewer is showing, animatic or shot (Franco,
+  // 2026-10-19).
+  {
+    auto *fitBtn = new TPanelTitleBarButton(getTitleBar(),
+                                            getIconPath("pane_fit"));
+    fitBtn->setToolTip(tr("Fit to Window"));
+    getTitleBar()->add(QPoint(-229, 0), fitBtn);
+    connect(fitBtn, &TPanelTitleBarButton::toggled, this, [this, fitBtn]() {
+      fitBtn->setPressed(false);
+      BaseViewerPanel *v = m_viewer;
+      if (m_stack->currentIndex() == 1 && m_shotViewer) v = m_shotViewer;
+      if (v && v->sceneViewer()) v->sceneViewer()->fitToCamera();
+    });
+  }
 
   // The CommandManager action toggling alone is not enough — the tool object must
   // also be notified via setGuideEnabled() (normally done in onSymmetryGuideToggled,
@@ -5356,7 +5438,7 @@ ZtoryAnimaticViewerPanel::ZtoryAnimaticViewerPanel(QWidget *parent)
 void ZtoryAnimaticViewerPanel::updateTitle() {
   TApp *app = TApp::instance();
   ToonzScene *scene = (app && app->getCurrentScene()) ? app->getCurrentScene()->getScene() : nullptr;
-  QString title;
+  QString title, accent;
   if (!scene) {
     title = tr("Animatic");
   } else {
@@ -5377,8 +5459,12 @@ void ZtoryAnimaticViewerPanel::updateTitle() {
           if (n->m_cl.getPointer())
             shot += " › " + QString::fromStdWString(n->m_cl->getName());
       title = tr("Animatic / %1").arg(shot);
+      accent = shot;
     }
   }
+  // The shot's name drawn in the inside-shot yellow (TPanelTitleBar).
+  setProperty("ztoryTitleAccent", accent);
+  setProperty("ztoryTitleAccentColor", QString(ZtoryMainGate::kInsideShotColor));
   setWindowTitle(title);
   // TPanel propagates window title to its title bar widget; force a refresh.
   if (getTitleBar()) getTitleBar()->update();
@@ -5548,7 +5634,7 @@ void ZtoryStoryStripPanel::showEvent(QShowEvent *e) {
 
 ZtoryAnimaticPanel::ZtoryAnimaticPanel(QWidget *parent, bool switchEnabled)
     : TPanel(parent), m_switchEnabled(switchEnabled) {
-  setWindowTitle("Ztory Animatic");
+  setWindowTitle(tr("Animatic"));
   setFocusPolicy(Qt::StrongFocus);
 
   // Keyboard shortcuts via qApp event filter (same approach as StoryboardPanel).
@@ -5897,7 +5983,23 @@ ZtoryAnimaticPanel::ZtoryAnimaticPanel(QWidget *parent, bool switchEnabled)
   // Outer stacked widget: page 0 = animatic, page 1 = native timeline
   m_outerStack = new QStackedWidget(this);
   m_outerStack->addWidget(container);  // page 0
-  setWidget(m_outerStack);
+
+  // Left: the small animatic monitor (updateMiniMonitor), hidden until needed.
+  QWidget *root       = new QWidget(this);
+  QHBoxLayout *rootLay = new QHBoxLayout(root);
+  rootLay->setContentsMargins(0, 0, 0, 0);
+  rootLay->setSpacing(0);
+  m_miniHost = new QWidget(root);
+  m_miniHost->setFixedWidth(280);
+  QVBoxLayout *miniLay = new QVBoxLayout(m_miniHost);
+  miniLay->setContentsMargins(0, 0, 2, 0);
+  miniLay->setSpacing(0);
+  m_miniHost->hide();
+  rootLay->addWidget(m_miniHost);
+  rootLay->addWidget(m_outerStack, 1);
+  setWidget(root);
+  connect(TApp::instance()->getCurrentXsheet(), &TXsheetHandle::xsheetSwitched,
+          this, &ZtoryAnimaticPanel::updateMiniMonitor);
 
   connect(m_ruler, &ZtoryAnimaticRuler::frameChanged,
           this, &ZtoryAnimaticPanel::onFrameChanged);
@@ -6498,8 +6600,36 @@ void ZtoryAnimaticPanel::refreshAudioTracks() {
   m_refreshingAudio = false;
 }
 
+void ZtoryAnimaticPanel::updateMiniMonitor() {
+  if (!m_miniHost) return;
+  bool show = !ZtoryMainGate::currentShotName().isEmpty();
+  if (show) {
+    // Only where this room's main viewer switched to the shot (Ztoryc X):
+    // a room without that viewer shows the animatic some other way.
+    bool roomHasViewer = false;
+    for (QWidget *w = parentWidget(); w; w = w->parentWidget())
+      if (w->inherits("Room")) {
+        roomHasViewer = !w->findChildren<ZtoryAnimaticViewerPanel *>().isEmpty();
+        break;
+      }
+    show = roomHasViewer;
+  }
+  if (show && !m_miniViewer) {
+    // A new viewer registers itself with the controller; the room's main one
+    // keeps that role (audio restarts on mute/solo).
+    auto *ctrl                     = ZtoryAnimaticController::instance();
+    ZtoryAnimaticViewer *mainViewer = ctrl->viewer();
+    m_miniViewer = new ZtoryAnimaticViewer(m_miniHost);
+    m_miniViewer->setEssential();
+    m_miniHost->layout()->addWidget(m_miniViewer);
+    if (mainViewer) ctrl->setViewer(mainViewer);
+  }
+  m_miniHost->setVisible(show);
+}
+
 void ZtoryAnimaticPanel::showEvent(QShowEvent *e) {
   TPanel::showEvent(e);
+  updateMiniMonitor();
   ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
   if (m_switchEnabled && scene && scene->getChildStack()->getAncestorCount() > 0) {
     showShotTimeline();
@@ -8665,7 +8795,7 @@ public:
   TPanel *createPanel(QWidget *parent) override {
     TPanel *panel = new ZtoryAnimaticPanel(parent);
     panel->setObjectName("ZtoryAnimatic");
-    panel->setWindowTitle("Ztoryc Animatic");
+    panel->setWindowTitle(QObject::tr("Animatic"));
     return panel;
   }
   void initialize(TPanel *panel) override { assert(0); }
@@ -8745,6 +8875,14 @@ ZtoryDrawLeftPanel::ZtoryDrawLeftPanel(QWidget *parent)
   m_toggleBtn->setChecked(false);
   m_toggleBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   m_toggleBtn->setFixedHeight(22);
+  // Quiet brand colour, not the theme's saturated accent: the header was the
+  // loudest thing on screen (UI review, 2026-10-20).
+  m_toggleBtn->setStyleSheet(
+      QString("QToolButton { background: %1; color: #E8E2E7; border: none;"
+              " border-radius: 3px; font-weight: bold; }"
+              "QToolButton:hover { background: %2; }")
+          .arg(ZtoryTheme::panelHeader().name(),
+               ZtoryTheme::panelHeader().lighter(125).name()));
   barL->addWidget(m_toggleBtn);
 
   m_linkBtn = new QToolButton(bar);

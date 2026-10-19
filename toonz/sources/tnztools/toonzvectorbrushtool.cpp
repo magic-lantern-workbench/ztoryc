@@ -86,6 +86,8 @@ TEnv::IntVar V_VectorBrushSnapSensitivity("VectorBrushSnapSensitivity", 0);
 TEnv::IntVar V_VectorBrushDrawBehind("VectorBrushDrawBehind", 0);
 TEnv::IntVar V_VectorBrushAutoClose("VectorBrushAutoClose", 0);
 TEnv::IntVar V_VectorBrushAutoFill("VectorBrushAutoFill", 0);
+TEnv::DoubleVar V_VectorBrushAutoCloseGap("VectorBrushAutoCloseGap",
+                                          c_ztorycAutocloseTolerance);
 TEnv::IntVar V_VectorBrushAutoGroup("VectorBrushAutoGroup", 0);
 TEnv::StringVar V_VectorBrushPreset("VectorBrushPreset", "<custom>");
 TEnv::IntVar V_VectorBrushSnapGrid("VectorBrushSnapGrid", 0);
@@ -372,24 +374,48 @@ static void findMaxCurvPoints(TStroke *stroke, const float &angoloLim,
 }
 
 // Auto Fill without Auto Group: the areas closed by the strokes just added —
-// alone or together with strokes already there — that are still EMPTY get
-// \p styleId. An area counts when one of its edges lies on a new stroke, so
-// old empty shapes the stroke does not touch stay empty, and details drawn
-// inside a filled shape keep its colour (their areas are born filled).
+// alone or together with strokes already there — get \p styleId when they
+// are EMPTY, or when the stroke cut them off a shape already coloured: of
+// the pieces of one colour the stroke touches, the LARGEST is the shape and
+// keeps its colour, the smaller ones (a curl of hair, a band of a collar)
+// take the new one (Franco, 2026-10-19). A detail line that closes nothing
+// cuts no piece off. Shapes the strokes do not touch stay as they are.
 // Returns what was painted, for the redo.
+namespace {
+struct ShoelaceArea final : public TRegionFeatureFormula {
+  double twice = 0;
+  void update(const TPointD &a, const TPointD &b) override {
+    twice += a.x * b.y - b.x * a.y;
+  }
+};
+double regionArea(TRegion *r) {
+  ShoelaceArea f;
+  computeRegionFeature(*r, f);
+  return std::abs(f.twice) * 0.5;
+}
+}  // namespace
+
 static std::vector<TFilledRegionInf> fillAreasClosedBy(
-    const TVectorImageP &vi, const std::set<int> &strokeIds, int styleId) {
+    const TVectorImageP &vi, const std::set<int> &strokeIds, int styleId,
+    double gap) {
   std::vector<TFilledRegionInf> painted;
   if (!vi || strokeIds.empty() || styleId <= 0) return painted;
+  // The brush's «Auto Close Gap» becomes the drawing's, as the Fill tool's
+  // slider does: at Tahoma's 1.15 strokes that only touch close nothing
+  // (tvectorimage.h).
+  if (gap > 0 && !areAlmostEqual(vi->getAutocloseTolerance(), gap, 0.001)) {
+    vi->setAutocloseTolerance(gap);
+    vi->forceRegionsRecompute();
+  }
   vi->findRegions();
+  std::vector<TRegion *> touched;  // areas with an edge on a new stroke
   std::function<void(TRegion *)> visit = [&](TRegion *r) {
     if (!r) return;
-    if (r->getStyle() == 0) {
+    if (r->getStyle() != styleId) {
       for (UINT e = 0; e < r->getEdgeCount(); e++) {
         TEdge *edge = r->getEdge(e);
         if (edge && edge->m_s && strokeIds.count(edge->m_s->getId())) {
-          r->setStyle(styleId);
-          painted.push_back(TFilledRegionInf(r->getId(), styleId));
+          touched.push_back(r);
           break;
         }
       }
@@ -404,6 +430,22 @@ static std::vector<TFilledRegionInf> fillAreasClosedBy(
   for (UINT i = 0; i < vi->getRegionCount(); i++)
     if (anyStroke < 0 || vi->sameGroupStrokeAndRegion(anyStroke, i))
       visit(vi->getRegion(i));
+
+  // Per old colour, the largest touched piece is the shape itself.
+  std::map<int, std::pair<TRegion *, double>> largest;
+  for (TRegion *r : touched) {
+    if (r->getStyle() == 0) continue;
+    const double a = regionArea(r);
+    auto it        = largest.find(r->getStyle());
+    if (it == largest.end() || a > it->second.second)
+      largest[r->getStyle()] = {r, a};
+  }
+  for (TRegion *r : touched) {
+    const int old = r->getStyle();
+    if (old != 0 && largest[old].first == r) continue;
+    r->setStyle(styleId);
+    painted.push_back(TFilledRegionInf(r->getId(), styleId));
+  }
   return painted;
 }
 
@@ -444,10 +486,14 @@ static void addStroke(TTool::Application *application, const TVectorImageP &vi,
   // stock behaviour (the stroke's own style) when the brush is not the
   // current tool, e.g. strokes added by another caller.
   int fillStyleId = -1;
+  double fillGap  = c_ztorycAutocloseTolerance;
   if (autoFill) {
     auto *brush = dynamic_cast<ToonzVectorBrushTool *>(
         application->getCurrentTool()->getTool());
-    if (brush) fillStyleId = brush->getAutoFillStyleId(stroke->getStyle());
+    if (brush) {
+      fillStyleId = brush->getAutoFillStyleId(stroke->getStyle());
+      fillGap     = brush->getAutoCloseGap();
+    }
   }
   std::set<int> addedIds;  // the strokes this call adds
   UndoPencil *lastUndo = nullptr;
@@ -478,7 +524,7 @@ static void addStroke(TTool::Application *application, const TVectorImageP &vi,
     if (autoFill && !autoGroup && lastUndo) {
       int fillStyle = fillStyleId >= 0 ? fillStyleId : stroke->getStyle();
       lastUndo->setAutoFilledRegions(
-          fillAreasClosedBy(vi, addedIds, fillStyle));
+          fillAreasClosedBy(vi, addedIds, fillStyle, fillGap));
     }
     TUndoManager::manager()->endBlock();
   } else {
@@ -495,7 +541,7 @@ static void addStroke(TTool::Application *application, const TVectorImageP &vi,
     if (autoFill && !autoGroup) {
       int fillStyle = fillStyleId >= 0 ? fillStyleId : stroke->getStyle();
       lastUndo->setAutoFilledRegions(
-          fillAreasClosedBy(vi, addedIds, fillStyle));
+          fillAreasClosedBy(vi, addedIds, fillStyle, fillGap));
     }
     TUndoManager::manager()->add(lastUndo);
   }
@@ -638,6 +684,7 @@ ToonzVectorBrushTool::ToonzVectorBrushTool(std::string name, int targetType)
     , m_autoGroup("Auto Group", false)
     , m_autoFill("Auto Fill", false)
     , m_autoFillStyle("Fill Style:")
+    , m_autoCloseGap("Auto Close Gap", 0.01, 30.0, c_ztorycAutocloseTolerance)
     , m_targetType(targetType)
     , m_workingFrameId(TFrameId())
     , m_snapGrid("Grid", false)
@@ -660,6 +707,7 @@ ToonzVectorBrushTool::ToonzVectorBrushTool(std::string name, int targetType)
   m_prop[0].bind(m_autoGroup);
   m_prop[0].bind(m_autoFill);
   m_prop[0].bind(m_autoFillStyle);
+  m_prop[0].bind(m_autoCloseGap);
   m_prop[0].bind(m_sendToBack);
   m_prop[0].bind(m_frameRange);
   m_prop[0].bind(m_snap);
@@ -675,6 +723,7 @@ ToonzVectorBrushTool::ToonzVectorBrushTool(std::string name, int targetType)
   m_autoGroup.setId("AutoGroup");
   m_autoFill.setId("Autofill");
   m_autoFillStyle.setId("AutoFillStyle");
+  m_autoCloseGap.setId("AutoCloseGap");
   m_sendToBack.setId("DrawUnder");
   m_breakAngles.setId("BreakSharpAngles");
   m_frameRange.setId("FrameRange");
@@ -762,6 +811,7 @@ void ToonzVectorBrushTool::updateTranslation() {
   m_autoClose.setQStringName(tr("Auto Close"));
   m_autoFill.setQStringName(tr("Auto Fill"));
   m_autoFillStyle.setQStringName(tr("Fill Style:"));
+  m_autoCloseGap.setQStringName(tr("Auto Close Gap"));
   m_autoGroup.setQStringName(tr("Auto Group"));
   m_sizeStylusProperty.setQStringName(tr("Stylus Settings - Size"));
 
@@ -2362,6 +2412,7 @@ bool ToonzVectorBrushTool::onPropertyChanged(std::string propertyName) {
   V_VectorBrushAutoClose       = m_autoClose.getValue();
   V_VectorBrushAutoGroup       = m_autoGroup.getValue();
   V_VectorBrushAutoFill        = m_autoFill.getValue();
+  V_VectorBrushAutoCloseGap    = m_autoCloseGap.getValue();
   V_VectorBrushSnap            = m_snap.getValue();
   int snapSensitivityIndex     = m_snapSensitivity.getIndex();
   V_VectorBrushSnapSensitivity = snapSensitivityIndex;
@@ -2527,22 +2578,17 @@ void ToonzVectorBrushTool::loadLastBrush() {
   m_autoGroup.setValue(V_VectorBrushAutoGroup);
   m_autoClose.setValue(V_VectorBrushAutoClose);
   m_autoFill.setValue(V_VectorBrushAutoFill);
+  m_autoCloseGap.setValue(V_VectorBrushAutoCloseGap);
   m_snapGrid.setValue(V_VectorBrushSnapGrid);
 
   // Recalculate based on prior values
   m_minThick = m_thickness.getValue().first;
   m_maxThick = m_thickness.getValue().second;
 
-  if (m_autoFill.getValue()) {
-    if (!m_autoClose.getValue()) {
-      m_autoClose.setValue(true);
-      V_VectorBrushAutoClose = 1;
-    }
-    if (!m_autoGroup.getValue()) {
-      m_autoGroup.setValue(true);
-      V_VectorBrushAutoGroup = 1;
-    }
-  }
+  // Ztoryc: Auto Fill does NOT switch Auto Close and Auto Group back on here
+  // (see onPropertyChanged). This leftover did it at every start-up, so the
+  // multi-stroke fill never ran after a restart (Franco, 2026-10-19: a collar
+  // drawn with open strokes stayed unfilled).
 
   switch (V_VectorBrushSnapSensitivity) {
   case 0:

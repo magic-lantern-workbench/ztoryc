@@ -117,6 +117,8 @@ set(MOC_HEADERS
     ztorykitsusync.h
     ztoryassetpreview.h
     ztorymouthlibrary.h
+    ztoryautomatte.h
+    ztoryautomattecore.h
     ztoriglibrary.h
     ztorigclips.h
     ztorylipsync.h
@@ -286,6 +288,7 @@ set(SOURCES
     ztorykitsusync.cpp
     ztoryassetpreview.cpp
     ztorymouthlibrary.cpp
+    ztoryautomatte.cpp
     ztoriglibrary.cpp
     ztorigclips.cpp
     ztorylipsync.cpp
