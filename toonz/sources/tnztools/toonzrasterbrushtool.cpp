@@ -2705,69 +2705,128 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
             if (rx < 0 || ry < 0 || rx >= sw || ry >= sh) return false;
             return ras->pixels(y0 + ry)[x0 + rx].getInk() != 0;
           };
-          // Pass 1: the enclosed pieces — 4-connected pixels without ink and
-          // of ONE paint, not outside. A piece counts when it borders the
-          // stroke's ink. Empty pieces are filled; of the painted ones, per
-          // colour the LARGEST is the shape and keeps its colour, the smaller
-          // ones (a curl, a band of a collar) take the fill colour — as on
-          // vectors (Franco, 2026-10-19).
+          // Pass 1: the enclosed pieces — pixels without ink, of ONE paint,
+          // not outside. A piece counts when it borders the stroke's ink.
+          // Empty pieces are filled; of the painted ones, per colour the
+          // LARGEST is the shape and keeps its colour, the smaller ones (a
+          // curl, a band of a collar) take the fill colour — as on vectors
+          // (Franco, 2026-10-19).
+          //
+          // With a gap the pieces grow from their CORES, the pixels farther
+          // than the gap from the line: two shapes joined by a neck narrower
+          // than the gap have two cores, so a stroke closing one no longer
+          // fills an old empty one next to it; the band along the line goes
+          // to the nearest core. Pixels no core reaches (a shape thinner
+          // than the gap, the holes between the dots of a soft tip) count
+          // only if the INK alone encloses them, gap or not, and they are not
+          // crumbs. gap 0: every free pixel is core = the pieces of before.
           auto touchesNew = [&](int rx, int ry) -> bool {
             if (rx < 0 || ry < 0 || rx >= sw || ry >= sh) return false;
             if (haveNewInk) return newInk[ry * sw + rx] != 0;
             return inkAt(rx, ry) && inStroke(x0 + rx, y0 + ry);
           };
-          struct Piece { int paint; std::vector<int> pixels; };
+          auto paintAt = [&](int i) {
+            return ras->pixels(y0 + i / sw)[x0 + i % sw].getPaint();
+          };
+          // Free = no ink, not outside, not already the fill colour.
+          std::vector<uint8_t> isFree(sw * sh, 0);
+          for (int i = 0; i < sw * sh; i++)
+            isFree[i] = !lineMask[i] && !exterior[i] && paintAt(i) != fillStyleId;
+          const int coreLimit = 3 * gap;  // chamfer units
+          std::vector<int> label(sw * sh, -1);
+          struct Piece { int paint; std::vector<int> pixels; bool touches; };
           std::vector<Piece> pieces;
-          std::vector<uint8_t> visited(sw * sh, 0);
-          std::vector<int> toFill;   // pixel indices to paint
-          std::vector<int> stack;
-          for (int sry = 0; sry < sh; sry++) {
-            TPixelCM32 *srow = ras->pixels(y0 + sry) + x0;
-            for (int srx = 0; srx < sw; srx++) {
-              int seed = sry * sw + srx;
-              // Seeds are pixels without ink only: line pixels used to start
-              // one-pixel "regions" and the fill colour peeked out of the
-              // antialiased edge (the rim). Pass 2 decides the line pixels.
-              if (visited[seed] || exterior[seed] || srow[srx].getInk() != 0)
-                continue;
-              const int paint = srow[srx].getPaint();
-              if (paint == fillStyleId) { visited[seed] = 1; continue; }
-              Piece piece{paint, {}};
-              stack.clear();
-              stack.push_back(seed); visited[seed] = 1;
-              bool touchesStroke = false;
-              bool hasCore       = false;  // a pixel farther than gap from line
-              while (!stack.empty()) {
-                int si = stack.back(); stack.pop_back();
-                int rx = si % sw, ry = si / sw;
-                piece.pixels.push_back(si);
-                if (lineDist[si] > 3 * gap) hasCore = true;
-                const int nx[4] = {rx-1, rx+1, rx, rx};
-                const int ny[4] = {ry, ry, ry-1, ry+1};
-                for (int k = 0; k < 4; k++) {
-                  if (nx[k] < 0 || ny[k] < 0 || nx[k] >= sw || ny[k] >= sh)
-                    continue;
-                  if (inkAt(nx[k], ny[k])) {
-                    if (touchesNew(nx[k], ny[k])) touchesStroke = true;
-                    continue;
-                  }
-                  int ni = ny[k] * sw + nx[k];
-                  if (!visited[ni] && !exterior[ni] &&
-                      ras->pixels(y0 + ny[k])[x0 + nx[k]].getPaint() == paint) {
-                    visited[ni] = 1; stack.push_back(ni);
-                  }
+          std::vector<int> stack, frontier, next;
+          auto neighbours = [&](int i, int *out) {
+            const int rx = i % sw, ry = i / sw;
+            int n = 0;
+            if (rx > 0) out[n++] = i - 1;
+            if (rx < sw - 1) out[n++] = i + 1;
+            if (ry > 0) out[n++] = i - sw;
+            if (ry < sh - 1) out[n++] = i + sw;
+            return n;
+          };
+          // a. Cores, flooded per paint.
+          for (int seed = 0; seed < sw * sh; seed++) {
+            if (!isFree[seed] || label[seed] >= 0 || lineDist[seed] <= coreLimit)
+              continue;
+            const int id = (int)pieces.size(), paint = paintAt(seed);
+            pieces.push_back({paint, {}, false});
+            stack.assign(1, seed); label[seed] = id;
+            while (!stack.empty()) {
+              int i = stack.back(); stack.pop_back();
+              pieces[id].pixels.push_back(i);
+              frontier.push_back(i);
+              int nb[4], n = neighbours(i, nb);
+              for (int k = 0; k < n; k++) {
+                int j = nb[k];
+                if (isFree[j] && label[j] < 0 && lineDist[j] > coreLimit &&
+                    paintAt(j) == paint) {
+                  label[j] = id; stack.push_back(j);
                 }
               }
-              // Crumbs: the dents of a rough line and the holes inside it,
-              // which the gap closing turns into tiny enclosed pieces — all
-              // of them hug the line. Filled, they dirtied the stroke
-              // (Franco, 2026-10-19). A real shape is big, or reaches farther
-              // than the gap from its outline.
-              const int minArea = 20 + 4 * gap * gap;
-              const bool crumb  = !hasCore && (int)piece.pixels.size() < minArea;
-              if (touchesStroke && !crumb) pieces.push_back(std::move(piece));
             }
           }
+          // b. The band along the line goes to the nearest core (same paint).
+          while (!frontier.empty()) {
+            next.clear();
+            for (int i : frontier) {
+              int nb[4], n = neighbours(i, nb);
+              for (int k = 0; k < n; k++) {
+                int j = nb[k];
+                if (isFree[j] && label[j] < 0 &&
+                    paintAt(j) == pieces[label[i]].paint) {
+                  label[j] = label[i];
+                  pieces[label[i]].pixels.push_back(j);
+                  next.push_back(j);
+                }
+              }
+            }
+            frontier.swap(next);
+          }
+          // c. What no core reached: kept only when the ink alone closes it
+          // and it is not a crumb.
+          std::vector<uint8_t> exteriorNoGap =
+              gap > 0 ? ZtoryAutoMatteCore::exteriorWithGaps(lineMask, sw, sh, 0)
+                      : exterior;
+          const int minArea = 20 + 4 * gap * gap;
+          for (int seed = 0; seed < sw * sh; seed++) {
+            if (!isFree[seed] || label[seed] >= 0) continue;
+            const int id = (int)pieces.size(), paint = paintAt(seed);
+            pieces.push_back({paint, {}, false});
+            bool closedByInk = true;
+            stack.assign(1, seed); label[seed] = id;
+            while (!stack.empty()) {
+              int i = stack.back(); stack.pop_back();
+              pieces[id].pixels.push_back(i);
+              if (exteriorNoGap[i]) closedByInk = false;
+              int nb[4], n = neighbours(i, nb);
+              for (int k = 0; k < n; k++) {
+                int j = nb[k];
+                if (isFree[j] && label[j] < 0 && paintAt(j) == paint) {
+                  label[j] = id; stack.push_back(j);
+                }
+              }
+            }
+            if (!closedByInk || (int)pieces[id].pixels.size() < minArea)
+              pieces[id].pixels.clear();  // a crumb: never filled
+          }
+          // Which pieces border the stroke's ink.
+          for (int i = 0; i < sw * sh; i++) {
+            if (label[i] < 0 || pieces[label[i]].touches) continue;
+            int nb[4], n = neighbours(i, nb);
+            for (int k = 0; k < n; k++)
+              if (lineMask[nb[k]] && touchesNew(nb[k] % sw, nb[k] / sw)) {
+                pieces[label[i]].touches = true;
+                break;
+              }
+          }
+          pieces.erase(std::remove_if(pieces.begin(), pieces.end(),
+                                      [](const Piece &p) {
+                                        return !p.touches || p.pixels.empty();
+                                      }),
+                       pieces.end());
+          std::vector<int> toFill;   // pixel indices to paint
           std::map<int, size_t> largestOf;  // paint -> index of its largest piece
           for (size_t i = 0; i < pieces.size(); i++) {
             if (pieces[i].paint == 0) continue;
