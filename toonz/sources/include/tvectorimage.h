@@ -46,6 +46,13 @@ class Mutex;
 #define REGION_COMPUTING_PRECISION 128.0
 
 const double c_newAutocloseTolerance = 1.15;
+// Ztoryc: the tolerance NEW drawings start with. At 1.15 hand-drawn strokes
+// that touch without crossing almost never close a shape, so the fill cannot
+// paint it (measured on a real drawing, 2026-10-19: the body closes at 5).
+// c_newAutocloseTolerance stays the "never changed" marker the .pli writer
+// and the Fill tool compare against; files keep Tahoma's format (the value is
+// written in the frame's tag as any changed tolerance).
+const double c_ztorycAutocloseTolerance = 5.0;
 
 //-----------------------------------------------------------------------------
 

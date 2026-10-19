@@ -381,6 +381,13 @@ static std::vector<TFilledRegionInf> fillAreasClosedBy(
     const TVectorImageP &vi, const std::set<int> &strokeIds, int styleId) {
   std::vector<TFilledRegionInf> painted;
   if (!vi || strokeIds.empty() || styleId <= 0) return painted;
+  // A drawing still at Tahoma's tolerance gets Ztoryc's, as with the Fill
+  // tool: at 1.15 strokes that only touch close nothing (tvectorimage.h).
+  if (areAlmostEqual(vi->getAutocloseTolerance(), c_newAutocloseTolerance,
+                     0.001)) {
+    vi->setAutocloseTolerance(c_ztorycAutocloseTolerance);
+    vi->forceRegionsRecompute();
+  }
   vi->findRegions();
   std::function<void(TRegion *)> visit = [&](TRegion *r) {
     if (!r) return;

@@ -5,6 +5,7 @@
 
 // TnzCore includes
 #include "tproperty.h"
+#include "tvectorimage.h"
 #include "toonz/txshlevelhandle.h"
 #include "toonz/txshsimplelevel.h"
 // TnzTools includes
@@ -96,7 +97,9 @@ class FillTool final : public QObject, public TTool {
   // last gap value explicitly set by the user in this session; propagated to
   // images still having the default tolerance, so the slider does not reset
   // on every frame switch
-  double m_lastUserGapValue = -1.0;
+  // Ztoryc: starts at our default, so drawings still at Tahoma's 1.15 are
+  // raised to it as soon as the Fill tool works on them (Franco, 2026-10-19).
+  double m_lastUserGapValue = c_ztorycAutocloseTolerance;
   TXshSimpleLevelP m_level;
   TFrameId m_firstFrameId, m_veryFirstFrameId;
   int m_onionStyleId;
