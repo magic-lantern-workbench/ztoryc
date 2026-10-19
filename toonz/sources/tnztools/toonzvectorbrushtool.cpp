@@ -374,11 +374,13 @@ static void findMaxCurvPoints(TStroke *stroke, const float &angoloLim,
 }
 
 // Auto Fill without Auto Group: the areas closed by the strokes just added —
-// alone or together with strokes already there — that are still EMPTY get
-// \p styleId. An area counts when one of its edges lies on a new stroke, so
-// old empty shapes the stroke does not touch stay empty, and details drawn
-// inside a filled shape keep its colour (their areas are born filled).
-// Returns what was painted, for the redo.
+// alone or together with strokes already there — get \p styleId when they
+// are EMPTY, or when the new strokes make at least HALF of their border
+// (Franco, 2026-10-19): hair, eyebrows or a collar drawn over a filled head
+// take the new colour, while a detail line (a wrinkle, the nose) that only
+// cuts a filled shape in two leaves both parts as they were. Old shapes the
+// strokes do not touch stay as they are. Returns what was painted, for the
+// redo.
 static std::vector<TFilledRegionInf> fillAreasClosedBy(
     const TVectorImageP &vi, const std::set<int> &strokeIds, int styleId,
     double gap) {
@@ -394,14 +396,20 @@ static std::vector<TFilledRegionInf> fillAreasClosedBy(
   vi->findRegions();
   std::function<void(TRegion *)> visit = [&](TRegion *r) {
     if (!r) return;
-    if (r->getStyle() == 0) {
+    if (r->getStyle() != styleId) {
+      double total = 0, mine = 0;
       for (UINT e = 0; e < r->getEdgeCount(); e++) {
         TEdge *edge = r->getEdge(e);
-        if (edge && edge->m_s && strokeIds.count(edge->m_s->getId())) {
-          r->setStyle(styleId);
-          painted.push_back(TFilledRegionInf(r->getId(), styleId));
-          break;
-        }
+        if (!edge || !edge->m_s) continue;
+        const double len = edge->m_s->getLength(
+            std::min(edge->m_w0, edge->m_w1), std::max(edge->m_w0, edge->m_w1));
+        total += len;
+        if (strokeIds.count(edge->m_s->getId())) mine += len;
+      }
+      const bool touched = mine > 0;
+      if (touched && (r->getStyle() == 0 || mine >= 0.5 * total)) {
+        r->setStyle(styleId);
+        painted.push_back(TFilledRegionInf(r->getId(), styleId));
       }
     }
     for (UINT s = 0; s < r->getSubregionCount(); s++) visit(r->getSubregion(s));
@@ -2553,16 +2561,10 @@ void ToonzVectorBrushTool::loadLastBrush() {
   m_minThick = m_thickness.getValue().first;
   m_maxThick = m_thickness.getValue().second;
 
-  if (m_autoFill.getValue()) {
-    if (!m_autoClose.getValue()) {
-      m_autoClose.setValue(true);
-      V_VectorBrushAutoClose = 1;
-    }
-    if (!m_autoGroup.getValue()) {
-      m_autoGroup.setValue(true);
-      V_VectorBrushAutoGroup = 1;
-    }
-  }
+  // Ztoryc: Auto Fill does NOT switch Auto Close and Auto Group back on here
+  // (see onPropertyChanged). This leftover did it at every start-up, so the
+  // multi-stroke fill never ran after a restart (Franco, 2026-10-19: a collar
+  // drawn with open strokes stayed unfilled).
 
   switch (V_VectorBrushSnapSensitivity) {
   case 0:
