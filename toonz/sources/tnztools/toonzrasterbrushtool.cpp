@@ -2816,6 +2816,18 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
             if (!closedByInk || (int)pieces[id].pixels.size() < minArea)
               pieces[id].pixels.clear();  // a crumb: never filled
           }
+          // Crumbs, whatever the gap: the holes inside a rough line are
+          // pieces closed all round by the new ink, so they counted as shapes
+          // the stroke drew and were coloured — the specks on the stroke —
+          // and switched the real fill off (below). A piece is a crumb when
+          // it is small AND hugs the line: no pixel 2 px or more away from it.
+          for (Piece &p : pieces) {
+            if (p.pixels.empty() || (int)p.pixels.size() >= minArea) continue;
+            bool deep = false;
+            for (int i : p.pixels)
+              if (lineDist[i] > std::max(coreLimit, 5)) { deep = true; break; }
+            if (!deep) p.pixels.clear();
+          }
           // Which pieces border the stroke's ink, and how much of their
           // border it makes.
           for (int i = 0; i < sw * sh; i++) {

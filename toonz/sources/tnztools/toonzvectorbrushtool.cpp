@@ -425,7 +425,10 @@ static std::vector<TFilledRegionInf> fillAreasClosedBy(
       if (mine > 0) touched.push_back(r);
       // Almost all of its border is new: a shape the stroke drew by itself
       // (an oval, a closed curl). See below.
-      if (total > 0 && mine >= 0.8 * total) drawn.push_back(r);
+      // Not the little loops a stroke makes crossing itself: they would
+      // count as drawn shapes and switch the real fill off.
+      if (total > 0 && mine >= 0.8 * total && regionArea(r) >= 9.0)
+        drawn.push_back(r);
     }
     for (UINT s = 0; s < r->getSubregionCount(); s++) visit(r->getSubregion(s));
   };
