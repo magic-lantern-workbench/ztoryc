@@ -74,6 +74,7 @@ class PanelWidget final : public QFrame {
   // toolbar; the drag-in-progress points are per-widget (normalized 0-1
   // over the preview area).
   static bool    s_lightEditMode;
+  static int     s_openShot;
   static QString s_lightColor;
   bool    m_lightDragging = false;
   QPointF m_lightDragTail, m_lightDragTip;
@@ -84,6 +85,9 @@ class PanelWidget final : public QFrame {
   QPointF normalizedPreviewPos(const QPoint &pos) const;
 public:
   static void setLightEditMode(bool on)        { s_lightEditMode = on; }
+  // The shot open in the viewer (-1 at the animatic level): its panels get
+  // the inside-shot yellow, the others are dimmed (Franco, 2026-10-20).
+  static void setOpenShot(int si)              { s_openShot = si; }
   static void setLightColor(const QString &c)  { s_lightColor = c; }
   explicit PanelWidget(QWidget *parent = nullptr);
   void setShotIndex(int si);
@@ -466,6 +470,8 @@ protected:
   void onRefreshPreviews();
   void onSetTechnique();
   void onXsheetChanged();
+  // The open shot's panels in yellow, the others dimmed (PanelWidget::setOpenShot).
+  void updateOpenShotHighlight();
   void onModelResequenced(); // called when ZtoryModel::resequenceXsheet runs
   void onMergeShots();            // merge selected shots (Board → xsheet + sub-scene merge)
   void onShotInserted(int col);   // called when razor/external op inserts a shot at col

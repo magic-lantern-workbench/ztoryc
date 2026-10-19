@@ -1,3 +1,4 @@
+#include "ztorymaingate.h"  // kInsideShotColor, currentShotName
 #include "storyboardpanel.h"
 #include "ztoryshotops.h"
 #include "ztorysceneclass.h"
@@ -823,6 +824,25 @@ void PanelWidget::setFollowCurrent(bool on) {
   update();
 }
 
+int PanelWidget::s_openShot = -1;
+
+// The Board's own shot index of the shot open in the viewer: the main column
+// the first sub-scene was entered from. Storyboard scenes only.
+void StoryboardPanel::updateOpenShotHighlight() {
+  int open = -1;
+  ToonzScene *sc = TApp::instance()->getCurrentScene()->getScene();
+  if (sc && !ZtoryMainGate::currentShotName().isEmpty()) {
+    if (AncestorNode *n = sc->getChildStack()->getAncestorInfo(0))
+      for (int si = 0; si < (int)m_shots.size(); si++)
+        if (m_shots[si].data && m_shots[si].data->xsheetColumn == n->m_col) {
+          open = si;
+          break;
+        }
+  }
+  PanelWidget::setOpenShot(open);
+  for (PanelWidget *pw : findChildren<PanelWidget *>()) pw->update();
+}
+
 void PanelWidget::paintEvent(QPaintEvent *e) {
   QWidget::paintEvent(e);  // stylesheet background/border first
   QPainter p(this);
@@ -851,6 +871,22 @@ void PanelWidget::paintEvent(QPaintEvent *e) {
     notch << QPointF(cx - 6.0, 4.0) << QPointF(cx + 6.0, 4.0)
           << QPointF(cx, 10.0);
     p.drawPolygon(notch);
+  }
+
+  // Inside a shot: its panels framed in the inside-shot yellow, as its clip
+  // in the Animatic timeline; the other shots' panels dimmed.
+  if (s_openShot >= 0) {
+    if (m_shotIndex == s_openShot) {
+      const QColor yellow(ZtoryMainGate::kInsideShotColor);
+      p.setPen(QPen(yellow, 3.0));
+      p.setBrush(Qt::NoBrush);
+      p.drawRoundedRect(QRectF(rect()).adjusted(1.5, 1.5, -1.5, -1.5), 3.0,
+                        3.0);
+    } else {
+      p.setPen(Qt::NoPen);
+      p.setBrush(QColor(0, 0, 0, 110));
+      p.drawRect(rect());
+    }
   }
 }
 
@@ -1993,6 +2029,9 @@ StoryboardPanel::StoryboardPanel(QWidget *parent)
     if (sc && sc->getChildStack()->getAncestorCount() == 0)
       refreshPreviewsFromMain();
   });
+  // Which shot is open, for the panels' yellow frame / dimming.
+  connect(TApp::instance()->getCurrentXsheet(), &TXsheetHandle::xsheetSwitched,
+          this, &StoryboardPanel::updateOpenShotHighlight);
   connect(TApp::instance()->getCurrentXsheet(), &TXsheetHandle::xsheetSwitched,
           this, [this](){
     disconnect(TApp::instance()->getCurrentXsheet(), &TXsheetHandle::xsheetChanged,

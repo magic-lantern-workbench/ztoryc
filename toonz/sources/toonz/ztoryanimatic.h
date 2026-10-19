@@ -595,6 +595,7 @@ public:
   ZtoryAnimaticViewer(QWidget *parent = nullptr);
   ~ZtoryAnimaticViewer() override;
   void stopAudio();
+  bool m_essential = false;  // see setEssential()
   // Use the base implementation so the animatic viewer also gets the
   // "GUI Show / Hide" context-menu submenu (playbar/frame slider toggles,
   // camera/table/safe-area/ruler).  These were empty no-ops since the first
@@ -614,6 +615,12 @@ public:
   // Called by the panel after applyMuteSolo() — if playback is in progress,
   // stops and restarts audio so the new mix takes effect immediately.
   void restartAudioIfPlaying();
+
+  // The small animatic monitor next to the timeline (ZtoryAnimaticPanel):
+  // playback controls and frame slider only, locked to Camera View and fitted
+  // to the camera;
+  // no clicks, wheel or menu on the image.
+  void setEssential();
 
   // Schedule an audio restart on the next onDrawFrame tick.  Safe to call
   // from any slot (including button-click handlers) because onDrawFrame runs
@@ -964,6 +971,13 @@ private:
   // Clipboard is now shared with StoryboardPanel via ZtoryModel::sharedClip().
 
   QStackedWidget       *m_outerStack    = nullptr;
+  // Small animatic monitor on the left, shown inside a shot when this room's
+  // viewer has switched to the shot (Ztoryc X): the whole animatic stays
+  // visible while you work on one segment (Franco, 2026-10-20). Created the
+  // first time it is needed.
+  QWidget              *m_miniHost      = nullptr;
+  ZtoryAnimaticViewer  *m_miniViewer    = nullptr;
+  void updateMiniMonitor();
   TimelineViewerPanel  *m_timelinePanel = nullptr;
   ZtoryAnimaticRuler *m_ruler;
   ZtoryAnimaticTrack *m_track;

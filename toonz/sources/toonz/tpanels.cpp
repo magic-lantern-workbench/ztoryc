@@ -408,7 +408,7 @@ OpenFloatingPanel openStoryboardCommand(MI_OpenStoryboard, "Storyboard",
                                               QObject::tr("Storyboard"));
 
 OpenFloatingPanel openZtoryAnimaticCommand(MI_OpenZtoryAnimatic, "ZtoryAnimatic",
-                                              QObject::tr("Ztoryc Animatic"));
+                                              QObject::tr("Animatic"));
 OpenFloatingPanel openZtoryAnimaticViewerCommand(MI_OpenZtoryAnimaticViewer, "ZtoryAnimaticViewer",
                                               QObject::tr("Ztoryc Viewer"));
 

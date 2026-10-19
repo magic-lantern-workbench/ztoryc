@@ -3521,6 +3521,8 @@ void ZtoryStoryStrip::wheelEvent(QWheelEvent *e) {
 // ---- ZtoryAnimaticViewer (standalone) ----
 
 ZtoryAnimaticViewer::~ZtoryAnimaticViewer() {
+  if (ZtoryAnimaticController::instance()->viewer() == this)
+    ZtoryAnimaticController::instance()->setViewer(nullptr);
   // Stop FlipConsole's internal play timer/thread before Qt destroys child
   // widgets. QThread::~QThread calls abort() if the thread is still running,
   // which crashes the app on room switch or panel close while playing.
@@ -4063,7 +4065,43 @@ void ZtoryAnimaticViewer::onAudioToggleChanged() {
   m_continuousPlay = false;
 }
 
+void ZtoryAnimaticViewer::setEssential() {
+  m_essential = true;
+  // Playback controls and the frame slider: where the room shows the shot's
+  // own timeline (Ztoryc T), the slider is the only way along the animatic.
+  setVisiblePartsFlag(VPPARTS_PLAYBAR | VPPARTS_FRAMESLIDER);
+  // On the playbar, the playback buttons and nothing else (Franco,
+  // 2026-10-20): no fps, sound, viewer controls (☰ can bring them back).
+  m_flipConsole->setCustomizemask(eShowVcr);
+  m_sceneViewer->setReferenceMode(SceneViewer::CAMERA_REFERENCE);
+  QTimer::singleShot(0, this, [this]() { m_sceneViewer->fitToCamera(); });
+}
+
 bool ZtoryAnimaticViewer::eventFilter(QObject *obj, QEvent *e) {
+  // Essential (the small monitor): the image only shows; its framing stays on
+  // the camera whatever the size.
+  if (m_essential && obj == m_sceneViewer) {
+    switch (e->type()) {
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonRelease:
+    case QEvent::MouseButtonDblClick:
+    case QEvent::MouseMove:
+    case QEvent::Wheel:
+    case QEvent::TabletPress:
+    case QEvent::TabletMove:
+    case QEvent::TabletRelease:
+    case QEvent::ContextMenu:
+    case QEvent::Gesture:
+    case QEvent::NativeGesture:
+      return true;
+    case QEvent::Resize:
+    case QEvent::Show:
+      QTimer::singleShot(0, this, [this]() { m_sceneViewer->fitToCamera(); });
+      break;
+    default:
+      break;
+    }
+  }
   // The animatic viewer is a timing/preview surface: the Animate (Edit) tool
   // must not transform shot objects here. Swallow its left-button and tablet
   // actions; hover, pan (middle/space) and zoom (wheel) still pass through.
@@ -5231,6 +5269,11 @@ ZtoryAnimaticViewerPanel::ZtoryAnimaticViewerPanel(QWidget *parent)
   m_backBtn->setToolTip(tr("Return to Animatic viewer and close sub-scene"));
   m_backBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   m_backBtn->setFixedHeight(22);
+  // In the inside-shot yellow, as «sh030» in the xsheet's path (Franco,
+  // 2026-10-20): the way out reads as part of the same signal.
+  m_backBtn->setStyleSheet(
+      QString("QToolButton { color: %1; font-weight: bold; }")
+          .arg(ZtoryMainGate::kInsideShotColor));
   barLay->addWidget(m_backBtn);
 
   m_linkBtn = new QToolButton(topBar);
@@ -5356,7 +5399,7 @@ ZtoryAnimaticViewerPanel::ZtoryAnimaticViewerPanel(QWidget *parent)
 void ZtoryAnimaticViewerPanel::updateTitle() {
   TApp *app = TApp::instance();
   ToonzScene *scene = (app && app->getCurrentScene()) ? app->getCurrentScene()->getScene() : nullptr;
-  QString title;
+  QString title, accent;
   if (!scene) {
     title = tr("Animatic");
   } else {
@@ -5377,8 +5420,12 @@ void ZtoryAnimaticViewerPanel::updateTitle() {
           if (n->m_cl.getPointer())
             shot += " › " + QString::fromStdWString(n->m_cl->getName());
       title = tr("Animatic / %1").arg(shot);
+      accent = shot;
     }
   }
+  // The shot's name drawn in the inside-shot yellow (TPanelTitleBar).
+  setProperty("ztoryTitleAccent", accent);
+  setProperty("ztoryTitleAccentColor", QString(ZtoryMainGate::kInsideShotColor));
   setWindowTitle(title);
   // TPanel propagates window title to its title bar widget; force a refresh.
   if (getTitleBar()) getTitleBar()->update();
@@ -5548,7 +5595,7 @@ void ZtoryStoryStripPanel::showEvent(QShowEvent *e) {
 
 ZtoryAnimaticPanel::ZtoryAnimaticPanel(QWidget *parent, bool switchEnabled)
     : TPanel(parent), m_switchEnabled(switchEnabled) {
-  setWindowTitle("Ztory Animatic");
+  setWindowTitle(tr("Animatic"));
   setFocusPolicy(Qt::StrongFocus);
 
   // Keyboard shortcuts via qApp event filter (same approach as StoryboardPanel).
@@ -5897,7 +5944,23 @@ ZtoryAnimaticPanel::ZtoryAnimaticPanel(QWidget *parent, bool switchEnabled)
   // Outer stacked widget: page 0 = animatic, page 1 = native timeline
   m_outerStack = new QStackedWidget(this);
   m_outerStack->addWidget(container);  // page 0
-  setWidget(m_outerStack);
+
+  // Left: the small animatic monitor (updateMiniMonitor), hidden until needed.
+  QWidget *root       = new QWidget(this);
+  QHBoxLayout *rootLay = new QHBoxLayout(root);
+  rootLay->setContentsMargins(0, 0, 0, 0);
+  rootLay->setSpacing(0);
+  m_miniHost = new QWidget(root);
+  m_miniHost->setFixedWidth(280);
+  QVBoxLayout *miniLay = new QVBoxLayout(m_miniHost);
+  miniLay->setContentsMargins(0, 0, 2, 0);
+  miniLay->setSpacing(0);
+  m_miniHost->hide();
+  rootLay->addWidget(m_miniHost);
+  rootLay->addWidget(m_outerStack, 1);
+  setWidget(root);
+  connect(TApp::instance()->getCurrentXsheet(), &TXsheetHandle::xsheetSwitched,
+          this, &ZtoryAnimaticPanel::updateMiniMonitor);
 
   connect(m_ruler, &ZtoryAnimaticRuler::frameChanged,
           this, &ZtoryAnimaticPanel::onFrameChanged);
@@ -6498,8 +6561,36 @@ void ZtoryAnimaticPanel::refreshAudioTracks() {
   m_refreshingAudio = false;
 }
 
+void ZtoryAnimaticPanel::updateMiniMonitor() {
+  if (!m_miniHost) return;
+  bool show = !ZtoryMainGate::currentShotName().isEmpty();
+  if (show) {
+    // Only where this room's main viewer switched to the shot (Ztoryc X):
+    // a room without that viewer shows the animatic some other way.
+    bool roomHasViewer = false;
+    for (QWidget *w = parentWidget(); w; w = w->parentWidget())
+      if (w->inherits("Room")) {
+        roomHasViewer = !w->findChildren<ZtoryAnimaticViewerPanel *>().isEmpty();
+        break;
+      }
+    show = roomHasViewer;
+  }
+  if (show && !m_miniViewer) {
+    // A new viewer registers itself with the controller; the room's main one
+    // keeps that role (audio restarts on mute/solo).
+    auto *ctrl                     = ZtoryAnimaticController::instance();
+    ZtoryAnimaticViewer *mainViewer = ctrl->viewer();
+    m_miniViewer = new ZtoryAnimaticViewer(m_miniHost);
+    m_miniViewer->setEssential();
+    m_miniHost->layout()->addWidget(m_miniViewer);
+    if (mainViewer) ctrl->setViewer(mainViewer);
+  }
+  m_miniHost->setVisible(show);
+}
+
 void ZtoryAnimaticPanel::showEvent(QShowEvent *e) {
   TPanel::showEvent(e);
+  updateMiniMonitor();
   ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
   if (m_switchEnabled && scene && scene->getChildStack()->getAncestorCount() > 0) {
     showShotTimeline();
@@ -8665,7 +8756,7 @@ public:
   TPanel *createPanel(QWidget *parent) override {
     TPanel *panel = new ZtoryAnimaticPanel(parent);
     panel->setObjectName("ZtoryAnimatic");
-    panel->setWindowTitle("Ztoryc Animatic");
+    panel->setWindowTitle(QObject::tr("Animatic"));
     return panel;
   }
   void initialize(TPanel *panel) override { assert(0); }
