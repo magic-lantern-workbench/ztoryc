@@ -1435,6 +1435,18 @@ static bool addAutocloseIntersection(IntersectionData &intData,
 
 // double g_autocloseTolerance = c_newAutocloseTolerance;
 
+// Ztoryc: every closing distance here is proportional to the thickness of the
+// two points, and the tip of a pressure stroke is almost 0 thick (0.35-0.6
+// units on a real sketch, 2026-10-19): there the tolerance hardly mattered,
+// even at 30.  Above Tahoma's 1.15 the tolerance also sets an ABSOLUTE floor,
+// 0.6 units per step (squared: the callers compare squared distances).  At
+// 1.15 nothing changes, so drawings never touched close exactly as before.
+static double ztorycAutocloseFloor2(double fac) {
+  if (fac <= c_newAutocloseTolerance + 1e-3) return 0.0;
+  const double d = 0.6 * fac;
+  return d * d;
+}
+
 static bool isCloseEnoughP2P(double facMin, double facMax, TStroke *s1,
                              double w0, TStroke *s2, double w1,
                              bool forAutoClose) {
@@ -1456,7 +1468,9 @@ static bool isCloseEnoughP2P(double facMin, double facMax, TStroke *s1,
   if (forAutoClose) {
     autoDistMin = 0;
     autoDistMax =
-        std::max(-2.0, facMax * (p0.thick + p1.thick) * (p0.thick + p1.thick));
+        std::max({-2.0,
+                  facMax * (p0.thick + p1.thick) * (p0.thick + p1.thick),
+                  ztorycAutocloseFloor2(facMax)});
     if (autoDistMax < 0.0000001)  //! for strokes without thickness, I connect
                                   //! for distances less than min between 2.5
                                   //! and half of the length of the stroke)
@@ -1642,7 +1656,9 @@ static bool isCloseEnoughP2L(double facMin, double facMax, TStroke *s1,
     if (forAutoClose) {
       autoDistMin = 0;
       autoDistMax = std::max(
-          -2.0, (facMax + 0.7) * (p0.thick + p1.thick) * (p0.thick + p1.thick));
+          {-2.0,
+           (facMax + 0.7) * (p0.thick + p1.thick) * (p0.thick + p1.thick),
+           ztorycAutocloseFloor2(facMax)});
       if (autoDistMax < 0.0000001)  //! for strokes without thickness, I connect
                                     //! for distances less than min between 2.5
                                     //! and half of the length of the pointing
@@ -1790,7 +1806,8 @@ void getClosingSegments(TL2LAutocloser &l2lautocloser, double facMin,
   double thickmax2 = s1->getMaxThickness() + s2->getMaxThickness();
   thickmax2 *= thickmax2;
   if (facMin == 0)
-    l2lautocloser.setMaxDistance2((facMax + 0.7) * thickmax2);
+    l2lautocloser.setMaxDistance2(
+        std::max((facMax + 0.7) * thickmax2, ztorycAutocloseFloor2(facMax)));
   else
     l2lautocloser.setMaxDistance2((facMax + 0.7) * thickmax2 +
                                   (facMax - facMin + 0.7) *
@@ -1807,8 +1824,9 @@ void getClosingSegments(TL2LAutocloser &l2lautocloser, double facMin,
     double autoDistMin, autoDistMax;
     if (facMin == 0) {
       autoDistMin = 0;
-      autoDistMax = (facMax + 0.7) * (seg.p0.thick + seg.p1.thick) *
-                    (seg.p0.thick + seg.p1.thick);
+      autoDistMax = std::max((facMax + 0.7) * (seg.p0.thick + seg.p1.thick) *
+                                 (seg.p0.thick + seg.p1.thick),
+                             ztorycAutocloseFloor2(facMax));
     } else {
       autoDistMin = (facMin + 0.7) * (seg.p0.thick + seg.p1.thick) *
                     (seg.p0.thick + seg.p1.thick);
@@ -2675,6 +2693,10 @@ void TVectorImage::Imp::findIntersections() {
           (m_autocloseTolerance + 0.7) *
           (s2->getMaxThickness() > 0 ? s2->getMaxThickness() : 2.5);
 
+      // Ztoryc: reach the absolute floor too (ztorycAutocloseFloor2).
+      const double floorReach = std::sqrt(ztorycAutocloseFloor2(m_autocloseTolerance));
+      enlarge1 = std::max(enlarge1, floorReach);
+      enlarge2 = std::max(enlarge2, floorReach);
       if (s1->getBBox().enlarge(enlarge1).overlaps(
               s2->getBBox().enlarge(enlarge2))) {
         map<pair<int, int>, vector<DoublePair>>::iterator it =
