@@ -1,3 +1,44 @@
+## [2026-10-19b] — Tema Ztoryc, auto-matte, Auto Close Gap e autofill rifatto (vettoriale e smart raster)
+
+### Added
+- **Tema «Ztoryc», predefinito** (`89fdcbe3c`): grafite caldo, oro = attivo/dentro lo shot, blu = selezione,
+  rosso = testina; via il magenta di Tahoma. Generato da `tools/make_ztoryc_theme.py` partendo da Dark;
+  Dark e gli altri restano nelle Preferenze. Selezione delle clip disegnata sopra la miniatura.
+- **Auto-matte (motore A)** (`bc4904da7`, `ae4bf46e9`, `dca45f1ce`): Generate / Update Auto-Matte… nel menu
+  della colonna; sagoma su un livello Toonz Raster nella colonna sotto, agganciata al disegno, colore nella
+  palette, raggio per chiudere le aperture. Vettoriale, Toonz Raster, Raster.
+- **Fit to Window come icona** nei titoli dei visori e nello strumento Mano (`122c34e67`, `60a72667d`).
+- **Auto Close Gap** nel pennello vettoriale (`555900417`) e nel pennello Toonz Raster (`a1bd9d814`).
+
+### Modified
+- **Vettoriale: Auto Close Gap 5 di base invece di 1,15, cursore fino a 30** (`782a84ff4`), e un minimo
+  assoluto della distanza di chiusura per le punte sottili dei tratti a pressione (`543275922`). Misurato
+  su un disegno vero con una sonda contro le librerie: la testa che si chiudeva a 20 ora si chiude a 10.
+  Formato .pli invariato. Candidato upstream 16b.
+- **Autofill (vettoriale e smart raster)**: i pezzi staccati da una forma colorata prendono il colore (il piu'
+  grande tiene il suo); una forma disegnata dal tratto da sola si colora da sola, senza gli spicchi verso le
+  linee vecchie; le briciole non contano; sullo smart raster «toccato dal tratto» = inchiostro nuovo vero
+  (dalle tessere dell'undo) e niente bordino del colore vecchio (`f5b405888` … `b88fbf455`, `14324b3f8`).
+- **Audit UI** (`c2a7e8129`): simboli Mac nei tooltip; righello meno fitto; nome dello shot mai tagliato;
+  **doppio clic sullo shot in cui si e' = ritorno all'Animatic**, col suggerimento (Esc scartato);
+  **workflow automatico su ogni apertura di scena** (Open Recent, Load Scene), non solo dalla Startup.
+
+### Fixed
+- **Crash**: pennello vettoriale con snap nel visore dell'animatic (righelli nulli) — `59ea69212`, su master.
+- Auto Group riacceso da solo all'avvio con Auto Fill (residuo di `loadLastBrush`).
+
+### Upstream candidates
+- 16b aggiornata: Auto Close Gap 5 + minimo assoluto (`tcomputeregions.cpp`).
+
+### Notes
+- Aperti (ANIMATIC_TASKS, «Aperti dopo la sessione del 19/10»): colore vettoriale che si perde aggiungendo
+  un tratto (non riprodotto; Franco vuole la causa, niente protezione — SOSPESI); autofill sul raster a
+  colori pieni; auto-matte motore B e tacca a V; PR FLA di Three.Star da provare; .pli a tolleranza > 1,15
+  in Tahoma; modalita' prova che non carica piu' la scena; 0.19.0 dopo qualche giorno d'uso.
+- Scoperto: `tregionutil.cpp` non e' compilato, il vivo e' `tcomputeregions.cpp`; la sonda contro le dylib
+  vuole `-DNDEBUG` e la cartella dei pennelli (`TVectorBrushStyle::setRootDir`).
+- Review inline: `reviews/2026-10-19b_*.md`, nessun bloccante.
+
 ## [2026-10-15 → 19] — 0.18.0 (crash su Windows), autofill su tutti i pennelli, il main dello storyboard
 
 ### Rilascio

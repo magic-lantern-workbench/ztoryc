@@ -52,6 +52,14 @@ degli status).
 > ricapita da solo lavorando.
 
 
+- **Esc per uscire dallo shot — TOLTO (Franco, 19/10).** Nel visore Esc serve agli strumenti (selezione,
+  polilinea) e creerebbe confusione; si esce col **doppio clic sullo shot in cui si e'** (vignetta, clip
+  della timeline, Monitor — `6b96cdb12`).
+- **Protezione dei colori a ogni tratto vettoriale — NO (Franco, 19/10).** Fotografare i colori di tutto il
+  disegno prima di ogni tratto e rimetterli dopo coprirebbe il colore che si perde, ma rallenta il disegno
+  e non dice la causa: si cerca la causa vera (voce fra gli aperti del 19/10).
+- **Type tool / testo con l'editor dei pannelli — lasciato a Rodney (Franco, 19/10)**: ci sta lavorando lui.
+
 - **Il Clone NON copia dialoghi, azione e note dello shot — SI LASCIA COSI'**
   (Franco, 2026-09-24). Lo shot clonato non si porta dietro l'audio, che resta
   nella timeline: *«non ha senso che cloni anche il testo dello shot»*. Il
@@ -149,17 +157,41 @@ degli status).
 
 ## 🎬 Ztoryc — storyboard, animatic, thumbs
 
-### 🆕 2026-10-19 — Rifiniture di «dove sono» (Franco, per il 20/10)
+### 🆕 Aperti dopo la sessione del 19/10 (tema, auto-matte, Auto Close Gap — tutto in master)
 
-Fatto con la #8 (`4d2a25820`, archivio 19/10): «Animatic / sh030» sopra lo xsheet, clip dello shot
-aperto gialla e il resto della timeline scurito (clip, righello, audio), blocchi nel main.
-Restano, decisi da Franco il 19/10:
-- **«← Back to Animatic» in giallo**, come «sh030» nello xsheet (`ztoryanimatic.cpp`, `m_backBtn`).
-- **Vedere l'animatic intero mentre si e' dentro uno shot**: il visore mostra solo lo shot, la timeline
-  si naviga tutta e crea confusione. Valutare un piccolo visore collegato alla timeline, come fa gia' il
-  Monitor (`ztorymonitorpanel.cpp`). Se e come: da decidere con Franco.
-- Nel Board (dalla proposta del 12/10): la card dello shot aperto evidenziata, le altre attenuate. Non
-  ancora fatto; il Board oggi non dice in che shot si e'.
+- **Vettoriale: il colore di un'area lontana si perde aggiungendo un tratto, e l'undo non lo rimette
+  (Franco, 19/10).** Visto sui capelli di una testa (`kitsuTest01/demo`, livello G): tratto a destra, i
+  capelli perdono il colore, ⌘Z non lo recupera; Franco dice che succede anche senza autofill. Perche'
+  l'undo non lo rimette e' chiaro: `UndoPencil` salva i colori solo nel riquadro del tratto
+  (`getFillingInformationOverlappingArea(..., stroke->getBBox())`). Perche' un tratto lontano cambi le
+  regioni NON e' chiaro. **Non riprodotto**: copia di recupero delle 20:40 (stato «prima», in
+  `reference/test_projects/vecfill_lost_2026-10-19/hair.pli`, Auto Close Gap 12) + tratto simulato a
+  destra, a 12 e col passaggio a 5 dell'autofill: i capelli restano colorati. Sonda pronta:
+  `vecfill_2026-10-19/vprobe.cpp` (regioni) e `scratchpad .../recomp.cpp` (stili prima/dopo un tratto).
+  **Franco NON vuole la protezione** (fotografare i colori di tutto il disegno a ogni tratto): vuole la
+  causa vera e non rallentare il disegno — vedi SOSPESI. Serve: una copia subito dopo, se Auto Fill era
+  acceso, se Auto Close Gap era appena cambiato.
+- **Autofill sul raster a colori pieni (#6): Auto Close Gap e pezzi staccati** come su vettoriale e smart
+  raster. Due ostacoli: il riempimento oggi e' `fullColorFill()` dai semi, che si espande per colore e
+  passa dai buchi → va scritto da noi pixel per pixel con l'antialias; e una forma colorata e' pixel
+  opachi come le linee → i pezzi vanno riconosciuti dal colore. Franco: con la matita meglio l'auto-matte.
+- **Auto-matte, seguiti** (motore A in master, `bc4904da7` e seguenti): motore B **LazyBrush** per gli
+  schizzi molto aperti (taglio di grafo di `naru_lazybrush.cpp`, vedi OPENTOONZ_PORT_CANDIDATES); la
+  **tacca a V** sul bordo della sagoma dove c'era l'apertura; la correzione della misura sui vettoriali
+  riaperti da file (`dca45f1ce`) e' verificata solo leggendo il codice.
+- **PR di Three.Star per l'import dei FLA** su opentoonz-dev (annunciata il 19/10, non ancora pubblicata):
+  provarla in un worktree, prima importatore e lettore, poi le ~4.900 righe di modifiche al core
+  (maschere, regioni, stili, renderer: Tahoma diverge, e le regioni le abbiamo toccate noi);
+  `license-guard` sul lettore Flash. Non urgente (Franco).
+- **.pli a tolleranza > 1,15 aperti in Tahoma/OpenToonz** (review 2026-10-19b, punto 1): il formato e'
+  lo stesso, ma il minimo assoluto della chiusura (`ztorycAutocloseFloor2`) chiude in Ztoryc regioni che
+  lo stock, sullo stesso file, non chiude: un disegno riempito qui potrebbe avere aree vuote la'. Provare
+  su un file vero prima della 0.19.0 e scriverlo nelle note.
+- **0.19.0**: dopo qualche giorno d'uso. Minor (tema predefinito nuovo, Fill vettoriale che cambia).
+  Prima la review di tutto dal 0.18.0 (checklist, punto 0).
+- **Prova da riga di comando che non carica piu' la scena**: dal pomeriggio del 19/10 Ztoryc in modalita'
+  prova si ferma sulla finestra Startup e non apre il .tnz passato (prima funzionava). Il collaudo di Open
+  Recent (`9f3a67f22`) e' rimasto da fare a mano: da capire.
 
 ### 🆕 Aperti dopo la 0.18 (sessioni del 15-19/10)
 
@@ -223,22 +255,6 @@ Restano, decisi da Franco il 19/10:
   nuova puo' essere bloccata finche' non ha reputazione — firmare installer + exe/dll, eventualmente
   inviarla a Microsoft o passare dallo Store. Nel frattempo: spegnere Smart App Control e' irreversibile
   senza reinstallare Windows.
-- **Auto-matte su livello a parte — dopo la 0.17 (Franco, 13/10, richiesta di un utente).** Come
-  «Generate Auto-Matte» di Storyboard Pro: dal disegno (vettoriale, ma anche raster e Toonz Raster) un
-  comando genera per ogni fotogramma una sagoma piena su un **livello nuovo, in una colonna sotto**, con
-  le stesse celle; serve a rendere opaco il personaggio sopra il fondale. Per fotogramma: rasterizzare,
-  chiudere le fessure con un raggio regolabile, riempire dentro il contorno esterno, colore scelto
-  dall'utente; comando «aggiorna matte» per rigenerarla dopo aver ridisegnato. Scelto il livello a parte
-  invece dell'autofill vettoriale nel disegno: quello riempie solo le regioni chiuse (gli schizzi sono
-  aperti), mescola sagoma e colori nelle stesse regioni e modifica l'originale. Prima versione raster
-  (uno-due giorni); sagoma vettoriale modificabile eventualmente dopo.
-  **Aggiornato il 17/10 (Franco):** il risultato e' un livello vero, visibile mentre si lavora (un effetto
-  di render NON sostituisce questa funzione). **Due motori**: A semplice (allargare la linea, esterno dal
-  bordo, sagoma = non esterno; poi fino a meta' linea con la regola di `AutoFillLineSplit`), predefinito;
-  B **LazyBrush** per gli schizzi aperti, il taglio di grafo di `naru_lazybrush.cpp` usato come funzione
-  (candidato in `OPENTOONZ_PORT_CANDIDATES.md`), semi automatici dentro/fondo. Misurare prima la velocita'
-  del taglio di grafo su un fotogramma intero. La parte lunga resta la timeline (livello, colonna sotto,
-  «aggiorna matte», un undo unico).
 - **Conform dal montaggio: aggiornare l'animatic dalle modifiche fatte nel montaggio — dopo l'export
   per Premiere (Franco, 13/10).** Storyboard Pro lo fa; da noi e' piu' fattibile del previsto, perche'
   il main e' gia' «quali fotogrammi di quale sotto-scena, in che ordine» e le clip esportate portano il
