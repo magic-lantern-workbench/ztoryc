@@ -1,6 +1,7 @@
 
 #include "xshcolumnviewer.h"
 #include "ztorymouthlibrary.h"
+#include "ztoryautomatte.h"
 
 // Tnz6 includes
 #include "xsheetviewer.h"
@@ -4303,6 +4304,9 @@ void ColumnArea::contextMenuEvent(QContextMenuEvent *event) {
         menu.addAction(cmdManager->getAction(MI_ExplodeChild));
         // Ztoryc: mark the character's mouth sub-scene (ztorymouthlibrary.h).
         ZtoryMouthLibrary::addMouthColumnActions(&menu, xsh, m_menuCol);
+      } else if (cell.m_level && cell.m_level->getSimpleLevel()) {
+        // Ztoryc: a solid silhouette in the column below (ztoryautomatte.h).
+        ZtoryAutoMatte::addColumnActions(&menu, xsh, m_menuCol);
       }
       menu.addSeparator();
     }
