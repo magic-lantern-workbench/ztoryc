@@ -2734,7 +2734,12 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
             isFree[i] = !lineMask[i] && !exterior[i] && paintAt(i) != fillStyleId;
           const int coreLimit = 3 * gap;  // chamfer units
           std::vector<int> label(sw * sh, -1);
-          struct Piece { int paint; std::vector<int> pixels; bool touches; };
+          struct Piece {
+            int paint;
+            std::vector<int> pixels;
+            bool touches;
+            int borderNew = 0, borderAll = 0;  // line contacts: new ink / all
+          };
           std::vector<Piece> pieces;
           std::vector<int> stack, frontier, next;
           auto neighbours = [&](int i, int *out) {
@@ -2811,15 +2816,20 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
             if (!closedByInk || (int)pieces[id].pixels.size() < minArea)
               pieces[id].pixels.clear();  // a crumb: never filled
           }
-          // Which pieces border the stroke's ink.
+          // Which pieces border the stroke's ink, and how much of their
+          // border it makes.
           for (int i = 0; i < sw * sh; i++) {
-            if (label[i] < 0 || pieces[label[i]].touches) continue;
+            if (label[i] < 0) continue;
+            Piece &p = pieces[label[i]];
             int nb[4], n = neighbours(i, nb);
-            for (int k = 0; k < n; k++)
-              if (lineMask[nb[k]] && touchesNew(nb[k] % sw, nb[k] / sw)) {
-                pieces[label[i]].touches = true;
-                break;
+            for (int k = 0; k < n; k++) {
+              if (!lineMask[nb[k]]) continue;
+              p.borderAll++;
+              if (touchesNew(nb[k] % sw, nb[k] / sw)) {
+                p.borderNew++;
+                p.touches = true;
               }
+            }
           }
           pieces.erase(std::remove_if(pieces.begin(), pieces.end(),
                                       [](const Piece &p) {
@@ -2827,6 +2837,23 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
                                       }),
                        pieces.end());
           std::vector<int> toFill;   // pixel indices to paint
+          // A shape the stroke drew BY ITSELF (an oval, a closed curl): its
+          // border is almost all new ink. Then only such shapes are filled,
+          // not the slivers left where the stroke touches old lines (Franco,
+          // 2026-10-19: an oval next to a line coloured the gap between
+          // them). With none, the rule below: empty pieces, and the smaller
+          // pieces cut off a coloured shape (a collar line).
+          auto drawnByStroke = [](const Piece &p) {
+            return p.borderAll > 0 && p.borderNew >= 0.8 * p.borderAll;
+          };
+          const bool drawnMode =
+              std::any_of(pieces.begin(), pieces.end(), drawnByStroke);
+          if (drawnMode)
+            pieces.erase(std::remove_if(pieces.begin(), pieces.end(),
+                                        [&](const Piece &p) {
+                                          return !drawnByStroke(p);
+                                        }),
+                         pieces.end());
           std::map<int, size_t> largestOf;  // paint -> index of its largest piece
           for (size_t i = 0; i < pieces.size(); i++) {
             if (pieces[i].paint == 0) continue;
@@ -2836,7 +2863,11 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
               largestOf[pieces[i].paint] = i;
           }
           for (size_t i = 0; i < pieces.size(); i++) {
-            if (pieces[i].paint != 0 && largestOf[pieces[i].paint] == i) continue;
+            // A drawn shape is filled whatever it was; otherwise the largest
+            // piece of a colour is the shape and keeps it.
+            if (!drawnMode && pieces[i].paint != 0 &&
+                largestOf[pieces[i].paint] == i)
+              continue;
             toFill.insert(toFill.end(), pieces[i].pixels.begin(),
                           pieces[i].pixels.end());
           }

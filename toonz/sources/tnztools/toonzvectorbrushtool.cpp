@@ -409,16 +409,23 @@ static std::vector<TFilledRegionInf> fillAreasClosedBy(
   }
   vi->findRegions();
   std::vector<TRegion *> touched;  // areas with an edge on a new stroke
+  std::vector<TRegion *> drawn;    // areas the new strokes closed by themselves
   std::function<void(TRegion *)> visit = [&](TRegion *r) {
     if (!r) return;
     if (r->getStyle() != styleId) {
+      double total = 0, mine = 0;
       for (UINT e = 0; e < r->getEdgeCount(); e++) {
         TEdge *edge = r->getEdge(e);
-        if (edge && edge->m_s && strokeIds.count(edge->m_s->getId())) {
-          touched.push_back(r);
-          break;
-        }
+        if (!edge || !edge->m_s) continue;
+        const double len = edge->m_s->getLength(
+            std::min(edge->m_w0, edge->m_w1), std::max(edge->m_w0, edge->m_w1));
+        total += len;
+        if (strokeIds.count(edge->m_s->getId())) mine += len;
       }
+      if (mine > 0) touched.push_back(r);
+      // Almost all of its border is new: a shape the stroke drew by itself
+      // (an oval, a closed curl). See below.
+      if (total > 0 && mine >= 0.8 * total) drawn.push_back(r);
     }
     for (UINT s = 0; s < r->getSubregionCount(); s++) visit(r->getSubregion(s));
   };
@@ -431,7 +438,17 @@ static std::vector<TFilledRegionInf> fillAreasClosedBy(
     if (anyStroke < 0 || vi->sameGroupStrokeAndRegion(anyStroke, i))
       visit(vi->getRegion(i));
 
-  // Per old colour, the largest touched piece is the shape itself.
+  // Shapes the stroke drew by itself are filled, and only they: not the
+  // slivers left where it touches old lines (Franco, 2026-10-19: an oval
+  // next to a line coloured the gap between them).
+  if (!drawn.empty()) {
+    for (TRegion *r : drawn) {
+      r->setStyle(styleId);
+      painted.push_back(TFilledRegionInf(r->getId(), styleId));
+    }
+    return painted;
+  }
+  // Otherwise, per old colour, the largest touched piece is the shape itself.
   std::map<int, std::pair<TRegion *, double>> largest;
   for (TRegion *r : touched) {
     if (r->getStyle() == 0) continue;
