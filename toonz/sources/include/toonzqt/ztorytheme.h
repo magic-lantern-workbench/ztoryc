@@ -68,6 +68,15 @@ inline QColor accent() { return QColor(0x4E, 0x7A, 0x51); }
 // Oro del logo Ztoryc. Usato per marcare gli elementi "arricchiti" rispetto al
 // corrispettivo Tahoma standard — p.es. il diamante di una chiave globale che
 // comprende anche la posa plastic, distinto dal diamante bianco normale.
+// ── Semantic colours (test/theme-colors, 2026-10-20) ──────────────────────
+// One meaning each, hue families kept apart: warm = where / when (inside
+// shot, playhead), cool = what is selected. Every Ztoryc surface takes its
+// colour from here instead of a literal.
+inline QColor insideShot() { return QColor(0xF5, 0xB8, 0x00); }  // where you are
+inline QColor selection() { return QColor(0x4A, 0x9E, 0xFF); }   // what is selected
+inline QColor playhead() { return QColor(0xFF, 0x4D, 0x3A); }    // current frame
+inline QColor panelHeader() { return QColor(0x5A, 0x4A, 0x58); } // brand, quiet
+
 inline QColor gold() { return QColor(0xEC, 0xA6, 0x1C); }
 
 // Fondo del bottone "Set Key" del KeyframeNavigator quando il frame corrente ha

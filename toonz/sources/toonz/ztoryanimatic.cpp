@@ -863,11 +863,11 @@ void ZtoryAnimaticRuler::paintEvent(QPaintEvent *) {
   static const int kPH = 8;
   int px = kLabelW + (int)(m_currentFrame * m_ppf) + (int)(m_ppf / 2);
   p.setPen(Qt::NoPen);
-  p.setBrush(QColor(255, 100, 0));
+  p.setBrush(ZtoryTheme::playhead());
   QPolygon tri;
   tri << QPoint(px - 5, rulerY) << QPoint(px + 5, rulerY) << QPoint(px, rulerY + kPH);
   p.drawConvexPolygon(tri);
-  p.setPen(QPen(QColor(255, 100, 0), 1));
+  p.setPen(QPen(ZtoryTheme::playhead(), 1));
   p.drawLine(px, rulerY + kPH, px, h);
 }
 
@@ -1613,7 +1613,7 @@ void ZtoryAudioTrack::paintEvent(QPaintEvent *e) {
 
   // Playhead (always on top, not cached) — centered on frame like the ruler
   int phx = labelW + (int)(m_currentFrame * m_ppf) + (int)(m_ppf / 2);
-  p.setPen(QColor(255, 100, 0));
+  p.setPen(ZtoryTheme::playhead());
   p.drawLine(phx, 0, phx, trackH);
 
   // Focus indicator: bright border around the whole track when keyboard-focused
@@ -2686,10 +2686,10 @@ void ZtoryAnimaticTrack::paintEvent(QPaintEvent *) {
     // Sfondo shot
     QColor bg = selected ? QColor(80, 110, 160) : QColor(60, 90, 130);
     p.fillRect(x + 1, 2, w - 2, h, bg);
-    p.setPen(selected ? QColor(255, 160, 0) : QColor(100, 140, 200));
+    p.setPen(selected ? ZtoryTheme::selection() : QColor(100, 140, 200));
     p.drawRect(x + 1, 2, w - 2, h);
     if (selected) {
-      p.setPen(QPen(QColor(255, 160, 0), 2));
+      p.setPen(QPen(ZtoryTheme::selection(), 2));
       p.drawRect(x + 2, 3, w - 4, h - 2);
     }
     // Active shot (being edited): the inside-shot yellow, as the xsheet's
@@ -2800,7 +2800,7 @@ void ZtoryAnimaticTrack::paintEvent(QPaintEvent *) {
 
   // Playhead — centered on frame like the ruler
   int px = kLabelW + (int)(m_currentFrame * m_ppf) + (int)(m_ppf / 2);
-  p.setPen(QColor(255, 100, 0));
+  p.setPen(ZtoryTheme::playhead());
   p.drawLine(px, 0, px, height());
 
   // Razor hover preview — bright vertical line snapped to the frame boundary
@@ -3485,7 +3485,7 @@ void ZtoryStoryStrip::paintEvent(QPaintEvent *) {
       p.drawPixmap(r, e.thumb.scaled(r.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
 
     // Border
-    p.setPen(current ? QColor(255, 160, 0) : ZtoryTheme::g(80));
+    p.setPen(current ? ZtoryTheme::insideShot() : ZtoryTheme::g(80));
     p.drawRect(r);
 
     // Shot number overlay
@@ -5006,6 +5006,14 @@ ZtoryRightPanel::ZtoryRightPanel(QWidget *parent)
   m_toggleBtn->setChecked(false);
   m_toggleBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   m_toggleBtn->setFixedHeight(22);
+  // Quiet brand colour, not the theme's saturated accent: the header was the
+  // loudest thing on screen (UI review, 2026-10-20).
+  m_toggleBtn->setStyleSheet(
+      QString("QToolButton { background: %1; color: #E8E2E7; border: none;"
+              " border-radius: 3px; font-weight: bold; }"
+              "QToolButton:hover { background: %2; }")
+          .arg(ZtoryTheme::panelHeader().name(),
+               ZtoryTheme::panelHeader().lighter(125).name()));
   barL->addWidget(m_toggleBtn);
 
   m_linkBtn = new QToolButton(bar);
@@ -5151,6 +5159,14 @@ ZtoryLeftPanel::ZtoryLeftPanel(QWidget *parent)
   m_toggleBtn->setChecked(false);  // false = Board, true = XSheet
   m_toggleBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   m_toggleBtn->setFixedHeight(22);
+  // Quiet brand colour, not the theme's saturated accent: the header was the
+  // loudest thing on screen (UI review, 2026-10-20).
+  m_toggleBtn->setStyleSheet(
+      QString("QToolButton { background: %1; color: #E8E2E7; border: none;"
+              " border-radius: 3px; font-weight: bold; }"
+              "QToolButton:hover { background: %2; }")
+          .arg(ZtoryTheme::panelHeader().name(),
+               ZtoryTheme::panelHeader().lighter(125).name()));
   barL->addWidget(m_toggleBtn);
 
   m_linkBtn = new QToolButton(bar);
@@ -8836,6 +8852,14 @@ ZtoryDrawLeftPanel::ZtoryDrawLeftPanel(QWidget *parent)
   m_toggleBtn->setChecked(false);
   m_toggleBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   m_toggleBtn->setFixedHeight(22);
+  // Quiet brand colour, not the theme's saturated accent: the header was the
+  // loudest thing on screen (UI review, 2026-10-20).
+  m_toggleBtn->setStyleSheet(
+      QString("QToolButton { background: %1; color: #E8E2E7; border: none;"
+              " border-radius: 3px; font-weight: bold; }"
+              "QToolButton:hover { background: %2; }")
+          .arg(ZtoryTheme::panelHeader().name(),
+               ZtoryTheme::panelHeader().lighter(125).name()));
   barL->addWidget(m_toggleBtn);
 
   m_linkBtn = new QToolButton(bar);

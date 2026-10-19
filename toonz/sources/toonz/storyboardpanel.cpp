@@ -1,4 +1,5 @@
 #include "ztorymaingate.h"  // kInsideShotColor, currentShotName
+#include "toonzqt/ztorytheme.h"
 #include "storyboardpanel.h"
 #include "ztoryshotops.h"
 #include "ztorysceneclass.h"
@@ -851,7 +852,7 @@ void PanelWidget::paintEvent(QPaintEvent *e) {
   if (m_selected) {
     // Selection highlight drawn over the base border: a 2px inset frame in the
     // Ztoryc orange, matching the old box-shadow look.
-    QPen pen(QColor(0xe0, 0x5a, 0x00), 2.0);
+    QPen pen(ZtoryTheme::selection(), 2.0);
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
     p.drawRoundedRect(QRectF(rect()).adjusted(1.0, 1.0, -1.0, -1.0), 3.0, 3.0);
@@ -862,7 +863,7 @@ void PanelWidget::paintEvent(QPaintEvent *e) {
     // notch. ORO, non l'arancione della testina: sul pannello selezionato
     // l'arancione si confondeva col bordo di selezione e il segno spariva
     // (Franco, 2026-09-24). E disegnato DOPO la selezione, sopra di lei.
-    const QColor gold(255, 196, 0);
+    const QColor gold = ZtoryTheme::insideShot();
     p.setPen(Qt::NoPen);
     p.setBrush(gold);
     p.drawRect(QRectF(3.0, 0.0, width() - 6.0, 4.0));
