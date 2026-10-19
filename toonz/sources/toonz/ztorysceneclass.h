@@ -36,9 +36,15 @@ bool declarePlain(const QString &tnzPath, const QString &workflow,
 QString plainWorkflowOf(const QString &tnzPath);
 // The workflow command for a room-set name (MI_Workflow2D…); empty if unknown.
 QString workflowCommandForRoom(const QString &room);
-// In Auto, after a scene is opened: a plain scene goes to its workflow (a
-// Board does it for storyboards and shots, the start-up popup for the rest).
-void followPlainWorkflow();
+// The workflow command Auto picks for a scene from its sidecar (role and
+// technique; a plain scene's own workflow). Empty = no change: no sidecar
+// (unclassified, the scene type question decides) or a plain scene with none.
+QString autoWorkflowCommandFor(const QString &tnzPath);
+// In Auto, after ANY scene is opened (Open Recent, Load Scene, the browser,
+// the start-up popup): it goes to its workflow, once per opening. It used to
+// be plain scenes only, and Open Recent left a shot or a character in the
+// previous workflow (Franco, 2026-10-19).
+void followSceneWorkflow();
 // role="storyboard" and the Production Tracker answer; the shots come with ⌘S.
 bool declareStoryboard(const QString &tnzPath, bool trackerOff,
                        QString *error = nullptr);

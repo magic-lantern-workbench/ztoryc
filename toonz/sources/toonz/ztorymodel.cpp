@@ -213,7 +213,7 @@ ZtoryModel::ZtoryModel() : m_fps(24) {
               // Boards have read it as plain (ztorysceneclass.h).
               QTimer::singleShot(300, this, [] {
                 ZtorySceneClass::askIfUnclassified();
-                ZtorySceneClass::followPlainWorkflow();
+                ZtorySceneClass::followSceneWorkflow();
                 // A storyboard with drawing levels in its main xsheet
                 // (ztorymaingate.h): after the scene type question.
                 ZtoryMainGate::checkMainForDrawingLevels();

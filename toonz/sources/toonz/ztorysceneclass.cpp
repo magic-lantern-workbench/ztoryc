@@ -681,7 +681,28 @@ QString ZtorySceneClass::workflowCommandForRoom(const QString &room) {
   return QString();
 }
 
-void ZtorySceneClass::followPlainWorkflow() {
+QString ZtorySceneClass::autoWorkflowCommandFor(const QString &tnzPath) {
+  QString ztoryPath = tnzPath;
+  ztoryPath.replace(QRegularExpression("\\.tnz$"), ".ztoryc");
+  QFile zf(ztoryPath);
+  if (!zf.exists() || !zf.open(QIODevice::ReadOnly | QIODevice::Text))
+    return QString();
+  const QString head = QString::fromUtf8(zf.read(1024));
+  // The role is READ, not guessed from «shot» (a character went to the
+  // storyboard rooms). Absent = storyboard, as sidecars written before roles.
+  QString role = "storyboard", technique;
+  QRegularExpressionMatch rm =
+      QRegularExpression("<ztoryc[^>]*\\brole=\"([^\"]*)\"").match(head);
+  if (rm.hasMatch() && !rm.captured(1).isEmpty()) role = rm.captured(1);
+  QRegularExpressionMatch mt =
+      QRegularExpression("technique=\"([^\"]*)\"").match(head);
+  if (mt.hasMatch()) technique = mt.captured(1);
+  if (role == QLatin1String("plain"))
+    return workflowCommandForRoom(plainWorkflowOf(tnzPath));
+  return ZtoryModel::workflowCommand(role, technique);
+}
+
+void ZtorySceneClass::followSceneWorkflow() {
   if (!ZtoryModel::autoWorkflowDetection()) return;
   const QString tnz = currentScenePath();
   if (tnz.isEmpty()) return;
@@ -689,10 +710,15 @@ void ZtorySceneClass::followPlainWorkflow() {
   static QString lastFollowed;
   if (tnz == lastFollowed) return;
   lastFollowed = tnz;
-  const QString room = plainWorkflowOf(tnz);
-  const QString cmd  = workflowCommandForRoom(room);
-  if (cmd.isEmpty() || room == Preferences::instance()->getCurrentRoomChoice())
-    return;
+  const QString cmd = autoWorkflowCommandFor(tnz);
+  if (cmd.isEmpty()) return;
+  // Already there (the start-up popup or a Board did it): nothing to do —
+  // and it matters: the Storyboard command also jumps to the first room.
+  const QString room = Preferences::instance()->getCurrentRoomChoice();
+  const QString here = room == "Storyboard"  ? QString(MI_WorkflowStoryboard)
+                       : room == "Character" ? QString(MI_WorkflowCharacter)
+                                             : workflowCommandForRoom(room);
+  if (here == cmd) return;
   CommandManager::instance()->execute(cmd.toStdString().c_str());
 }
 

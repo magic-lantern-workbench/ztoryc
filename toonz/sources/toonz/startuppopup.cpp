@@ -1174,38 +1174,12 @@ void StartupPopup::applyWorkflowForScene(const QString &scenePath) {
 
   QString cmd;
   if (ZtoryModel::autoWorkflowDetection()) {
-    // Auto: il workflow si ricava dal .ztoryc della scena (ruolo + tecnica).
-    // Qui e non solo nel Board, cosi' vale anche quando la room corrente non
-    // ha un pannello Storyboard che faccia girare loadZtoryc.
-    QString role = "storyboard", technique;
-    QString ztoryPath = scenePath;
-    ztoryPath.replace(QRegularExpression("\\.tnz$"), ".ztoryc");
-    QFile zf(ztoryPath);
-    // Nessun sidecar = scena non classificata: niente cambio di workflow, lo
-    // decide la domanda che arriva all'apertura (ztorysceneclass.h).  Prima la
-    // si mandava nelle room dello storyboard, e le sue sotto-scene diventavano
-    // shot.
-    if (!zf.exists()) return;
-    if (zf.open(QIODevice::ReadOnly | QIODevice::Text)) {
-      const QString head = QString::fromUtf8(zf.read(1024));
-      // Si LEGGE il ruolo, non si deduce cercando «shot»: con il terzo ruolo
-      // (character) la deduzione mandava i personaggi nelle room dello
-      // storyboard. Assente = storyboard, come i sidecar scritti prima che il
-      // ruolo esistesse.
-      QRegularExpressionMatch rm =
-          QRegularExpression("<ztoryc[^>]*\\brole=\"([^\"]*)\"").match(head);
-      if (rm.hasMatch() && !rm.captured(1).isEmpty()) role = rm.captured(1);
-      QRegularExpressionMatch mt =
-          QRegularExpression("technique=\"([^\"]*)\"").match(head);
-      if (mt.hasMatch()) technique = mt.captured(1);
-    }
-    if (role == QLatin1String("plain")) {
-      // La scena semplice ricorda il suo workflow; se non ne ha, resta dov'e'.
-      cmd = ZtorySceneClass::workflowCommandForRoom(
-          ZtorySceneClass::plainWorkflowOf(scenePath));
-      if (cmd.isEmpty()) return;
-    } else
-      cmd = ZtoryModel::workflowCommand(role, technique);
+    // Auto: dal .ztoryc della scena (ruolo + tecnica). La tabella sta in
+    // ZtorySceneClass::autoWorkflowCommandFor, la stessa che usa ogni altra
+    // apertura (Open Recent, Load Scene): vuoto = non classificata o semplice
+    // senza workflow, niente cambio.
+    cmd = ZtorySceneClass::autoWorkflowCommandFor(scenePath);
+    if (cmd.isEmpty()) return;
   } else {
     static const char *kCmds[] = {
       MI_WorkflowStoryboard, MI_Workflow2D,
