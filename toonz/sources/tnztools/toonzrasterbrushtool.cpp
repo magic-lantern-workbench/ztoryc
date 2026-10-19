@@ -2844,7 +2844,14 @@ void ToonzRasterBrushTool::finishRasterBrush(const TPointD &pos,
           // Pass 2: give the fill colour also to the antialiased line pixels
           // on the inner side of the line — without it they keep paint 0 and
           // show as a light halo. See autofilllinesplit.h.
-          AutoFillLineSplit::addInnerLinePixels(ras, x0, y0, sw, sh, toFill);
+          std::vector<int> recoloured;  // old paints of the pieces recoloured
+          for (const Piece &p : pieces)
+            if (p.paint != 0 &&
+                std::find(recoloured.begin(), recoloured.end(), p.paint) ==
+                    recoloured.end())
+              recoloured.push_back(p.paint);
+          AutoFillLineSplit::addInnerLinePixels(ras, x0, y0, sw, sh, toFill,
+                                                recoloured);
 
           if (!toFill.empty()) {
             // Bounding rect of the pixels to fill.
