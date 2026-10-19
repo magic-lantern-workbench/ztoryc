@@ -4828,10 +4828,12 @@ HandToolOptionsBox::HandToolOptionsBox(QWidget *parent, TTool *tool,
   QAction *resetPositionAction =
       CommandManager::instance()->getAction(VB_ZoomFit);
 
-  QPushButton *button = new QPushButton(tr("Fit to Window"));
-  int buttonWidth     = fontMetrics().horizontalAdvance(button->text()) + 20;
-  button->setFixedWidth(buttonWidth);
-  button->setFixedHeight(20);
+  // An icon, the same as the viewers' title bar and the timeline's Fit All.
+  QPushButton *button = new QPushButton();
+  button->setIcon(createQIcon("ztoryc_fit_all"));
+  button->setIconSize(QSize(16, 16));
+  button->setToolTip(tr("Fit to Window"));
+  button->setFixedSize(26, 20);
   button->addAction(resetPositionAction);
 
   connect(button, SIGNAL(clicked()), resetPositionAction, SLOT(trigger()));

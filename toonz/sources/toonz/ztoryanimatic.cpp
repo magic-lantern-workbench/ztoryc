@@ -5353,6 +5353,22 @@ ZtoryAnimaticViewerPanel::ZtoryAnimaticViewerPanel(QWidget *parent)
   m_overlayButtons.append(makeOverlayBtn(-198, "pane_symmetry",    "Show Symmetry Guide",    MI_ShowSymmetryGuide));
   m_overlayButtons.append(makeOverlayBtn(-177, "pane_perspective", "Show Perspective Grids", MI_ShowPerspectiveGrids));
 
+  // Fit to Window, the same icon as the timeline's Fit All: one click, not a
+  // toggle. Acts on whichever viewer is showing, animatic or shot (Franco,
+  // 2026-10-19).
+  {
+    auto *fitBtn = new TPanelTitleBarButton(getTitleBar(),
+                                            getIconPath("ztoryc_fit_all"));
+    fitBtn->setToolTip(tr("Fit to Window"));
+    getTitleBar()->add(QPoint(-232, 0), fitBtn);
+    connect(fitBtn, &TPanelTitleBarButton::toggled, this, [this, fitBtn]() {
+      fitBtn->setPressed(false);
+      BaseViewerPanel *v = m_viewer;
+      if (m_stack->currentIndex() == 1 && m_shotViewer) v = m_shotViewer;
+      if (v && v->sceneViewer()) v->sceneViewer()->fitToCamera();
+    });
+  }
+
   // The CommandManager action toggling alone is not enough — the tool object must
   // also be notified via setGuideEnabled() (normally done in onSymmetryGuideToggled,
   // which is only wired in viewers that call initializeTitleBar()).  Mirror that

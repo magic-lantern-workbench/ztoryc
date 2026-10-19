@@ -431,6 +431,19 @@ void BaseViewerPanel::initializeTitleBar(TPanelTitleBar *titleBar) {
   int iconWidth                         = 20;
   TPanelTitleBarButton *button;
 
+  // Ztoryc: Fit to Window as a one-click button, the icon of the animatic
+  // timeline's Fit All (Franco, 2026-10-19).
+  {
+    auto *fitBtn =
+        new TPanelTitleBarButton(titleBar, getIconPath("ztoryc_fit_all"));
+    fitBtn->setToolTip(tr("Fit to Window"));
+    titleBar->add(QPoint(x - 10 - 24, 0), fitBtn);
+    connect(fitBtn, &TPanelTitleBarButton::toggled, this, [this, fitBtn]() {
+      fitBtn->setPressed(false);
+      if (m_sceneViewer) m_sceneViewer->fitToCamera();
+    });
+  }
+
   m_symmetryButton =
       new TPanelTitleBarButton(titleBar, getIconPath("pane_symmetry"));
   m_symmetryButton->setToolTip(tr("Show Symmetry Guide"));
