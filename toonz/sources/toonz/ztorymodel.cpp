@@ -4237,3 +4237,12 @@ void ZtoryModel::activateShotForViewing(int col) {
   emit shotActivatedForViewing(col);
 }
 void ZtoryModel::requestReturnToViewer()         { emit returnToViewerMainRequested(); }
+
+bool ztoryExitShot() {
+  ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
+  if (!scene || scene->getChildStack()->getAncestorCount() == 0) return false;
+  ZtoryModel::instance()->requestReturnToViewer();
+  while (scene->getChildStack()->getAncestorCount() > 0)
+    CommandManager::instance()->execute("MI_CloseChild");
+  return true;
+}

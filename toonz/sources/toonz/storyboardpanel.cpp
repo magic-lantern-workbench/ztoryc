@@ -5272,6 +5272,12 @@ void StoryboardPanel::keyPressEvent(QKeyEvent *e) {
     e->accept();
     return;
   }
+  // Esc inside a shot = «← Back to Animatic» (ztoryExitShot).
+  if (e->key() == Qt::Key_Escape && e->modifiers() == Qt::NoModifier &&
+      ztoryExitShot()) {
+    e->accept();
+    return;
+  }
   TPanel::keyPressEvent(e);
 }
 

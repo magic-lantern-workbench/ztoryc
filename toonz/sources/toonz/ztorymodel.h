@@ -1405,3 +1405,10 @@ signals:
 private:
   bool m_inAutosave = false;
 };
+
+// Esc inside a shot = «← Back to Animatic» (UI audit, 2026-10-19): asks the
+// viewer panel to return to the animatic, then closes any sub-scene still
+// open (a room without the viewer panel). False when no shot is open, so the
+// caller lets Esc go on. Only for the Ztoryc panels: in the viewer Esc
+// belongs to the tools.
+bool ztoryExitShot();

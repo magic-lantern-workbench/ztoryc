@@ -4394,8 +4394,9 @@ ZtoryPanelNavigator::ZtoryPanelNavigator(QWidget *parent)
   newShotBtn->setText("+");
   newShotBtn->setFixedSize(28, 28);
   newShotBtn->setToolTip(
-      tr("New shot after this one (Shift+N).\nCreated right after the shot "
-         "you are editing; you enter it directly and keep drawing."));
+      tr("New shot after this one (%1).\nCreated right after the shot "
+         "you are editing; you enter it directly and keep drawing.")
+          .arg(trModKey("Shift+N")));
   newShotBtn->setStyleSheet(
       "QToolButton{background:transparent;color:#ccc;border:1px solid #555;border-radius:4px;font-size:15px;}"
       "QToolButton:hover{background:#555;}");
@@ -5674,7 +5675,7 @@ ZtoryAnimaticPanel::ZtoryAnimaticPanel(QWidget *parent, bool switchEnabled)
   m_fitAllBtn->setIcon(createQIcon("ztoryc_fit_all"));
   m_fitAllBtn->setIconSize(QSize(20, 20));
   m_fitAllBtn->setFixedSize(28, 28);
-  m_fitAllBtn->setToolTip(tr("Fit All — zoom to show the entire animatic (Ctrl+0)"));
+  m_fitAllBtn->setToolTip(tr("Fit All — zoom to show the entire animatic (%1)").arg(trModKey("Ctrl+0")));
   m_fitAllBtn->setStyleSheet(
       "QToolButton{background:transparent;border:none;border-radius:4px;}"
       "QToolButton:hover{background:#555;}");
@@ -5766,9 +5767,9 @@ ZtoryAnimaticPanel::ZtoryAnimaticPanel(QWidget *parent, bool switchEnabled)
                        "QToolButton:hover{background:#555;}");
     return btn;
   };
-  QToolButton *copyBtn  = makeAnimaticBtn2("ztoryc_copy",  tr("Copy selected shots  (Ctrl+C)"));
-  QToolButton *cloneBtn = makeAnimaticBtn2("ztoryc_clone", tr("Clone selected shots  (Ctrl+D)"));
-  QToolButton *pasteBtn = makeAnimaticBtn2("ztoryc_paste", tr("Paste shots  (Ctrl+V)"));
+  QToolButton *copyBtn  = makeAnimaticBtn2("ztoryc_copy",  tr("Copy selected shots  (%1)").arg(trModKey("Ctrl+C")));
+  QToolButton *cloneBtn = makeAnimaticBtn2("ztoryc_clone", tr("Clone selected shots  (%1)").arg(trModKey("Ctrl+D")));
+  QToolButton *pasteBtn = makeAnimaticBtn2("ztoryc_paste", tr("Paste shots  (%1)").arg(trModKey("Ctrl+V")));
   connect(copyBtn,  &QToolButton::clicked, this, &ZtoryAnimaticPanel::onCopyShots);
   connect(cloneBtn, &QToolButton::clicked, this, &ZtoryAnimaticPanel::onCloneShots);
   connect(pasteBtn, &QToolButton::clicked, this, &ZtoryAnimaticPanel::onPasteShots);
@@ -6943,6 +6944,12 @@ void ZtoryAnimaticPanel::keyPressEvent(QKeyEvent *e) {
   // Ctrl+0 — Fit All: zoom to show the entire animatic
   if (cmd && e->key() == Qt::Key_0) {
     onFitAll();
+    e->accept();
+    return;
+  }
+
+  // Esc inside a shot = «← Back to Animatic» (ztoryExitShot).
+  if (e->key() == Qt::Key_Escape && mod == Qt::NoModifier && ztoryExitShot()) {
     e->accept();
     return;
   }
