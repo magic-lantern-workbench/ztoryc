@@ -2688,10 +2688,6 @@ void ZtoryAnimaticTrack::paintEvent(QPaintEvent *) {
     p.fillRect(x + 1, 2, w - 2, h, bg);
     p.setPen(selected ? ZtoryTheme::selection() : QColor(100, 140, 200));
     p.drawRect(x + 1, 2, w - 2, h);
-    if (selected) {
-      p.setPen(QPen(ZtoryTheme::selection(), 2));
-      p.drawRect(x + 2, 3, w - 4, h - 2);
-    }
     // Active shot (being edited): the inside-shot yellow, as the xsheet's
     // «Animatic / sh020». The timeline can be browsed anywhere while the
     // viewer shows this shot only, so the clip says which segment you are
@@ -2725,6 +2721,17 @@ void ZtoryAnimaticTrack::paintEvent(QPaintEvent *) {
       p.setOpacity(0.85);
       p.drawPixmap(x + 2, thumbY, thumbW, thumbH, b.thumbnail);
       p.setOpacity(1.0);
+    }
+
+    // Selection AFTER the thumbnail: drawn before it, the 2px border was
+    // covered on three sides and the selection barely showed (Franco,
+    // 2026-10-19). A blue wash over the picture plus a 3px frame.
+    if (selected) {
+      QColor wash = ZtoryTheme::selection();
+      wash.setAlpha(70);
+      p.fillRect(x + 1, 2, w - 2, h, wash);
+      p.setPen(QPen(ZtoryTheme::selection(), 3));
+      p.drawRect(x + 2, 3, w - 4, h - 2);
     }
 
     // Numero shot — to the right of the thumbnail if present

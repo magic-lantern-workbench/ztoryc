@@ -304,7 +304,7 @@ void Preferences::load() {
   }
 
   if (!m_styleSheetList.contains(getStringValue(CurrentStyleSheetName)))
-    setValue(CurrentStyleSheetName, "Dark");
+    setValue(CurrentStyleSheetName, "Ztoryc");
 
   if (!m_languageList.contains(getStringValue(CurrentLanguageName)))
     setValue(CurrentLanguageName, "English");
@@ -420,7 +420,8 @@ void Preferences::refreshStyleSheetThemeIndex() {
   if (themeFileExists(cur)) return;
 
   QString fix;
-  static const char *kBuiltinPriority[] = {"Dark", "Medium", "Neutral"};
+  static const char *kBuiltinPriority[] = {"Ztoryc", "Dark", "Medium",
+                                           "Neutral"};
   for (const char *p : kBuiltinPriority) {
     QString s = QString::fromLatin1(p);
     if (themeFileExists(s)) {
@@ -477,8 +478,10 @@ void Preferences::definePreferenceItems() {
   setCallBack(undoMemorySize, &Preferences::setUndoMemorySize);
 
   // Interface
+  // Ztoryc: our own dark theme (warm graphite, gold, blue selection) is the
+  // default; Tahoma's Dark and the others stay selectable.
   define(CurrentStyleSheetName, "CurrentStyleSheetName", QMetaType::QString,
-         "Dark");
+         "Ztoryc");
   define(additionalStyleSheet, "additionalStyleSheet", QMetaType::QString, "");
   define(iconTheme, "iconTheme", QMetaType::Bool, false);
   define(pixelsOnly, "pixelsOnly", QMetaType::Bool, true);
@@ -1199,7 +1202,8 @@ QString Preferences::getCurrentStyleSheet() const {
   QStringList candidates;
   if (!preferred.isEmpty()) candidates.append(preferred);
 
-  static const char *kBuiltinPriority[] = {"Dark", "Medium", "Neutral"};
+  static const char *kBuiltinPriority[] = {"Ztoryc", "Dark", "Medium",
+                                           "Neutral"};
   for (const char *p : kBuiltinPriority) {
     QString s = QString::fromLatin1(p);
     if (!candidates.contains(s)) candidates.append(s);

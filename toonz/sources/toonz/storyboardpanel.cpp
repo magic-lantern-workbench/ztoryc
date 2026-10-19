@@ -852,7 +852,7 @@ void PanelWidget::paintEvent(QPaintEvent *e) {
   if (m_selected) {
     // Selection highlight drawn over the base border: a 2px inset frame in the
     // Ztoryc orange, matching the old box-shadow look.
-    QPen pen(ZtoryTheme::selection(), 2.0);
+    QPen pen(ZtoryTheme::selection(), 3.0);
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
     p.drawRoundedRect(QRectF(rect()).adjusted(1.0, 1.0, -1.0, -1.0), 3.0, 3.0);
