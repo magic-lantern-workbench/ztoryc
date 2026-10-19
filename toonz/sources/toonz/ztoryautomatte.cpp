@@ -28,6 +28,7 @@
 #include "tpalette.h"
 #include "tcolorstyles.h"
 #include "tvectorimage.h"
+#include "tstroke.h"
 #include "trasterimage.h"
 #include "ttoonzimage.h"
 #include "tundo.h"
@@ -126,7 +127,12 @@ Frame matteFrame(const Source &s, int gap) {
     for (const TFrameId &fid : s.fids) {
       TVectorImageP vi = s.sl->getFrame(fid, false);
       if (!vi) continue;
-      const TRectD b = vi->getBBox();
+      // The strokes' boxes, not vi->getBBox(): on a drawing just read from
+      // its .pli that box is still empty (seen with a probe, 2026-10-19), and
+      // the matte would come out a few pixels wide.
+      TRectD b;
+      for (UINT i = 0; i < vi->getStrokeCount(); i++)
+        b += vi->getStroke(i)->getBBox();
       if (b.isEmpty()) continue;
       hx = std::max({hx, std::abs(b.x0) * k, std::abs(b.x1) * k});
       hy = std::max({hy, std::abs(b.y0) * k, std::abs(b.y1) * k});
