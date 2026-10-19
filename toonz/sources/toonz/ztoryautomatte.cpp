@@ -371,15 +371,21 @@ public:
 };
 
 //-----------------------------------------------------------------------------
-// Settings dialog: colour and gap radius, remembered between uses.
+// Settings dialog: colour and gap radius, remembered between uses.  With no
+// colour (Update) only the radius is asked: the matte's colour then lives in
+// its palette.
 
 bool askSettings(QColor *color, int *gap) {
+  const bool withColor = color != nullptr;
+  QColor dummy;
+  if (!color) color = &dummy;
   QSettings set;
   *color = set.value("ZtoryAutoMatte/color", QColor(Qt::white)).value<QColor>();
   *gap   = set.value("ZtoryAutoMatte/gap", 10).toInt();
 
   QDialog dlg(dialogParent());
-  dlg.setWindowTitle(QObject::tr("Generate Auto-Matte"));
+  dlg.setWindowTitle(withColor ? QObject::tr("Generate Auto-Matte")
+                               : QObject::tr("Update Auto-Matte"));
   QFormLayout *lay = new QFormLayout(&dlg);
 
   QPushButton *colorBtn = new QPushButton(&dlg);
@@ -395,7 +401,10 @@ bool askSettings(QColor *color, int *gap) {
                                             QObject::tr("Matte Colour"));
     if (c.isValid()) *color = c, paint(c);
   });
-  lay->addRow(QObject::tr("Colour:"), colorBtn);
+  if (withColor)
+    lay->addRow(QObject::tr("Colour:"), colorBtn);
+  else
+    colorBtn->hide();
 
   QSpinBox *gapBox = new QSpinBox(&dlg);
   gapBox->setRange(0, 60);
@@ -414,7 +423,7 @@ bool askSettings(QColor *color, int *gap) {
 
   if (dlg.exec() != QDialog::Accepted) return false;
   *gap = gapBox->value();
-  set.setValue("ZtoryAutoMatte/color", *color);
+  if (withColor) set.setValue("ZtoryAutoMatte/color", *color);
   set.setValue("ZtoryAutoMatte/gap", *gap);
   return true;
 }
@@ -487,8 +496,9 @@ TXshSimpleLevel *generateWith(TXsheet *xsh, int col, const QColor &color,
 void update(TXsheet *xsh, int col, TXshSimpleLevel *matte) {
   Source s = readSource(xsh, col);
   if (!s.sl || s.fids.empty() || !matte) return;
-  QSettings set;
-  const int gap = set.value("ZtoryAutoMatte/gap", 10).toInt();
+  // The radius again: the first one may have closed too little or too much.
+  int gap = 0;
+  if (!askSettings(nullptr, &gap)) return;
 
   Frame oldF;
   oldF.w   = matte->getProperties()->getImageRes().lx;
@@ -534,7 +544,7 @@ void ZtoryAutoMatte::addColumnActions(QMenu *menu, TXsheet *xsh, int col) {
     return;
 
   if (TXshSimpleLevel *matte = existingMatte(xsh, col, s.sl)) {
-    QAction *act = menu->addAction(QObject::tr("Update Auto-Matte"));
+    QAction *act = menu->addAction(QObject::tr("Update Auto-Matte..."));
     act->setToolTip(QObject::tr("Recompute the matte below after redrawing"));
     QObject::connect(act, &QAction::triggered,
                      [xsh, col, matte]() { update(xsh, col, matte); });
