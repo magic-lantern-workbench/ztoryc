@@ -431,13 +431,14 @@ void BaseViewerPanel::initializeTitleBar(TPanelTitleBar *titleBar) {
   int iconWidth                         = 20;
   TPanelTitleBarButton *button;
 
-  // Ztoryc: Fit to Window as a one-click button, the icon of the animatic
-  // timeline's Fit All (Franco, 2026-10-19).
+  // Ztoryc: Fit to Window as a one-click button. pane_fit draws the timeline's
+  // Fit All glyph on the 20x18 grid of the other title bar icons (Franco,
+  // 2026-10-19: the 24 px icon was too big and sat low).
   {
     auto *fitBtn =
-        new TPanelTitleBarButton(titleBar, getIconPath("ztoryc_fit_all"));
+        new TPanelTitleBarButton(titleBar, getIconPath("pane_fit"));
     fitBtn->setToolTip(tr("Fit to Window"));
-    titleBar->add(QPoint(x - 10 - 24, 0), fitBtn);
+    titleBar->add(QPoint(x - 10 - 20, 0), fitBtn);
     connect(fitBtn, &TPanelTitleBarButton::toggled, this, [this, fitBtn]() {
       fitBtn->setPressed(false);
       if (m_sceneViewer) m_sceneViewer->fitToCamera();

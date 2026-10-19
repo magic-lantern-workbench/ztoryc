@@ -5358,9 +5358,9 @@ ZtoryAnimaticViewerPanel::ZtoryAnimaticViewerPanel(QWidget *parent)
   // 2026-10-19).
   {
     auto *fitBtn = new TPanelTitleBarButton(getTitleBar(),
-                                            getIconPath("ztoryc_fit_all"));
+                                            getIconPath("pane_fit"));
     fitBtn->setToolTip(tr("Fit to Window"));
-    getTitleBar()->add(QPoint(-232, 0), fitBtn);
+    getTitleBar()->add(QPoint(-229, 0), fitBtn);
     connect(fitBtn, &TPanelTitleBarButton::toggled, this, [this, fitBtn]() {
       fitBtn->setPressed(false);
       BaseViewerPanel *v = m_viewer;
