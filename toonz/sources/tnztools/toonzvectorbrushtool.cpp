@@ -375,12 +375,26 @@ static void findMaxCurvPoints(TStroke *stroke, const float &angoloLim,
 
 // Auto Fill without Auto Group: the areas closed by the strokes just added —
 // alone or together with strokes already there — get \p styleId when they
-// are EMPTY, or when the new strokes make at least HALF of their border
-// (Franco, 2026-10-19): hair, eyebrows or a collar drawn over a filled head
-// take the new colour, while a detail line (a wrinkle, the nose) that only
-// cuts a filled shape in two leaves both parts as they were. Old shapes the
-// strokes do not touch stay as they are. Returns what was painted, for the
-// redo.
+// are EMPTY, or when the stroke cut them off a shape already coloured: of
+// the pieces of one colour the stroke touches, the LARGEST is the shape and
+// keeps its colour, the smaller ones (a curl of hair, a band of a collar)
+// take the new one (Franco, 2026-10-19). A detail line that closes nothing
+// cuts no piece off. Shapes the strokes do not touch stay as they are.
+// Returns what was painted, for the redo.
+namespace {
+struct ShoelaceArea final : public TRegionFeatureFormula {
+  double twice = 0;
+  void update(const TPointD &a, const TPointD &b) override {
+    twice += a.x * b.y - b.x * a.y;
+  }
+};
+double regionArea(TRegion *r) {
+  ShoelaceArea f;
+  computeRegionFeature(*r, f);
+  return std::abs(f.twice) * 0.5;
+}
+}  // namespace
+
 static std::vector<TFilledRegionInf> fillAreasClosedBy(
     const TVectorImageP &vi, const std::set<int> &strokeIds, int styleId,
     double gap) {
@@ -394,22 +408,16 @@ static std::vector<TFilledRegionInf> fillAreasClosedBy(
     vi->forceRegionsRecompute();
   }
   vi->findRegions();
+  std::vector<TRegion *> touched;  // areas with an edge on a new stroke
   std::function<void(TRegion *)> visit = [&](TRegion *r) {
     if (!r) return;
     if (r->getStyle() != styleId) {
-      double total = 0, mine = 0;
       for (UINT e = 0; e < r->getEdgeCount(); e++) {
         TEdge *edge = r->getEdge(e);
-        if (!edge || !edge->m_s) continue;
-        const double len = edge->m_s->getLength(
-            std::min(edge->m_w0, edge->m_w1), std::max(edge->m_w0, edge->m_w1));
-        total += len;
-        if (strokeIds.count(edge->m_s->getId())) mine += len;
-      }
-      const bool touched = mine > 0;
-      if (touched && (r->getStyle() == 0 || mine >= 0.5 * total)) {
-        r->setStyle(styleId);
-        painted.push_back(TFilledRegionInf(r->getId(), styleId));
+        if (edge && edge->m_s && strokeIds.count(edge->m_s->getId())) {
+          touched.push_back(r);
+          break;
+        }
       }
     }
     for (UINT s = 0; s < r->getSubregionCount(); s++) visit(r->getSubregion(s));
@@ -422,6 +430,22 @@ static std::vector<TFilledRegionInf> fillAreasClosedBy(
   for (UINT i = 0; i < vi->getRegionCount(); i++)
     if (anyStroke < 0 || vi->sameGroupStrokeAndRegion(anyStroke, i))
       visit(vi->getRegion(i));
+
+  // Per old colour, the largest touched piece is the shape itself.
+  std::map<int, std::pair<TRegion *, double>> largest;
+  for (TRegion *r : touched) {
+    if (r->getStyle() == 0) continue;
+    const double a = regionArea(r);
+    auto it        = largest.find(r->getStyle());
+    if (it == largest.end() || a > it->second.second)
+      largest[r->getStyle()] = {r, a};
+  }
+  for (TRegion *r : touched) {
+    const int old = r->getStyle();
+    if (old != 0 && largest[old].first == r) continue;
+    r->setStyle(styleId);
+    painted.push_back(TFilledRegionInf(r->getId(), styleId));
+  }
   return painted;
 }
 
