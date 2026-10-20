@@ -5272,8 +5272,13 @@ void ZtoryLeftPanel::updateMainLock() {
     m_stack->setCurrentIndex(0);
     m_toggleBtn->blockSignals(true);
     m_toggleBtn->setChecked(false);
-    m_toggleBtn->setText(tr("BOARD | XSHEET"));
+    // Only «BOARD»: there is nothing to switch to here (Franco, 2026-10-20).
+    m_toggleBtn->setText(tr("BOARD"));
     m_toggleBtn->blockSignals(false);
+  } else if (!m_toggleBtn->isEnabled()) {
+    // Just entered a shot: the toggle is back, labelled by the page shown.
+    m_toggleBtn->setText(m_stack->currentIndex() == 1 ? tr("XSHEET | BOARD")
+                                                       : tr("BOARD | XSHEET"));
   }
   m_toggleBtn->setEnabled(!locked);
   m_toggleBtn->setToolTip(
@@ -5290,6 +5295,7 @@ void ZtoryLeftPanel::showBoardMode() {
   m_toggleBtn->setChecked(false);
   m_toggleBtn->setText(tr("BOARD | XSHEET"));
   m_toggleBtn->blockSignals(false);
+  updateMainLock();  // back in the Animatic: only «BOARD»
 }
 
 void ZtoryLeftPanel::showShotMode(int /*col*/) {
