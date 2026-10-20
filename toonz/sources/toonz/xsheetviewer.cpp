@@ -2,6 +2,8 @@
 
 #include "xsheetviewer.h"
 #include "ztorymodel.h"
+#include <QLabel>
+#include "ztorymaingate.h"  // isStoryboardMain (main cover)
 #include "sceneviewerevents.h"
 #include "tapp.h"
 #include "floatingpanelcommand.h"
@@ -329,6 +331,51 @@ XsheetViewer::XsheetViewer(QWidget *parent, Qt::WindowFlags flags)
   emit orientationChanged(orientation());
 
   onPreferenceChanged("XsheetCamera");
+
+  // Ztoryc: the storyboard's main xsheet is covered (updateZtoryMainCover).
+  // Connected here, for the viewer's whole life: the cover must be right also
+  // when the viewer is shown again.
+  connect(TApp::instance()->getCurrentXsheet(), &TXsheetHandle::xsheetSwitched,
+          this, [this]() { updateZtoryMainCover(); });
+  connect(TApp::instance()->getCurrentScene(), &TSceneHandle::sceneSwitched,
+          this, [this]() { updateZtoryMainCover(); });
+}
+
+//-----------------------------------------------------------------------------
+
+// Ztoryc: in a storyboard's main xsheet the shots are managed from the
+// Animatic and the Board, which keep durations, the .ztoryc and the tracker in
+// step. The xsheet would let you add, delete, move or rename shot columns and
+// change their cells behind their back (Franco, 2026-10-20): it shows a notice
+// instead, and its column and cell selections are dropped so menu commands and
+// shortcuts cannot act on columns you do not see. Inside a shot, and in any
+// other kind of scene, it is the usual xsheet.
+void XsheetViewer::updateZtoryMainCover() {
+  const bool cover = ZtoryMainGate::isStoryboardMain();
+  if (!cover) {
+    if (m_ztoryMainCover) m_ztoryMainCover->hide();
+    return;
+  }
+  if (!m_ztoryMainCover) {
+    m_ztoryMainCover = new QLabel(this);
+    m_ztoryMainCover->setAlignment(Qt::AlignCenter);
+    m_ztoryMainCover->setWordWrap(true);
+    m_ztoryMainCover->setAutoFillBackground(true);
+    m_ztoryMainCover->setMargin(24);
+    m_ztoryMainCover->setText(
+        tr("This is the storyboard's main timeline.\n\nThe shots are managed "
+           "from the Animatic and the Board.\nDouble-click a shot to work "
+           "inside it."));
+  }
+  m_ztoryMainCover->setGeometry(rect());
+  m_ztoryMainCover->raise();
+  m_ztoryMainCover->show();
+  TSelection *sel = TSelection::getCurrent();
+  if (sel && (dynamic_cast<TCellSelection *>(sel) ||
+              dynamic_cast<TColumnSelection *>(sel))) {
+    sel->selectNone();
+    TApp::instance()->getCurrentSelection()->setSelection(nullptr);
+  }
 }
 
 //-----------------------------------------------------------------------------
@@ -1298,6 +1345,7 @@ void XsheetViewer::showEvent(QShowEvent *) {
   changeWindowTitle();
 
   xsheetHandle->notifyZoomScaleChanged(m_frameZoomFactor);
+  updateZtoryMainCover();  // Ztoryc
 }
 
 //-----------------------------------------------------------------------------
@@ -1352,6 +1400,7 @@ void XsheetViewer::hideEvent(QHideEvent *) {
 //-----------------------------------------------------------------------------
 
 void XsheetViewer::resizeEvent(QResizeEvent *event) {
+  if (m_ztoryMainCover) m_ztoryMainCover->setGeometry(rect());
   positionSections();
 
   //(New Layout Manager) introduced automatic refresh

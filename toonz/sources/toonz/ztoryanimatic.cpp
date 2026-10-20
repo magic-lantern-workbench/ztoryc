@@ -5254,11 +5254,38 @@ ZtoryLeftPanel::ZtoryLeftPanel(QWidget *parent)
   // Edge case: xsheet navigated back to main by any path
   connect(TApp::instance()->getCurrentXsheet(), &TXsheetHandle::xsheetSwitched,
           this, [this]() {
+    updateMainLock();
     if (m_stack->currentIndex() != 1) return;
     ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
     if (scene && scene->getChildStack()->getAncestorCount() == 0)
       showBoardMode();
   });
+  connect(TApp::instance()->getCurrentScene(), &TSceneHandle::sceneSwitched,
+          this, [this]() { updateMainLock(); });
+  QTimer::singleShot(0, this, [this]() { updateMainLock(); });
+}
+
+void ZtoryLeftPanel::updateMainLock() {
+  const bool locked = ZtoryMainGate::isStoryboardMain();
+  if (locked) {
+    // On the Board whether or not the panels are linked to the viewer.
+    m_stack->setCurrentIndex(0);
+    m_toggleBtn->blockSignals(true);
+    m_toggleBtn->setChecked(false);
+    // Only «BOARD»: there is nothing to switch to here (Franco, 2026-10-20).
+    m_toggleBtn->setText(tr("BOARD"));
+    m_toggleBtn->blockSignals(false);
+  } else if (!m_toggleBtn->isEnabled()) {
+    // Just entered a shot: the toggle is back, labelled by the page shown.
+    m_toggleBtn->setText(m_stack->currentIndex() == 1 ? tr("XSHEET | BOARD")
+                                                       : tr("BOARD | XSHEET"));
+  }
+  m_toggleBtn->setEnabled(!locked);
+  m_toggleBtn->setToolTip(
+      locked ? tr("In the Animatic the Board is shown: the shots are managed "
+                  "from the Animatic and the Board.\nThe XSheet is available "
+                  "inside a shot.")
+             : tr("Toggle between Board (storyboard) and XSheet views"));
 }
 
 void ZtoryLeftPanel::showBoardMode() {
@@ -5268,6 +5295,7 @@ void ZtoryLeftPanel::showBoardMode() {
   m_toggleBtn->setChecked(false);
   m_toggleBtn->setText(tr("BOARD | XSHEET"));
   m_toggleBtn->blockSignals(false);
+  updateMainLock();  // back in the Animatic: only «BOARD»
 }
 
 void ZtoryLeftPanel::showShotMode(int /*col*/) {

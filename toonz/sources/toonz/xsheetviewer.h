@@ -651,6 +651,10 @@ class XsheetViewer final : public QFrame, public SaveLoadQSettings {
   int m_scrubCol, m_scrubRow0, m_scrubRow1;
 
   bool m_isCurrentFrameSwitched;
+  // Ztoryc: covers the viewer in a storyboard's main xsheet (see
+  // updateZtoryMainCover in xsheetviewer.cpp).
+  class QLabel *m_ztoryMainCover = nullptr;
+  void updateZtoryMainCover();
   bool m_isCurrentColumnSwitched;
 
   XsheetGUI::DragTool *m_dragTool;
