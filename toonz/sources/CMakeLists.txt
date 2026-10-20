@@ -752,17 +752,45 @@ if(WITH_TRANSLATION)
     # generate Qt translations and messages
     set(LANGUAGES japanese italian french spanish chinese german russian korean czech brazilian-portuguese)
 
+    # Not qt5_create_translation(): it names the lupdate stamp file after the
+    # .ts file name only, and every language has a .ts with the same name
+    # (<lang>/<module>.ts), so the rules collide on newer Qt5 releases.
+    # Here the stamp is per language and module, with the same lupdate/lrelease
+    # behaviour (the .qm depends on the stamp, the stamp on the sources).
     function(add_translation module)
-        set(translation)
-        foreach(lang ${LANGUAGES})
-            set(name "${CMAKE_SOURCE_DIR}/translations/${lang}/${module}.ts")
-            list(APPEND translation ${name})
-            set_source_files_properties(${name} PROPERTIES
-                OUTPUT_LOCATION "${CMAKE_BINARY_DIR}/loc/${lang}"
-            )
+        set(stamp_dir "${CMAKE_CURRENT_BINARY_DIR}/.lupdate")
+        file(MAKE_DIRECTORY "${stamp_dir}")
+
+        get_directory_property(include_dirs INCLUDE_DIRECTORIES)
+        set(list_content)
+        foreach(src ${ARGN})
+            get_filename_component(abs_src "${src}" ABSOLUTE)
+            set(list_content "${abs_src}\n${list_content}")
+        endforeach()
+        foreach(inc ${include_dirs})
+            set(list_content "-I${inc}\n${list_content}")
         endforeach()
 
-        qt5_create_translation(message ${translation} ${ARGN})
+        set(message)
+        foreach(lang ${LANGUAGES})
+            set(ts "${CMAKE_SOURCE_DIR}/translations/${lang}/${module}.ts")
+            set(qm "${CMAKE_BINARY_DIR}/loc/${lang}/${module}.qm")
+            set(stamp "${stamp_dir}/${lang}_${module}.ts.stamp")
+            set(lst "${CMAKE_CURRENT_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/${lang}_${module}.ts_lst_file")
+            file(WRITE "${lst}" "${list_content}")
+            file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/loc/${lang}")
+
+            add_custom_command(OUTPUT "${stamp}"
+                COMMAND ${Qt5_LUPDATE_EXECUTABLE} "@${lst}" -ts "${ts}"
+                COMMAND ${CMAKE_COMMAND} -E touch "${stamp}"
+                DEPENDS ${ARGN}
+                VERBATIM)
+            add_custom_command(OUTPUT "${qm}"
+                COMMAND ${Qt5_LRELEASE_EXECUTABLE} "${ts}" -qm "${qm}"
+                DEPENDS "${stamp}"
+                VERBATIM)
+            list(APPEND message "${qm}")
+        endforeach()
 
         add_custom_target("translation_${module}" DEPENDS ${message})
         set_target_properties("translation_${module}" PROPERTIES
