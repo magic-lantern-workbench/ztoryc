@@ -5254,11 +5254,33 @@ ZtoryLeftPanel::ZtoryLeftPanel(QWidget *parent)
   // Edge case: xsheet navigated back to main by any path
   connect(TApp::instance()->getCurrentXsheet(), &TXsheetHandle::xsheetSwitched,
           this, [this]() {
+    updateMainLock();
     if (m_stack->currentIndex() != 1) return;
     ToonzScene *scene = TApp::instance()->getCurrentScene()->getScene();
     if (scene && scene->getChildStack()->getAncestorCount() == 0)
       showBoardMode();
   });
+  connect(TApp::instance()->getCurrentScene(), &TSceneHandle::sceneSwitched,
+          this, [this]() { updateMainLock(); });
+  QTimer::singleShot(0, this, [this]() { updateMainLock(); });
+}
+
+void ZtoryLeftPanel::updateMainLock() {
+  const bool locked = ZtoryMainGate::isStoryboardMain();
+  if (locked) {
+    // On the Board whether or not the panels are linked to the viewer.
+    m_stack->setCurrentIndex(0);
+    m_toggleBtn->blockSignals(true);
+    m_toggleBtn->setChecked(false);
+    m_toggleBtn->setText(tr("BOARD | XSHEET"));
+    m_toggleBtn->blockSignals(false);
+  }
+  m_toggleBtn->setEnabled(!locked);
+  m_toggleBtn->setToolTip(
+      locked ? tr("In the Animatic the Board is shown: the shots are managed "
+                  "from the Animatic and the Board.\nThe XSheet is available "
+                  "inside a shot.")
+             : tr("Toggle between Board (storyboard) and XSheet views"));
 }
 
 void ZtoryLeftPanel::showBoardMode() {

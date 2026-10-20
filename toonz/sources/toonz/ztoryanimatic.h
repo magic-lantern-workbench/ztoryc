@@ -828,6 +828,10 @@ public slots:
   void showShotMode(int col = -1);  // switch to page 1 (XSheet)
 
 private:
+  // In a storyboard's main xsheet the toggle is locked on the Board (the
+  // xsheet there would bypass Animatic and Board — Franco, 2026-10-20).
+  void updateMainLock();
+
   StoryboardPanel   *m_boardPanel  = nullptr;
   XsheetViewerPanel *m_xsheetPanel = nullptr;
   QStackedWidget    *m_stack       = nullptr;
